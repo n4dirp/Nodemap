@@ -1,51 +1,40 @@
-"""Node Editor header button and minimap popover panel."""
+"""Node Editor minimap settings inside the native Overlays popover."""
 
-from bpy.types import Panel
+from .helpers import _state
 
 
-def draw_minimap_header_button(self, context):
+def draw_minimap_overlay_settings(self, context):
     if context.area.type != "NODE_EDITOR":
         return
     layout = self.layout
     prefs = context.preferences.addons.get(__package__).preferences
+    settings = prefs.settings
+    st = _state()
 
-    row = layout.row(align=True)
+    layout.separator()
+    col = layout.column()
+
+    head, body = col.panel("NODES_MINIMAP_PT_settings", default_closed=True)
+    row = head.row()
     row.operator(
         "nodes_minimap.toggle",
-        text="",
-        icon="META_PLANE",
-        depress=getattr(prefs.settings, "enabled", True),
+        text="Minimap",
+        depress=st.get("enabled", True),
     )
-    row.popover("NODES_MINIMAP_PT_popup", text="")
 
+    if body:
+        body.label(text="Alignment")
+        body.prop(settings, "position", text="", expand=False)
 
-class NODES_MINIMAP_PT_popup(Panel):
-    bl_label = "Minimap Settings"
-    bl_space_type = "NODE_EDITOR"
-    bl_region_type = "WINDOW"
-    bl_ui_units_x = 10
+        col = body.column(align=True)
+        col.prop(settings, "minimap_width", text="Size X")
+        col.prop(settings, "minimap_height", text="Size Y")
 
-    def draw(self, context):
-        layout = self.layout
-        prefs = context.preferences.addons.get(__package__).preferences
-        settings = prefs.settings
+        body.prop(settings, "opacity", text="Opacity", slider=True)
 
-        layout.label(text="Minimap")
-
-        head, body = layout.panel("NODES_MINIMAP_PT_interface", default_closed=False)
-        head.label(text="Interface")
-        if body:
-            body.prop(settings, "position", text="", expand=False)
-
-            col = body.column(align=True)
-            col.prop(settings, "minimap_width", text="Size X")
-            col.prop(settings, "minimap_height", text="Size Y")
-
-            body.prop(settings, "opacity", text="Opacity", slider=True)
-
-        head, body = layout.panel("NODES_MINIMAP_PT_behavior", default_closed=False)
-        head.label(text="Behavior")
-        if body:
-            body.prop(settings, "show_node_count")
-            body.prop(settings, "auto_frame_selected")
-            body.prop(settings, "interactive")
+        body.separator()
+        col = body.column(align=True)
+        col.prop(settings, "show_node_count")
+        col.prop(settings, "show_node_initials")
+        col.prop(settings, "auto_frame_selected")
+        col.prop(settings, "interactive")

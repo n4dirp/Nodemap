@@ -15,6 +15,7 @@ from .gpu_draw import (
     _draw_text_with_shadow,
 )
 from .helpers import (
+    _compute_outline_color,
     _get_minimap_transform,
     _get_node_color,
     _get_node_dims,
@@ -30,6 +31,8 @@ logger = logging.getLogger(__package__)
 
 _modal_invoked_for_area: set[int] = set()
 
+FONT_SIZE = 11
+
 
 def draw_minimap():
     context = bpy.context
@@ -39,14 +42,17 @@ def draw_minimap():
     if space.type != "NODE_EDITOR":
         return
 
+    if not space.overlay.show_overlays:
+        return
+
+    st = _state()
+    if not st.get("enabled", True):
+        return
+
     addon = context.preferences.addons.get(__package__)
     if not addon:
         return
     settings = addon.preferences.settings
-    if not getattr(settings, "enabled", True):
-        return
-
-    st = _state()
 
     area_ptr = context.area.as_pointer()
     if getattr(settings, "interactive", True):
@@ -92,6 +98,10 @@ def draw_minimap():
     else:
         mx = sx + 10
         my = sy + margin
+
+    if mx < sx or my < sy or mx + mw > ex or my + mh > ey:
+        st["rect"] = (0, 0, 0, 0)
+        return
 
     st["rect"] = (mx, my, mw, mh)
     st["tree_bounds"] = bounds
@@ -145,6 +155,7 @@ def draw_minimap():
     _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors)
 
     # 3. Draw Regular Nodes & Accurate Hover Highlight Mapping
+    font_id = 0
     for node in regular_nodes:
         if node.hide:
             w, h = 100.0, 30.0
@@ -173,14 +184,31 @@ def draw_minimap():
             _draw_filled_rounded_rect(nx, ny, max(nw_s, min_dim), max(nh_s, min_dim), node_r, fill_color)
         else:
             _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, fill_color)
-            border_w = 1.5 * ui_scale if (node.select or is_hovered) else 0.5 * ui_scale
-            border_c = colors["indicator"] if (node.select or is_hovered) else colors["node_border"]
+            border_w = 1.0 * ui_scale if (node.select or is_hovered) else 0.5 * ui_scale
+            border_c = colors["node_selected"] if node.select else colors["node_border"]
             if node.mute:
                 border_c = (border_c[0], border_c[1], border_c[2], border_c[3] * 0.35)
             _draw_rounded_rect_border(nx, ny, nw_s, nh_s, node_r, border_c, border_w)
             if node.mute:
                 muted_overlay = (bg_color[0], bg_color[1], bg_color[2], 0.4)
                 _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, muted_overlay)
+
+            if getattr(settings, "show_node_initials", True) and nw_s > 6 * ui_scale and nh_s > 6 * ui_scale:
+                label = node.label
+                if not label and getattr(node, "node_tree", None):
+                    label = node.node_tree.name
+                if not label:
+                    label = node.bl_label
+                initials = _get_node_initials(label)
+                if initials:
+                    font_size = max(6, int(min(nw_s, nh_s) * 0.45))
+                    text_color = _compute_outline_color(fill_color)
+                    blf.size(font_id, font_size)
+                    tw, th = blf.dimensions(font_id, initials)
+                    tx = nx + (nw_s - tw) / 2
+                    ty = ny + (nh_s - th) / 2
+                    _draw_text_with_shadow(font_id, initials, tx, ty, text_color, font_size)
+                    gpu.state.blend_set("ALPHA")
 
     # 4. Draw Active Main Viewport Interactive Panning Box
     visible = _get_visible_rect(space, region)
@@ -219,16 +247,14 @@ def draw_minimap():
 
     # Node Count respects space overlay mode and drops scale footprint
     if getattr(settings, "show_node_count", True):
-        show_overlays = getattr(space, "show_overlays", True)
         info_text = f"{len(nodes)} Nodes"
-        font_id = 0
 
-        font_size = int(12 * ui_scale) if show_overlays else int(9 * ui_scale)
+        font_size = int(FONT_SIZE * ui_scale)
         blf.size(font_id, font_size)
         text_w, _ = blf.dimensions(font_id, info_text)
 
         tx = mx + (mw - text_w) / 2
-        ty = my + (8 * ui_scale if show_overlays else 4 * ui_scale)
+        ty = my + (FONT_SIZE * ui_scale)
         _draw_text_with_shadow(font_id, info_text, tx, ty, colors["text"], font_size)
 
 
@@ -270,3 +296,13 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors):
                     gpu.matrix.multiply_matrix(Matrix.Rotation(angle, 4, "Z"))
                     _draw_pill(-length / 2, -thickness / 2, length, thickness, wire_color)
                     gpu.matrix.pop()
+
+
+def _get_node_initials(name: str) -> str:
+    name = name.strip()
+    if not name:
+        return "?"
+    words = name.split()
+    if len(words) >= 2:
+        return "".join(w[0] for w in words).upper()[:2]
+    return words[0][0].upper()

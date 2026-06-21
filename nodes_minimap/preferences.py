@@ -126,6 +126,12 @@ class MinimapPrefs(PropertyGroup):
         default=True,
     )
 
+    show_node_initials: BoolProperty(
+        name="Show Node Initials",
+        description="Display node name initials inside minimap nodes",
+        default=True,
+    )
+
     auto_frame_selected: BoolProperty(
         name="Auto Frame Selected",
         description="Automatically frame the selected node when clicking in the minimap",

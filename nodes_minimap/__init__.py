@@ -9,7 +9,7 @@ from bpy.types import SpaceNodeEditor
 
 from .minimap_draw import draw_minimap
 from .minimap_ops import NODES_MINIMAP_OT_navigate, NODES_MINIMAP_OT_toggle
-from .panels import NODES_MINIMAP_PT_popup, draw_minimap_header_button
+from .panels import draw_minimap_overlay_settings
 from .preferences import _update_logger_from_prefs
 from .preferences import classes as prefs_classes
 
@@ -21,7 +21,6 @@ classes = (
     *prefs_classes,
     NODES_MINIMAP_OT_navigate,
     NODES_MINIMAP_OT_toggle,
-    NODES_MINIMAP_PT_popup,
 )
 
 _draw_handler = None
@@ -40,7 +39,7 @@ def register():
         "POST_PIXEL",
     )
 
-    bpy.types.NODE_HT_header.append(draw_minimap_header_button)
+    bpy.types.NODE_PT_overlay.append(draw_minimap_overlay_settings)
 
     _update_logger_from_prefs()
 
@@ -56,7 +55,7 @@ def unregister():
             pass
         _draw_handler = None
 
-    bpy.types.NODE_HT_header.remove(draw_minimap_header_button)
+    bpy.types.NODE_PT_overlay.remove(draw_minimap_overlay_settings)
 
     for cls in reversed(classes):
         try:

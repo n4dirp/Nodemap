@@ -118,9 +118,6 @@ def _get_node_color(node, fallback_color: tuple[float, ...]) -> tuple[float, ...
     return fallback_color
 
 
-NAV_GIZMO_SIZE = 40
-
-
 def _get_safe_bounds(
     area: bpy.types.Area,
     region: bpy.types.Region,
@@ -144,15 +141,12 @@ def _get_safe_bounds(
 
     scale = _get_ui_scale()
 
-    if space and corner == "TOP_LEFT" and getattr(space, "show_overlays", False):
-        top = min(top, region.height - int(30 * scale))
+    if space and corner == "TOP_LEFT" and getattr(space.overlay, "show_overlays", False):
+        top = min(top, region.height - int(10 * scale))
 
     if getattr(area, "show_region_asset_shelf", False):
-        bottom = max(bottom, int(30 * scale))
+        bottom = max(bottom, int(10 * scale))
 
-    nav = int(NAV_GIZMO_SIZE * scale)
-    if right - left > nav and top - bottom > nav:
-        right -= nav
     return int(left), int(bottom), int(right), int(top)
 
 
@@ -168,6 +162,7 @@ _DEFAULT_STATE: dict = {
     "zoom": 1.0,
     "pan": [0.0, 0.0],
     "modal_active": False,
+    "enabled": True,
 }
 
 
@@ -305,9 +300,9 @@ def _get_node_editor_theme_colors():
         "bg": _theme_rgba("node_editor.node_backdrop", (0.22, 0.22, 0.22, 0.85)),
         "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
         "node": _theme_rgba("user_interface.wcol_regular.inner", (0.25, 0.25, 0.25, 1.0)),
-        "node_selected": _theme_rgba("user_interface.wcol_regular.inner_sel", (0.28, 0.45, 0.7, 1.0)),
+        "node_selected": _theme_rgba("node_editor.node_active", (0.28, 0.45, 0.7, 1.0)),
         "node_border": _theme_rgba("user_interface.wcol_regular.outline", (1.0, 1.0, 1.0, 0.12)),
-        "wire": _theme_rgba("user_interface.wcol_regular.text", (0.45, 0.45, 0.45, 0.5)),
+        "wire": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
         "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
         "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 0.37, 0.34, 0.9)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),

@@ -35,11 +35,8 @@ class NODES_MINIMAP_OT_toggle(Operator):
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
-        prefs = context.preferences.addons.get(__package__)
-        if not prefs:
-            return {"CANCELLED"}
-        settings = prefs.preferences.settings
-        settings.enabled = not settings.enabled
+        st = _state()
+        st["enabled"] = not st.get("enabled", True)
         redraw_ui("NODE_EDITOR")
         return {"FINISHED"}
 
@@ -62,15 +59,17 @@ class NODES_MINIMAP_OT_navigate(Operator):
     def modal(self, context: Context, event: Event) -> set[str]:
         if not context.area:
             return {"CANCELLED"}
-        if _state().get("modal_area_ptr", 0) != context.area.as_pointer():
+        st = _state()
+        if st.get("modal_area_ptr", 0) != context.area.as_pointer():
             return {"CANCELLED"}
+        if not st.get("enabled", True):
+            return {"PASS_THROUGH"}
 
         addon = context.preferences.addons.get(__package__)
         if addon and not getattr(addon.preferences.settings, "interactive", True):
             return {"PASS_THROUGH"}
 
         in_minimap = _is_in_minimap(event.mouse_region_x, event.mouse_region_y)
-        st = _state()
 
         # 1. Capture exact Hover State for accurate node highlighting
         if event.type == "MOUSEMOVE" and not self._dragging and not self._mmb_dragging:
