@@ -144,7 +144,7 @@ def _get_safe_bounds(
     if space and corner == "TOP_LEFT" and getattr(space.overlay, "show_overlays", False):
         top = min(top, region.height - int(10 * scale))
 
-    if getattr(area, "show_region_asset_shelf", False):
+    if space and getattr(space, "show_region_asset_shelf", False):
         bottom = max(bottom, int(10 * scale))
 
     return int(left), int(bottom), int(right), int(top)

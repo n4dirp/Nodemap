@@ -114,7 +114,7 @@ class MinimapPrefs(PropertyGroup):
     opacity: FloatProperty(
         name="Opacity",
         description="Background opacity of the minimap",
-        default=0.85,
+        default=1.0,
         min=0.1,
         max=1.0,
         subtype="FACTOR",
@@ -129,6 +129,12 @@ class MinimapPrefs(PropertyGroup):
     show_node_initials: BoolProperty(
         name="Show Node Initials",
         description="Display node name initials inside minimap nodes",
+        default=True,
+    )
+
+    colored_nodes: BoolProperty(
+        name="Colored Nodes",
+        description="Use node custom colors and color tags; when disabled all nodes use the theme default",
         default=True,
     )
 

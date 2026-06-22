@@ -23,8 +23,9 @@ def draw_minimap_overlay_settings(self, context):
     )
 
     if body:
-        body.label(text="Alignment")
-        body.prop(settings, "position", text="", expand=False)
+        col = body.column(align=True)
+        col.label(text="Alignment")
+        col.prop(settings, "position", text="", expand=False)
 
         col = body.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
@@ -32,9 +33,12 @@ def draw_minimap_overlay_settings(self, context):
 
         body.prop(settings, "opacity", text="Opacity", slider=True)
 
-        body.separator()
         col = body.column(align=True)
-        col.prop(settings, "show_node_count")
-        col.prop(settings, "show_node_initials")
-        col.prop(settings, "auto_frame_selected")
-        col.prop(settings, "interactive")
+        col.prop(settings, "colored_nodes", text="Colored Nodes")
+        col.prop(settings, "show_node_initials", text="Name Initials")
+        col.prop(settings, "show_node_count", text="Node Count")
+        col.separator()
+        col.prop(settings, "interactive", text="Interactive Minimap")
+        sub = col.column(align=True)
+        sub.active = settings.interactive
+        sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")

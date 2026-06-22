@@ -5,7 +5,15 @@ import logging
 import bpy
 from bpy.types import Context, Event, Operator
 
-from .helpers import _find_node_at, _get_minimap_transform, _get_visible_rect, _state, redraw_ui
+from .helpers import (
+    _find_node_at,
+    _get_minimap_transform,
+    _get_safe_bounds,
+    _get_ui_scale,
+    _get_visible_rect,
+    _state,
+    redraw_ui,
+)
 
 logger = logging.getLogger(__package__)
 
@@ -25,6 +33,65 @@ def _region_to_tree(region_x: int, region_y: int) -> tuple[float, float] | None:
     tx = tree_cx + (region_x - cx) / scale
     ty = tree_cy + (region_y - cy) / scale
     return tx, ty
+
+
+_HANDLE_THICKNESS = 6
+
+_CURSOR_MAP: dict[str, str] = {
+    "W": "MOVE_X",
+    "H": "MOVE_Y",
+    "C": "CROSSHAIR",
+}
+
+
+def _get_resize_handle(
+    st: dict, corner: str, rx: int, ry: int, ui_scale: float
+) -> str | None:
+    mx, my, mw, mh = st.get("rect", (0, 0, 0, 0))
+    if mw <= 0 or mh <= 0:
+        return None
+    hw = _HANDLE_THICKNESS * ui_scale
+
+    def near(v, target):
+        return target - hw <= v <= target + hw
+
+    if corner == "TOP_RIGHT":
+        on_left = mx <= rx <= mx + hw
+        on_bottom = my <= ry <= my + hw
+        if on_left and on_bottom:
+            return "C"
+        if on_left:
+            return "W"
+        if on_bottom:
+            return "H"
+    elif corner == "TOP_LEFT":
+        on_right = mx + mw - hw <= rx <= mx + mw
+        on_bottom = my <= ry <= my + hw
+        if on_right and on_bottom:
+            return "C"
+        if on_right:
+            return "W"
+        if on_bottom:
+            return "H"
+    elif corner == "BOTTOM_RIGHT":
+        on_left = mx <= rx <= mx + hw
+        on_top = my + mh - hw <= ry <= my + mh
+        if on_left and on_top:
+            return "C"
+        if on_left:
+            return "W"
+        if on_top:
+            return "H"
+    elif corner == "BOTTOM_LEFT":
+        on_right = mx + mw - hw <= rx <= mx + mw
+        on_top = my + mh - hw <= ry <= my + mh
+        if on_right and on_top:
+            return "C"
+        if on_right:
+            return "W"
+        if on_top:
+            return "H"
+    return None
 
 
 class NODES_MINIMAP_OT_toggle(Operator):
@@ -56,6 +123,11 @@ class NODES_MINIMAP_OT_navigate(Operator):
     _mmb_dragging: bool = False
     _mmb_drag_start: tuple[int, int] | None = None
 
+    _resize_handle: str | None = None
+    _resize_start_mouse: tuple[int, int] | None = None
+    _resize_start_values: tuple[int, int] | None = None
+    _last_cursor: str = ""
+
     def modal(self, context: Context, event: Event) -> set[str]:
         if not context.area:
             return {"CANCELLED"}
@@ -65,14 +137,32 @@ class NODES_MINIMAP_OT_navigate(Operator):
         if not st.get("enabled", True):
             return {"PASS_THROUGH"}
 
+        # Early-out for resize release (before interactive check so drag always completes)
+        if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "RELEASE" and self._resize_handle:
+            self._resize_handle = None
+            self._resize_start_mouse = None
+            self._resize_start_values = None
+            context.window.cursor_modal_set("DEFAULT")
+            self._last_cursor = ""
+            return {"RUNNING_MODAL"}
+
         addon = context.preferences.addons.get(__package__)
         if addon and not getattr(addon.preferences.settings, "interactive", True):
             return {"PASS_THROUGH"}
 
         in_minimap = _is_in_minimap(event.mouse_region_x, event.mouse_region_y)
 
+        # --- Resize drag MOUSEMOVE ---
+        if self._resize_handle and event.type == "MOUSEMOVE":
+            self._resize_apply_delta(context, event)
+            return {"RUNNING_MODAL"}
+
+        # --- Cursor feedback for resize zones ---
+        if event.type == "MOUSEMOVE" and not self._dragging and not self._mmb_dragging and not self._drag_start:
+            self._update_cursor(context, event)
+
         # 1. Capture exact Hover State for accurate node highlighting
-        if event.type == "MOUSEMOVE" and not self._dragging and not self._mmb_dragging:
+        if event.type == "MOUSEMOVE" and not self._dragging and not self._mmb_dragging and not self._resize_handle:
             old_hovered = st.get("hovered_node")
             new_hovered = None
             if in_minimap:
@@ -155,6 +245,20 @@ class NODES_MINIMAP_OT_navigate(Operator):
             if event.value == "PRESS":
                 self._was_in_minimap = in_minimap
                 if self._was_in_minimap:
+                    # Check for resize handle first
+                    if addon:
+                        handle = self._get_handle_at(context, event)
+                        if handle:
+                            self._resize_handle = handle
+                            self._resize_start_mouse = (event.mouse_region_x, event.mouse_region_y)
+                            self._resize_start_values = (
+                                addon.preferences.settings.minimap_width,
+                                addon.preferences.settings.minimap_height,
+                            )
+                            cursor = _CURSOR_MAP[handle]
+                            context.window.cursor_modal_set(cursor)
+                            self._last_cursor = cursor
+                            return {"RUNNING_MODAL"}
                     self._drag_start = (event.mouse_region_x, event.mouse_region_y)
                     self._center_view_on_mouse(context, event.mouse_region_x, event.mouse_region_y)
                     return {"RUNNING_MODAL"}
@@ -250,6 +354,64 @@ class NODES_MINIMAP_OT_navigate(Operator):
                     bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
                 except RuntimeError:
                     pass
+
+    def _update_cursor(self, context: Context, event: Event) -> None:
+        st = _state()
+        if not st.get("rect"):
+            return
+        in_minimap = _is_in_minimap(event.mouse_region_x, event.mouse_region_y)
+        if not in_minimap:
+            if self._last_cursor:
+                context.window.cursor_modal_set("DEFAULT")
+                self._last_cursor = ""
+            return
+        handle = self._get_handle_at(context, event)
+        cursor = _CURSOR_MAP.get(handle, "DEFAULT")
+        if cursor != self._last_cursor:
+            context.window.cursor_modal_set(cursor)
+            self._last_cursor = cursor
+
+    def _get_handle_at(self, context: Context, event: Event) -> str | None:
+        st = _state()
+        addon = context.preferences.addons.get(__package__)
+        if not addon:
+            return None
+        corner = getattr(addon.preferences.settings, "position", "TOP_RIGHT")
+        ui_scale = _get_ui_scale()
+        return _get_resize_handle(st, corner, event.mouse_region_x, event.mouse_region_y, ui_scale)
+
+    def _resize_apply_delta(self, context: Context, event: Event) -> None:
+        addon = context.preferences.addons.get(__package__)
+        if not addon:
+            return
+        settings = addon.preferences.settings
+        if not self._resize_start_values:
+            return
+        w0, h0 = self._resize_start_values
+        dx = event.mouse_region_x - self._resize_start_mouse[0]
+        dy = event.mouse_region_y - self._resize_start_mouse[1]
+        corner = getattr(settings, "position", "TOP_RIGHT")
+
+        ui_scale = _get_ui_scale()
+        sx, sy, ex, ey = _get_safe_bounds(context.area, context.region, context.space_data, corner)
+        max_w = max(64, min(800, int(ex - sx - 10)))
+        max_h = max(64, min(600, int(ey - sy - 35 * ui_scale)))
+
+        if self._resize_handle in ("W", "C"):
+            if corner in ("TOP_RIGHT", "BOTTOM_RIGHT"):
+                new_w = max(64, min(max_w, w0 - dx))
+            else:
+                new_w = max(64, min(max_w, w0 + dx))
+            settings.minimap_width = int(new_w)
+
+        if self._resize_handle in ("H", "C"):
+            if corner in ("TOP_RIGHT", "TOP_LEFT"):
+                new_h = max(64, min(max_h, h0 - dy))
+            else:
+                new_h = max(64, min(max_h, h0 + dy))
+            settings.minimap_height = int(new_h)
+
+        redraw_ui("NODE_EDITOR")
 
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":

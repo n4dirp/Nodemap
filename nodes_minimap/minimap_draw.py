@@ -32,6 +32,7 @@ logger = logging.getLogger(__package__)
 _modal_invoked_for_area: set[int] = set()
 
 FONT_SIZE = 11
+_FONT_SIZE_MAX = 11
 
 
 def draw_minimap():
@@ -80,10 +81,13 @@ def draw_minimap():
 
     mw = getattr(settings, "minimap_width", 200) * ui_scale
     mh = getattr(settings, "minimap_height", 200) * ui_scale
-    margin = 35 * ui_scale
+    margin = 10 * ui_scale
+    if space.node_tree and space.node_tree.type == "COMPOSITING":
+        if getattr(context.space_data, "show_region_asset_shelf", False):
+            margin = 35 * ui_scale
     padding = 6 * ui_scale
     corner = getattr(settings, "position", "TOP_RIGHT")
-    bg_opacity = getattr(settings, "opacity", 0.85)
+    master_alpha = getattr(settings, "opacity", 0.85)
 
     sx, sy, ex, ey = _get_safe_bounds(context.area, region, space, corner)
     if corner == "TOP_RIGHT":
@@ -110,10 +114,11 @@ def draw_minimap():
 
     gpu.state.blend_set("ALPHA")
 
-    bg_color = colors["bg"][:3] + (bg_opacity,)
+    bg_color = colors["bg"][:3] + (master_alpha,)
     panel_r = colors.get("panel_roundness", 4.0)
     _draw_filled_rounded_rect(mx, my, mw, mh, panel_r, bg_color)
-    _draw_rounded_rect_border(mx, my, mw, mh, panel_r, colors["bg_border"], 0.5)
+    border_color = (*colors["bg_border"][:3], colors["bg_border"][3] * master_alpha)
+    _draw_rounded_rect_border(mx, my, mw, mh, panel_r, border_color, 0.5)
 
     # Calculate transformation incorporating Pan & Internal zoom levels
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
@@ -133,6 +138,8 @@ def draw_minimap():
     frames = [n for n in nodes if n.type == "FRAME"]
     regular_nodes = [n for n in nodes if n.type != "FRAME"]
 
+    font_id = 0
+
     # 1. Draw Transparent Layout Frame Nodes First
     for node in frames:
         w, h = _get_node_dims(node)
@@ -142,20 +149,37 @@ def draw_minimap():
         nh_s = max(h * scale, 1.0)
 
         is_hovered = node.name == hovered_node_name
-        alpha = 0.6 if is_hovered else 0.5
+        frame_alpha = (0.6 if is_hovered else 0.5) * master_alpha
 
-        frame_color = _get_node_color(node, colors.get("frame_node", colors["node"]))
-        bg_frame = (frame_color[0], frame_color[1], frame_color[2], alpha)
+        if getattr(settings, "colored_nodes", True):
+            frame_color = _get_node_color(node, colors.get("frame_node", colors["node"]))
+        else:
+            frame_color = colors.get("frame_node", colors["node"])
+        bg_frame = (frame_color[0], frame_color[1], frame_color[2], frame_alpha)
         _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, 2.0 * ui_scale, bg_frame)
 
         border_col = colors["indicator"] if is_hovered else frame_color
+        border_col = (*border_col[:3], border_col[3] * master_alpha)
         _draw_rounded_rect_border(nx, ny, nw_s, nh_s, 2.0 * ui_scale, border_col, 0.5)
 
+        # Frame label centered above the frame
+        frame_label = node.label
+        if frame_label and nw_s > 20 * ui_scale and nh_s > 14 * ui_scale:
+            label_font_size = max(6, min(_FONT_SIZE_MAX, int(nh_s * 0.2)))
+            label_color = _compute_outline_color(frame_color)
+            label_color = (*label_color[:3], label_color[3] * master_alpha)
+            blf.size(font_id, label_font_size)
+            tw, th = blf.dimensions(font_id, frame_label)
+            if tw < nw_s - 4 * ui_scale:
+                lx = nx + (nw_s - tw) / 2
+                ly = ny + nh_s + 2 * ui_scale
+                _draw_text_with_shadow(font_id, frame_label, lx, ly, label_color, label_font_size)
+                gpu.state.blend_set("ALPHA")
+
     # 2. Draw Connection Wires
-    _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors)
+    _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha)
 
     # 3. Draw Regular Nodes & Accurate Hover Highlight Mapping
-    font_id = 0
     for node in regular_nodes:
         if node.hide:
             w, h = 100.0, 30.0
@@ -171,7 +195,11 @@ def draw_minimap():
         min_dim = 3.0 * ui_scale
         is_hovered = node.name == hovered_node_name
 
-        fill_color = _get_node_color(node, colors["node"])
+        if getattr(settings, "colored_nodes", True):
+            fill_color = _get_node_color(node, colors["node"])
+        else:
+            fill_color = colors["node"]
+        fill_color = (*fill_color[:3], fill_color[3] * master_alpha)
         if is_hovered:
             fill_color = (
                 min(fill_color[0] * 1.35, 1.0),
@@ -186,12 +214,11 @@ def draw_minimap():
             _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, fill_color)
             border_w = 1.0 * ui_scale if (node.select or is_hovered) else 0.5 * ui_scale
             border_c = colors["node_selected"] if node.select else colors["node_border"]
+            border_c = (*border_c[:3], border_c[3])
             if node.mute:
                 border_c = (border_c[0], border_c[1], border_c[2], border_c[3] * 0.35)
+            border_c = (*border_c[:3], border_c[3] * master_alpha)
             _draw_rounded_rect_border(nx, ny, nw_s, nh_s, node_r, border_c, border_w)
-            if node.mute:
-                muted_overlay = (bg_color[0], bg_color[1], bg_color[2], 0.4)
-                _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, muted_overlay)
 
             if getattr(settings, "show_node_initials", True) and nw_s > 6 * ui_scale and nh_s > 6 * ui_scale:
                 label = node.label
@@ -201,14 +228,19 @@ def draw_minimap():
                     label = node.bl_label
                 initials = _get_node_initials(label)
                 if initials:
-                    font_size = max(6, int(min(nw_s, nh_s) * 0.45))
+                    font_size = max(6, min(_FONT_SIZE_MAX, int(min(nw_s, nh_s) * 0.45)))
                     text_color = _compute_outline_color(fill_color)
+                    text_color = (*text_color[:3], text_color[3] * master_alpha)
                     blf.size(font_id, font_size)
                     tw, th = blf.dimensions(font_id, initials)
                     tx = nx + (nw_s - tw) / 2
                     ty = ny + (nh_s - th) / 2
                     _draw_text_with_shadow(font_id, initials, tx, ty, text_color, font_size)
                     gpu.state.blend_set("ALPHA")
+
+            if node.mute:
+                muted_overlay = (bg_color[0], bg_color[1], bg_color[2], 0.85 * master_alpha)
+                _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, muted_overlay)
 
     # 4. Draw Active Main Viewport Interactive Panning Box
     visible = _get_visible_rect(space, region)
@@ -224,7 +256,7 @@ def draw_minimap():
         v_right = min(vx + vw, mx + mw)
         v_top = min(vy + vh, my + mh)
 
-        overlay = (0.0, 0.0, 0.0, 0.35)
+        overlay = (0.0, 0.0, 0.0, 0.45 * master_alpha)
 
         if v_left > mx:
             _draw_filled_rounded_rect(mx, my, v_left - mx, mh, 0, overlay)
@@ -235,7 +267,8 @@ def draw_minimap():
         if v_top < my + mh:
             _draw_filled_rounded_rect(v_left, v_top, v_right - v_left, (my + mh) - v_top, 0, overlay)
 
-        _draw_rounded_rect_border(vx, vy, vw, vh, 2.0, colors["node_outline"], 0.5 * ui_scale)
+        outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
+        _draw_rounded_rect_border(vx, vy, vw, vh, 2.0, outline_col, 0.5 * ui_scale)
 
     if _scissor_active:
         try:
@@ -255,11 +288,12 @@ def draw_minimap():
 
         tx = mx + (mw - text_w) / 2
         ty = my + (FONT_SIZE * ui_scale)
-        _draw_text_with_shadow(font_id, info_text, tx, ty, colors["text"], font_size)
+        text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
+        _draw_text_with_shadow(font_id, info_text, tx, ty, text_color, font_size)
 
 
-def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors):
-    wire_color = colors["wire"]
+def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0):
+    wire_color = (*colors["wire"][:3], colors["wire"][3] * master_alpha)
     thickness = max(1.5, 2.0 * scale)
 
     for node in nodes:
