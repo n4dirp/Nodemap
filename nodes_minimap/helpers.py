@@ -281,7 +281,7 @@ def _get_visible_rect(
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
         result = (min(xs), min(ys), max(xs), max(ys))
-        logger.log(5, "Visible rect: %s (region %dx%d, %d/4 corners valid)", result, w, h, len(points))
+        # logger.log(5, "Visible rect: %s (region %dx%d, %d/4 corners valid)", result, w, h, len(points))
         return result
     except Exception as e:
         logger.log(5, "_get_visible_rect failed: %s", e)
@@ -307,6 +307,7 @@ def _get_node_editor_theme_colors():
         "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 0.37, 0.34, 0.9)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
         "text": _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0)),
+        "scroll_item": _theme_rgba("user_interface.wcol_scroll.outline", (0.45, 0.45, 0.45, 0.5)),
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
     }

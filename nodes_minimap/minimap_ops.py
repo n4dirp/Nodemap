@@ -40,13 +40,11 @@ _HANDLE_THICKNESS = 6
 _CURSOR_MAP: dict[str, str] = {
     "W": "MOVE_X",
     "H": "MOVE_Y",
-    "C": "CROSSHAIR",
+    "C": "SCROLL_XY",
 }
 
 
-def _get_resize_handle(
-    st: dict, corner: str, rx: int, ry: int, ui_scale: float
-) -> str | None:
+def _get_resize_handle(st: dict, corner: str, rx: int, ry: int, ui_scale: float) -> str | None:
     mx, my, mw, mh = st.get("rect", (0, 0, 0, 0))
     if mw <= 0 or mh <= 0:
         return None
@@ -130,9 +128,17 @@ class NODES_MINIMAP_OT_navigate(Operator):
 
     def modal(self, context: Context, event: Event) -> set[str]:
         if not context.area:
+            st = _state(self._area_ptr)
+            st["modal_active"] = False
+            st["modal_area_ptr"] = 0
             return {"CANCELLED"}
         st = _state()
-        if st.get("modal_area_ptr", 0) != context.area.as_pointer():
+        area_ptr_now = context.area.as_pointer()
+        modal_ptr = st.get("modal_area_ptr", 0)
+        if modal_ptr != area_ptr_now:
+            st = _state(self._area_ptr)
+            st["modal_active"] = False
+            st["modal_area_ptr"] = 0
             return {"CANCELLED"}
         if not st.get("enabled", True):
             return {"PASS_THROUGH"}

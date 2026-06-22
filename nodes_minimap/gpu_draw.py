@@ -10,6 +10,8 @@ GPUStageInterfaceInfo = gpu.types.GPUStageInterfaceInfo
 GPUShaderCreateInfo = gpu.types.GPUShaderCreateInfo
 
 _FILL_SDF_SHADER: gpu.types.GPUShader | None = None
+_FILL_SDF_VARYING_SHADER: gpu.types.GPUShader | None = None
+_FILL_SDF_HOLE_SHADER: gpu.types.GPUShader | None = None
 _BORDER_SDF_SHADER: gpu.types.GPUShader | None = None
 _PILL_SHADER: gpu.types.GPUShader | None = None
 _PILL_BORDER_SHADER: gpu.types.GPUShader | None = None
@@ -28,6 +30,37 @@ float sdRoundRect(vec2 p, vec2 b, float r) {
 }
 void main() {
     float dist = sdRoundRect(vUv, halfSize, radius);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_FILL_FRAG_VARYING_SRC = """
+float sdRoundRectVarying(vec2 p, vec2 b, vec4 r) {
+    float radius = mix(
+        mix(r.w, r.z, step(0.0, p.x)),
+        mix(r.x, r.y, step(0.0, p.x)),
+        step(0.0, p.y)
+    );
+    vec2 q = abs(p) - b + radius;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
+}
+void main() {
+    float dist = sdRoundRectVarying(vUv, halfSize, radii);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_FILL_FRAG_HOLE_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float outerDist = sdRoundRect(vUv, outerHalfSize, outerRadius);
+    float innerDist = sdRoundRect(vUv - innerOffset, innerHalfSize, innerRadius);
+    float dist = max(outerDist, -innerDist);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
 }
@@ -108,6 +141,51 @@ def _get_sdf_fill_shader() -> gpu.types.GPUShader:
         _FILL_SDF_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _FILL_SDF_SHADER
+
+
+def _get_sdf_fill_varying_shader() -> gpu.types.GPUShader:
+    global _FILL_SDF_VARYING_SHADER
+    if _FILL_SDF_VARYING_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("fill_varying_iface")
+        vert_out.smooth("VEC2", "vUv")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.push_constant("VEC2", "halfSize")
+        info.push_constant("VEC4", "radii")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_FILL_VERT_SRC)
+        info.fragment_source(_FILL_FRAG_VARYING_SRC)
+        _FILL_SDF_VARYING_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _FILL_SDF_VARYING_SHADER
+
+
+def _get_sdf_fill_hole_shader() -> gpu.types.GPUShader:
+    global _FILL_SDF_HOLE_SHADER
+    if _FILL_SDF_HOLE_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("fill_hole_iface")
+        vert_out.smooth("VEC2", "vUv")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.push_constant("VEC2", "outerHalfSize")
+        info.push_constant("FLOAT", "outerRadius")
+        info.push_constant("VEC2", "innerOffset")
+        info.push_constant("VEC2", "innerHalfSize")
+        info.push_constant("FLOAT", "innerRadius")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_FILL_VERT_SRC)
+        info.fragment_source(_FILL_FRAG_HOLE_SRC)
+        _FILL_SDF_HOLE_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _FILL_SDF_HOLE_SHADER
 
 
 def _get_sdf_border_shader() -> gpu.types.GPUShader:
@@ -240,6 +318,85 @@ def _draw_filled_rounded_rect(x, y, w, h, r, color):
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (hw, hh))
     shader.uniform_float("radius", r)
+    batch.draw(shader)
+
+
+def _draw_filled_rounded_rect_varying(x, y, w, h, radii, color):
+    if w <= 0 or h <= 0:
+        return
+    max_r = min(w / 2, h / 2)
+    radii = tuple(max(0, min(r, max_r)) for r in radii)
+
+    shader = _get_sdf_fill_varying_shader()
+    hw, hh = w / 2, h / 2
+
+    vertices = (
+        (x, y, 0.0),
+        (x + w, y, 0.0),
+        (x + w, y + h, 0.0),
+        (x, y + h, 0.0),
+    )
+    uvs = (
+        (-hw, -hh),
+        (hw, -hh),
+        (hw, hh),
+        (-hw, hh),
+    )
+    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+
+    shader.bind()
+    shader.uniform_float(
+        "ModelViewProjectionMatrix",
+        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+    )
+    shader.uniform_float("color", _srgb_to_linear(color))
+    shader.uniform_float("halfSize", (hw, hh))
+    shader.uniform_float("radii", radii)
+    batch.draw(shader)
+
+
+def _draw_filled_rounded_rect_with_hole(
+    mx, my, mw, mh, outer_r,
+    ix, iy, iw, ih, inner_r,
+    color,
+):
+    if mw <= 0 or mh <= 0 or iw <= 0 or ih <= 0:
+        return
+    outer_r = max(0, min(outer_r, mw / 2, mh / 2))
+
+    shader = _get_sdf_fill_hole_shader()
+    hw, hh = mw / 2, mh / 2
+
+    inner_off_x = (ix + iw / 2) - (mx + mw / 2)
+    inner_off_y = (iy + ih / 2) - (my + mh / 2)
+    inner_hw = iw / 2
+    inner_hh = ih / 2
+
+    vertices = (
+        (mx, my, 0.0),
+        (mx + mw, my, 0.0),
+        (mx + mw, my + mh, 0.0),
+        (mx, my + mh, 0.0),
+    )
+    uvs = (
+        (-hw, -hh),
+        (hw, -hh),
+        (hw, hh),
+        (-hw, hh),
+    )
+    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+
+    shader.bind()
+    shader.uniform_float(
+        "ModelViewProjectionMatrix",
+        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+    )
+    shader.uniform_float("color", _srgb_to_linear(color))
+    shader.uniform_float("outerHalfSize", (hw, hh))
+    shader.uniform_float("outerRadius", outer_r)
+    shader.uniform_float("innerOffset", (inner_off_x, inner_off_y))
+    shader.uniform_float("innerHalfSize", (inner_hw, inner_hh))
+    shader.uniform_float("innerRadius", inner_r)
     batch.draw(shader)
 
 

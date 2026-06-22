@@ -92,7 +92,7 @@ class MinimapPrefs(PropertyGroup):
             ("BOTTOM_LEFT", "Bottom Left", "Display in the bottom-left corner"),
             ("BOTTOM_RIGHT", "Bottom Right", "Display in the bottom-right corner"),
         ],
-        default="TOP_RIGHT",
+        default="BOTTOM_LEFT",
     )
 
     minimap_width: IntProperty(

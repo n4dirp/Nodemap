@@ -10,6 +10,7 @@ from mathutils import Matrix
 
 from .gpu_draw import (
     _draw_filled_rounded_rect,
+    _draw_filled_rounded_rect_with_hole,
     _draw_pill,
     _draw_rounded_rect_border,
     _draw_text_with_shadow,
@@ -28,8 +29,6 @@ from .helpers import (
 )
 
 logger = logging.getLogger(__package__)
-
-_modal_invoked_for_area: set[int] = set()
 
 FONT_SIZE = 11
 _FONT_SIZE_MAX = 11
@@ -55,10 +54,8 @@ def draw_minimap():
         return
     settings = addon.preferences.settings
 
-    area_ptr = context.area.as_pointer()
     if getattr(settings, "interactive", True):
-        if area_ptr not in _modal_invoked_for_area:
-            _modal_invoked_for_area.add(area_ptr)
+        if not st.get("modal_active", False):
             try:
                 bpy.ops.nodes_minimap.navigate("INVOKE_DEFAULT")
             except RuntimeError:
@@ -258,17 +255,52 @@ def draw_minimap():
 
         overlay = (0.0, 0.0, 0.0, 0.45 * master_alpha)
 
-        if v_left > mx:
-            _draw_filled_rounded_rect(mx, my, v_left - mx, mh, 0, overlay)
-        if v_right < mx + mw:
-            _draw_filled_rounded_rect(v_right, my, (mx + mw) - v_right, mh, 0, overlay)
-        if v_bottom > my:
-            _draw_filled_rounded_rect(v_left, my, v_right - v_left, v_bottom - my, 0, overlay)
-        if v_top < my + mh:
-            _draw_filled_rounded_rect(v_left, v_top, v_right - v_left, (my + mh) - v_top, 0, overlay)
+        # Temporarily disable scissor so rounded outer edges aren't clipped
+        scissor_overlay = _scissor_active
+        if scissor_overlay:
+            gpu.state.scissor_test_set(False)
+
+        # Single shape: rounded minimap rect with visible-viewport hole.
+        # Avoids seam artifacts from multi-strip approaches and respects
+        # panel_roundness universally regardless of zoom/scroll position.
+        _draw_filled_rounded_rect_with_hole(
+            mx,
+            my,
+            mw,
+            mh,
+            panel_r,
+            v_left,
+            v_bottom,
+            v_right - v_left,
+            v_top - v_bottom,
+            0,
+            overlay,
+        )
+
+        if scissor_overlay:
+            gpu.state.scissor_test_set(True)
+            gpu.state.scissor_set(int(mx + 1), int(my + 1), int(mw - 2), int(mh - 2))
 
         outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
-        _draw_rounded_rect_border(vx, vy, vw, vh, 2.0, outline_col, 0.5 * ui_scale)
+        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
+
+    # 5. Scrollbar indicators when zoomed in
+    _draw_minimap_scrollbars(
+        mx,
+        my,
+        mw,
+        mh,
+        padding,
+        cx,
+        cy,
+        scale,
+        tree_cx,
+        tree_cy,
+        bounds,
+        colors,
+        ui_scale,
+        master_alpha,
+    )
 
     if _scissor_active:
         try:
@@ -330,6 +362,57 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
                     gpu.matrix.multiply_matrix(Matrix.Rotation(angle, 4, "Z"))
                     _draw_pill(-length / 2, -thickness / 2, length, thickness, wire_color)
                     gpu.matrix.pop()
+
+
+def _draw_minimap_scrollbars(
+    mx, my, mw, mh, padding, cx, cy, scale, tree_cx, tree_cy, bounds, colors, ui_scale, master_alpha
+):
+    inner_l = mx + padding
+    inner_r = mx + mw - padding
+    inner_b = my + padding
+    inner_t = my + mh - padding
+    inner_w = mw - 2 * padding
+    inner_h = mh - 2 * padding
+
+    bbox_l, bbox_b, bbox_r, bbox_t = bounds
+    bbox_w = bbox_r - bbox_l
+    bbox_h = bbox_t - bbox_b
+    if bbox_w <= 0 or bbox_h <= 0:
+        return
+
+    tree_l = tree_cx + (inner_l - cx) / scale
+    tree_r = tree_cx + (inner_r - cx) / scale
+    tree_b = tree_cy + (inner_b - cy) / scale
+    tree_t = tree_cy + (inner_t - cy) / scale
+
+    v_left = max(bbox_l, min(bbox_r, tree_l))
+    v_right = max(bbox_l, min(bbox_r, tree_r))
+    v_bottom = max(bbox_b, min(bbox_t, tree_b))
+    v_top = max(bbox_b, min(bbox_t, tree_t))
+
+    visible_w = v_right - v_left
+    visible_h = v_top - v_bottom
+    if visible_w >= bbox_w and visible_h >= bbox_h:
+        return
+
+    bar_thick = max(2, int(3 * ui_scale))
+    bar_off = int(2 * ui_scale)
+    min_thumb = int(6 * ui_scale)
+    scroll_color = (*colors["scroll_item"][:3], colors["scroll_item"][3] * master_alpha)
+
+    if visible_w < bbox_w:
+        track_w = inner_w
+        thumb_w = max(min_thumb, int(track_w * visible_w / bbox_w))
+        thumb_x = inner_l + int(track_w * (v_left - bbox_l) / bbox_w)
+        thumb_y = my + bar_off
+        _draw_filled_rounded_rect(thumb_x, thumb_y, thumb_w, bar_thick, bar_thick * 0.5, scroll_color)
+
+    if visible_h < bbox_h:
+        track_h = inner_h
+        thumb_h = max(min_thumb, int(track_h * visible_h / bbox_h))
+        thumb_x2 = mx + mw - bar_off - bar_thick
+        thumb_y2 = inner_b + int(track_h * (v_bottom - bbox_b) / bbox_h)
+        _draw_filled_rounded_rect(thumb_x2, thumb_y2, bar_thick, thumb_h, bar_thick * 0.5, scroll_color)
 
 
 def _get_node_initials(name: str) -> str:

@@ -43,8 +43,6 @@ def register():
 
     _update_logger_from_prefs()
 
-    logger.info("Nodes Minimap registered")
-
 
 def unregister():
     global _draw_handler, _modal_operator
@@ -62,5 +60,3 @@ def unregister():
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
-
-    logger.info("Nodes Minimap unregistered")
