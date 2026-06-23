@@ -202,7 +202,8 @@ def _get_node_dims(node) -> tuple[float, float]:
     except (AttributeError, TypeError, IndexError):
         h = abs(getattr(node, "height", 30.0))
 
-    return max(w, 5.0), max(h, 5.0)
+    ui_scale = _get_ui_scale()
+    return max(w / ui_scale, 5.0), max(h / ui_scale, 5.0)
 
 
 def _get_node_tree_bounds(nodes: bpy.types.Nodes) -> tuple[float, float, float, float]:
@@ -226,7 +227,7 @@ def _get_minimap_transform() -> tuple[float, float, float, float, float]:
     st = _state()
     rect = st.get("rect", (0, 0, 100, 100))
     bounds = st.get("tree_bounds", (0, 0, 100, 100))
-    padding = st.get("padding", 6) * _get_ui_scale()
+    padding = st.get("padding", 6 * _get_ui_scale())
     zoom = st.get("zoom", 1.0)
     pan = st.get("pan", [0.0, 0.0])
 

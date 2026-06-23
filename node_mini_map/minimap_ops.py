@@ -244,24 +244,36 @@ class NODES_MINIMAP_OT_navigate(Operator):
 
             case "WHEELUPMOUSE" | "WHEELDOWNMOUSE":
                 if in_minimap:
-                    zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
-                    old_zoom = st.get("zoom", 1.0)
-                    new_zoom = max(0.1, min(old_zoom * zoom_delta, 20.0))
+                    prefs = addon.preferences.settings if addon else None
+                    scroll_mode = getattr(prefs, "scroll_wheel_mode", "MINIMAP") if prefs else "MINIMAP"
+                    if scroll_mode == "NODE_EDITOR":
+                        try:
+                            factor = 0.1
+                            if event.type == "WHEELUPMOUSE":
+                                bpy.ops.view2d.zoom_in(zoomfacx=factor, zoomfacy=factor)
+                            else:
+                                bpy.ops.view2d.zoom_out(zoomfacx=-factor, zoomfacy=-factor)
+                        except RuntimeError:
+                            pass
+                    else:
+                        zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
+                        old_zoom = st.get("zoom", 1.0)
+                        new_zoom = max(0.1, min(old_zoom * zoom_delta, 20.0))
 
-                    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
-                    tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
+                        cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
+                        tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
 
-                    if scale > 0 and tree_coord is not None:
-                        tx, ty = tree_coord
-                        base_scale = scale / old_zoom
-                        pan_x, pan_y = st.get("pan", [0.0, 0.0])
+                        if scale > 0 and tree_coord is not None:
+                            tx, ty = tree_coord
+                            base_scale = scale / old_zoom
+                            pan_x, pan_y = st.get("pan", [0.0, 0.0])
 
-                        pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - old_zoom)
-                        pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - old_zoom)
+                            pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - old_zoom)
+                            pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - old_zoom)
 
-                        st["zoom"] = new_zoom
-                        st["pan"] = [pan_x_new, pan_y_new]
-                        redraw_ui("NODE_EDITOR")
+                            st["zoom"] = new_zoom
+                            st["pan"] = [pan_x_new, pan_y_new]
+                    redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -392,22 +404,22 @@ class NODES_MINIMAP_OT_navigate(Operator):
 
         ui_scale = _get_ui_scale()
         sx, sy, ex, ey = _get_safe_bounds(context.area, context.region, context.space_data, corner)
-        max_w = max(64, min(800, int(ex - sx - 10)))
+        max_w = max(64, min(800, int(ex - sx - 10 * ui_scale)))
         max_h = max(64, min(600, int(ey - sy - 35 * ui_scale)))
 
         if self._resize_handle in ("W", "C"):
             if corner in ("TOP_RIGHT", "BOTTOM_RIGHT"):
-                new_w = max(64, min(max_w, w0 - dx))
+                new_w = max(64, min(max_w, int(w0 - dx / ui_scale)))
             else:
-                new_w = max(64, min(max_w, w0 + dx))
-            settings.minimap_width = int(new_w)
+                new_w = max(64, min(max_w, int(w0 + dx / ui_scale)))
+            settings.minimap_width = new_w
 
         if self._resize_handle in ("H", "C"):
             if corner in ("TOP_RIGHT", "TOP_LEFT"):
-                new_h = max(64, min(max_h, h0 - dy))
+                new_h = max(64, min(max_h, int(h0 - dy / ui_scale)))
             else:
-                new_h = max(64, min(max_h, h0 + dy))
-            settings.minimap_height = int(new_h)
+                new_h = max(64, min(max_h, int(h0 + dy / ui_scale)))
+            settings.minimap_height = new_h
 
         redraw_ui("NODE_EDITOR")
 

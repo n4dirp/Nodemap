@@ -128,10 +128,20 @@ class MinimapPrefs(PropertyGroup):
         default=True,
     )
 
-    show_node_initials: BoolProperty(
-        name="Show Node Initials",
-        description="Display node name initials inside minimap nodes",
+    show_names: BoolProperty(
+        name="Show Node Labels",
+        description="Display labels inside minimap nodes",
         default=True,
+    )
+
+    node_label_mode: EnumProperty(
+        name="Label Mode",
+        description="How to display node labels in the minimap",
+        items=[
+            ("COMPACT", "Initials", "Display abbreviated initials"),
+            ("FULL", "Full Name", "Display full name split across lines"),
+        ],
+        default="COMPACT",
     )
 
     colored_nodes: BoolProperty(
@@ -156,6 +166,16 @@ class MinimapPrefs(PropertyGroup):
         name="Interactive",
         description="Enable mouse and keyboard interaction with the minimap",
         default=True,
+    )
+
+    scroll_wheel_mode: EnumProperty(
+        name="Scroll Wheel",
+        description="What the scroll wheel controls when hovering the minimap",
+        items=[
+            ("MINIMAP", "Minimap Zoom", "Zoom the minimap's internal view"),
+            ("NODE_EDITOR", "Node Editor Zoom", "Zoom the actual node editor viewport"),
+        ],
+        default="MINIMAP",
     )
 
 

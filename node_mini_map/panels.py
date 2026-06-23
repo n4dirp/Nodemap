@@ -57,9 +57,14 @@ class NODES_MINIMAP_PT_appearance(Panel):
 
         layout.prop(settings, "opacity", text="Opacity", slider=True)
 
+        row = layout.row(align=True, heading="Node Labels")
+        row.prop(settings, "show_names", text="")
+        sub = row.row(align=True)
+        sub.active = settings.show_names
+        sub.prop(settings, "node_label_mode", text="")
+
         col = layout.column(align=True, heading="Show")
         col.prop(settings, "colored_nodes", text="Colored Nodes")
-        col.prop(settings, "show_node_initials", text="Name Initials")
         col.prop(settings, "show_wires", text="Node Wires")
         col.prop(settings, "show_node_count", text="Total Count")
 
@@ -90,6 +95,7 @@ class NODES_MINIMAP_PT_behavior(Panel):
         sub = col.column(align=True)
         sub.active = settings.interactive
         sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+        sub.prop(settings, "scroll_wheel_mode", text="Scroll Wheel")
 
 
 classes = (

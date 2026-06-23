@@ -31,7 +31,7 @@ from .helpers import (
 logger = logging.getLogger(__package__)
 
 FONT_SIZE = 11
-_FONT_SIZE_MAX = 11
+
 MAP_PADDING = 10
 
 
@@ -79,18 +79,19 @@ def draw_minimap():
 
     mw = getattr(settings, "minimap_width", 200) * ui_scale
     mh = getattr(settings, "minimap_height", 200) * ui_scale
-    margin = MAP_PADDING * ui_scale
+    x_margin = MAP_PADDING * ui_scale
+    y_margin = x_margin
 
     corner = getattr(settings, "position", "TOP_RIGHT")
 
     match corner:
         case "TOP_RIGHT" | "TOP_LEFT":
             if getattr(context.space_data.overlay, "show_context_path", False):
-                margin = (MAP_PADDING + 20) * ui_scale
+                y_margin = (MAP_PADDING + 20) * ui_scale
         case "BOTTOM_RIGHT" | "BOTTOM_LEFT":
             if space.node_tree and space.node_tree.type == "COMPOSITING":
                 if getattr(context.space_data, "show_region_asset_shelf", False):
-                    margin = (MAP_PADDING + 25) * ui_scale
+                    y_margin = (MAP_PADDING + 25) * ui_scale
 
     padding = 6 * ui_scale
     master_alpha = getattr(settings, "opacity", 0.85)
@@ -99,17 +100,17 @@ def draw_minimap():
 
     match corner:
         case "TOP_RIGHT":
-            mx = ex - mw - MAP_PADDING
-            my = ey - mh - margin
+            mx = ex - mw - x_margin
+            my = ey - mh - y_margin
         case "TOP_LEFT":
-            mx = sx + MAP_PADDING
-            my = ey - mh - margin
+            mx = sx + x_margin
+            my = ey - mh - y_margin
         case "BOTTOM_RIGHT":
-            mx = ex - mw - MAP_PADDING
-            my = sy + margin
+            mx = ex - mw - x_margin
+            my = sy + y_margin
         case "BOTTOM_LEFT":
-            mx = sx + MAP_PADDING
-            my = sy + margin
+            mx = sx + x_margin
+            my = sy + y_margin
 
     if mx < sx or my < sy or mx + mw > ex or my + mh > ey:
         st["rect"] = (0, 0, 0, 0)
@@ -117,7 +118,7 @@ def draw_minimap():
 
     st["rect"] = (mx, my, mw, mh)
     st["tree_bounds"] = bounds
-    st["margin"] = margin
+    st["margin"] = y_margin
     st["padding"] = padding
 
     gpu.state.blend_set("ALPHA")
@@ -175,7 +176,7 @@ def draw_minimap():
         # Frame label centered above the frame
         frame_label = node.label
         if frame_label and nw_s > 20 * ui_scale and nh_s > 14 * ui_scale:
-            label_font_size = max(6, min(_FONT_SIZE_MAX, int(nh_s * 0.2)))
+            label_font_size = max(6, min(int(11 * ui_scale), int(nh_s * 0.2)))
             label_color = _compute_outline_color(frame_color)
             label_color = (*label_color[:3], label_color[3] * master_alpha)
             blf.size(font_id, label_font_size)
@@ -231,23 +232,41 @@ def draw_minimap():
             border_c = (*border_c[:3], border_c[3] * master_alpha)
             _draw_rounded_rect_border(nx, ny, nw_s, nh_s, node_r, border_c, border_w)
 
-            if getattr(settings, "show_node_initials", True) and nw_s > 6 * ui_scale and nh_s > 6 * ui_scale:
+            node_label_mode = getattr(settings, "node_label_mode", "COMPACT")
+            if getattr(settings, "show_names", True) and nw_s > 6 * ui_scale and nh_s > 6 * ui_scale:
                 label = node.label
                 if not label and getattr(node, "node_tree", None):
                     label = node.node_tree.name
                 if not label:
                     label = node.bl_label
-                initials = _get_node_initials(label)
-                if initials:
-                    font_size = max(6, min(_FONT_SIZE_MAX, int(min(nw_s, nh_s) * 0.45)))
+                if node_label_mode == "FULL" and label:
+                    font_size = max(6, min(int(11 * ui_scale), int(min(nw_s, nh_s) * 0.35)))
                     text_color = _compute_outline_color(fill_color)
                     text_color = (*text_color[:3], text_color[3] * master_alpha)
-                    blf.size(font_id, font_size)
-                    tw, th = blf.dimensions(font_id, initials)
-                    tx = nx + (nw_s - tw) / 2
-                    ty = ny + (nh_s - th) / 2
-                    _draw_text_with_shadow(font_id, initials, tx, ty, text_color, font_size)
-                    gpu.state.blend_set("ALPHA")
+                    lines = _get_node_label_lines(label, font_id, font_size, nw_s - 4 * ui_scale, 3)
+                    if lines:
+                        blf.size(font_id, font_size)
+                        line_h = blf.dimensions(font_id, "Ay")[1] + 1
+                        total_h = len(lines) * line_h
+                        start_y = ny + (nh_s - total_h) / 2
+                        for i, line in enumerate(lines):
+                            lw, _ = blf.dimensions(font_id, line)
+                            lx = nx + (nw_s - lw) / 2
+                            ly = start_y + (len(lines) - 1 - i) * line_h
+                            _draw_text_with_shadow(font_id, line, lx, ly, text_color, font_size)
+                            gpu.state.blend_set("ALPHA")
+                else:
+                    initials = _get_node_initials(label)
+                    if initials:
+                        font_size = max(6, min(int(11 * ui_scale), int(min(nw_s, nh_s) * 0.45)))
+                        text_color = _compute_outline_color(fill_color)
+                        text_color = (*text_color[:3], text_color[3] * master_alpha)
+                        blf.size(font_id, font_size)
+                        tw, th = blf.dimensions(font_id, initials)
+                        tx = nx + (nw_s - tw) / 2
+                        ty = ny + (nh_s - th) / 2
+                        _draw_text_with_shadow(font_id, initials, tx, ty, text_color, font_size)
+                        gpu.state.blend_set("ALPHA")
 
             if node.mute:
                 muted_overlay = (bg_color[0], bg_color[1], bg_color[2], 0.85 * master_alpha)
@@ -267,6 +286,9 @@ def draw_minimap():
         v_right = min(vx + vw, mx + mw)
         v_top = min(vy + vh, my + mh)
 
+        hole_w = v_right - v_left
+        hole_h = v_top - v_bottom
+
         overlay = (0.0, 0.0, 0.0, 0.45 * master_alpha)
 
         # Temporarily disable scissor so rounded outer edges aren't clipped
@@ -274,29 +296,34 @@ def draw_minimap():
         if scissor_overlay:
             gpu.state.scissor_test_set(False)
 
-        # Single shape: rounded minimap rect with visible-viewport hole.
-        # Avoids seam artifacts from multi-strip approaches and respects
-        # panel_roundness universally regardless of zoom/scroll position.
-        _draw_filled_rounded_rect_with_hole(
-            mx,
-            my,
-            mw,
-            mh,
-            panel_r,
-            v_left,
-            v_bottom,
-            v_right - v_left,
-            v_top - v_bottom,
-            0,
-            overlay,
-        )
+        if hole_w > 0 and hole_h > 0:
+            # Single shape: rounded minimap rect with visible-viewport hole.
+            # Avoids seam artifacts from multi-strip approaches and respects
+            # panel_roundness universally regardless of zoom/scroll position.
+            _draw_filled_rounded_rect_with_hole(
+                mx,
+                my,
+                mw,
+                mh,
+                panel_r,
+                v_left,
+                v_bottom,
+                hole_w,
+                hole_h,
+                0,
+                overlay,
+            )
+        else:
+            # Viewport is completely outside minimap; draw full overlay without hole.
+            _draw_filled_rounded_rect(mx, my, mw, mh, panel_r, overlay)
 
         if scissor_overlay:
             gpu.state.scissor_test_set(True)
             gpu.state.scissor_set(int(mx + 1), int(my + 1), int(mw - 2), int(mh - 2))
 
-        outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
-        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
+        if hole_w > 0 and hole_h > 0:
+            outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
+            _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
 
     # 5. Scrollbar indicators when zoomed in
     _draw_minimap_scrollbars(
@@ -437,3 +464,26 @@ def _get_node_initials(name: str) -> str:
     if len(words) >= 2:
         return "".join(w[0] for w in words).upper()[:2]
     return words[0][0].upper()
+
+
+def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: float, max_lines: int = 3) -> list[str]:
+    blf.size(font_id, font_size)
+    words = label.split()
+    if not words:
+        return []
+    if blf.dimensions(font_id, label)[0] <= max_width:
+        return [label]
+    lines = []
+    i = 0
+    while i < len(words) and len(lines) < max_lines:
+        line_words = [words[i]]
+        i += 1
+        while i < len(words):
+            candidate = " ".join(line_words + [words[i]])
+            w, _ = blf.dimensions(font_id, candidate)
+            if w > max_width:
+                break
+            line_words.append(words[i])
+            i += 1
+        lines.append(" ".join(line_words))
+    return lines
