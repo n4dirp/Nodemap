@@ -1,5 +1,5 @@
-# Nodes Minimap - Blender Extension
-# Minimap overlay for the Node Editor
+# Node Mini Map - Blender Extension
+# Mini Map overlay for the Node Editor
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import logging
@@ -8,8 +8,8 @@ import bpy
 from bpy.types import SpaceNodeEditor
 
 from .minimap_draw import draw_minimap
-from .minimap_ops import NODES_MINIMAP_OT_navigate, NODES_MINIMAP_OT_toggle
-from .panels import draw_minimap_overlay_settings
+from .minimap_ops import classes as operator_classes
+from .panels import classes as panel_classes
 from .preferences import _update_logger_from_prefs
 from .preferences import classes as prefs_classes
 
@@ -19,8 +19,8 @@ logger.addHandler(logging.NullHandler())
 
 classes = (
     *prefs_classes,
-    NODES_MINIMAP_OT_navigate,
-    NODES_MINIMAP_OT_toggle,
+    *operator_classes,
+    *panel_classes,
 )
 
 _draw_handler = None
@@ -39,8 +39,6 @@ def register():
         "POST_PIXEL",
     )
 
-    bpy.types.NODE_PT_overlay.append(draw_minimap_overlay_settings)
-
     _update_logger_from_prefs()
 
 
@@ -52,8 +50,6 @@ def unregister():
         except (ValueError, RuntimeError):
             pass
         _draw_handler = None
-
-    bpy.types.NODE_PT_overlay.remove(draw_minimap_overlay_settings)
 
     for cls in reversed(classes):
         try:

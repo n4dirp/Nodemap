@@ -77,9 +77,9 @@ class CAMGRID_PG_scene(PropertyGroup):
 class MinimapPrefs(PropertyGroup):
     """Preferences for the Nodes Minimap."""
 
-    enabled: BoolProperty(
-        name="Enabled",
-        description="Show minimap in the Node Editor",
+    show_by_default: BoolProperty(
+        name="Show by Default",
+        description="Show minimap on newly opened Node Editor areas",
         default=True,
     )
 
@@ -101,6 +101,7 @@ class MinimapPrefs(PropertyGroup):
         default=256,
         min=64,
         max=800,
+        subtype="PIXEL",
     )
 
     minimap_height: IntProperty(
@@ -109,6 +110,7 @@ class MinimapPrefs(PropertyGroup):
         default=128,
         min=64,
         max=600,
+        subtype="PIXEL",
     )
 
     opacity: FloatProperty(
@@ -138,10 +140,16 @@ class MinimapPrefs(PropertyGroup):
         default=True,
     )
 
+    show_wires: BoolProperty(
+        name="Show Wires",
+        description="Display node connections in the minimap",
+        default=True,
+    )
+
     auto_frame_selected: BoolProperty(
         name="Auto Frame Selected",
         description="Automatically frame the selected node when clicking in the minimap",
-        default=True,
+        default=False,
     )
 
     interactive: BoolProperty(
@@ -180,6 +188,9 @@ class NodesMinimapAddonPreferences(AddonPreferences):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+
+        layout.label(text="Mini Map")
+        layout.prop(self.settings, "show_by_default")
 
         layout.label(text="Development")
         row = layout.row(align=True, heading="Console Logging")

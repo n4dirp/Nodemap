@@ -32,6 +32,7 @@ logger = logging.getLogger(__package__)
 
 FONT_SIZE = 11
 _FONT_SIZE_MAX = 11
+MAP_PADDING = 10
 
 
 def draw_minimap():
@@ -57,7 +58,7 @@ def draw_minimap():
     if getattr(settings, "interactive", True):
         if not st.get("modal_active", False):
             try:
-                bpy.ops.nodes_minimap.navigate("INVOKE_DEFAULT")
+                bpy.ops.node_mini_map.navigate("INVOKE_DEFAULT")
             except RuntimeError:
                 pass
 
@@ -78,27 +79,37 @@ def draw_minimap():
 
     mw = getattr(settings, "minimap_width", 200) * ui_scale
     mh = getattr(settings, "minimap_height", 200) * ui_scale
-    margin = 10 * ui_scale
-    if space.node_tree and space.node_tree.type == "COMPOSITING":
-        if getattr(context.space_data, "show_region_asset_shelf", False):
-            margin = 35 * ui_scale
-    padding = 6 * ui_scale
+    margin = MAP_PADDING * ui_scale
+
     corner = getattr(settings, "position", "TOP_RIGHT")
+
+    match corner:
+        case "TOP_RIGHT" | "TOP_LEFT":
+            if getattr(context.space_data.overlay, "show_context_path", False):
+                margin = (MAP_PADDING + 20) * ui_scale
+        case "BOTTOM_RIGHT" | "BOTTOM_LEFT":
+            if space.node_tree and space.node_tree.type == "COMPOSITING":
+                if getattr(context.space_data, "show_region_asset_shelf", False):
+                    margin = (MAP_PADDING + 25) * ui_scale
+
+    padding = 6 * ui_scale
     master_alpha = getattr(settings, "opacity", 0.85)
 
     sx, sy, ex, ey = _get_safe_bounds(context.area, region, space, corner)
-    if corner == "TOP_RIGHT":
-        mx = ex - mw - 10
-        my = ey - mh - margin
-    elif corner == "TOP_LEFT":
-        mx = sx + 10
-        my = ey - mh - margin
-    elif corner == "BOTTOM_RIGHT":
-        mx = ex - mw - 10
-        my = sy + margin
-    else:
-        mx = sx + 10
-        my = sy + margin
+
+    match corner:
+        case "TOP_RIGHT":
+            mx = ex - mw - MAP_PADDING
+            my = ey - mh - margin
+        case "TOP_LEFT":
+            mx = sx + MAP_PADDING
+            my = ey - mh - margin
+        case "BOTTOM_RIGHT":
+            mx = ex - mw - MAP_PADDING
+            my = sy + margin
+        case "BOTTOM_LEFT":
+            mx = sx + MAP_PADDING
+            my = sy + margin
 
     if mx < sx or my < sy or mx + mw > ex or my + mh > ey:
         st["rect"] = (0, 0, 0, 0)
@@ -134,6 +145,8 @@ def draw_minimap():
 
     frames = [n for n in nodes if n.type == "FRAME"]
     regular_nodes = [n for n in nodes if n.type != "FRAME"]
+    if not getattr(settings, "show_wires", True):
+        regular_nodes = [n for n in regular_nodes if n.type != "REROUTE"]
 
     font_id = 0
 
@@ -174,7 +187,8 @@ def draw_minimap():
                 gpu.state.blend_set("ALPHA")
 
     # 2. Draw Connection Wires
-    _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha)
+    if getattr(settings, "show_wires", True):
+        _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha)
 
     # 3. Draw Regular Nodes & Accurate Hover Highlight Mapping
     for node in regular_nodes:

@@ -58,8 +58,8 @@ float sdRoundRect(vec2 p, vec2 b, float r) {
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 void main() {
-    float outerDist = sdRoundRect(vUv, outerHalfSize, outerRadius);
-    float innerDist = sdRoundRect(vUv - innerOffset, innerHalfSize, innerRadius);
+    float outerDist = sdRoundRect(vUv, outerData.xy, outerData.z);
+    float innerDist = sdRoundRect(vUv - innerOffset, innerHalfSize, outerData.w);
     float dist = max(outerDist, -innerDist);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
@@ -172,11 +172,9 @@ def _get_sdf_fill_hole_shader() -> gpu.types.GPUShader:
         info = GPUShaderCreateInfo()
         info.push_constant("MAT4", "ModelViewProjectionMatrix")
         info.push_constant("VEC4", "color")
-        info.push_constant("VEC2", "outerHalfSize")
-        info.push_constant("FLOAT", "outerRadius")
+        info.push_constant("VEC4", "outerData")
         info.push_constant("VEC2", "innerOffset")
         info.push_constant("VEC2", "innerHalfSize")
-        info.push_constant("FLOAT", "innerRadius")
         info.vertex_in(0, "VEC3", "pos")
         info.vertex_in(1, "VEC2", "uv")
         info.vertex_out(vert_out)
@@ -392,11 +390,9 @@ def _draw_filled_rounded_rect_with_hole(
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("outerHalfSize", (hw, hh))
-    shader.uniform_float("outerRadius", outer_r)
+    shader.uniform_float("outerData", (hw, hh, outer_r, inner_r))
     shader.uniform_float("innerOffset", (inner_off_x, inner_off_y))
     shader.uniform_float("innerHalfSize", (inner_hw, inner_hh))
-    shader.uniform_float("innerRadius", inner_r)
     batch.draw(shader)
 
 

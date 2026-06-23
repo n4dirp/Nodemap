@@ -173,7 +173,14 @@ def _state(area_ptr: int | None = None) -> dict:
         except (AttributeError, ReferenceError):
             return {}
     if area_ptr not in _minimap_state:
-        _minimap_state[area_ptr] = dict(_DEFAULT_STATE)
+        state = dict(_DEFAULT_STATE)
+        try:
+            prefs = bpy.context.preferences.addons.get(__package__)
+            if prefs:
+                state["enabled"] = getattr(prefs.preferences.settings, "show_by_default", True)
+        except (AttributeError, ReferenceError):
+            pass
+        _minimap_state[area_ptr] = state
     return _minimap_state[area_ptr]
 
 

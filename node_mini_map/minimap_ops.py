@@ -95,7 +95,7 @@ def _get_resize_handle(st: dict, corner: str, rx: int, ry: int, ui_scale: float)
 class NODES_MINIMAP_OT_toggle(Operator):
     """Toggle the minimap overlay on and off."""
 
-    bl_idname = "nodes_minimap.toggle"
+    bl_idname = "node_mini_map.toggle"
     bl_label = "Toggle Minimap"
     bl_options = {"INTERNAL"}
 
@@ -109,7 +109,7 @@ class NODES_MINIMAP_OT_toggle(Operator):
 class NODES_MINIMAP_OT_navigate(Operator):
     """Navigate the Node Editor view via the minimap."""
 
-    bl_idname = "nodes_minimap.navigate"
+    bl_idname = "node_mini_map.navigate"
     bl_label = "Minimap Navigate"
     bl_options = {"INTERNAL"}
 
@@ -143,115 +143,37 @@ class NODES_MINIMAP_OT_navigate(Operator):
         if not st.get("enabled", True):
             return {"PASS_THROUGH"}
 
-        # Early-out for resize release (before interactive check so drag always completes)
-        if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "RELEASE" and self._resize_handle:
-            self._resize_handle = None
-            self._resize_start_mouse = None
-            self._resize_start_values = None
-            context.window.cursor_modal_set("DEFAULT")
-            self._last_cursor = ""
-            return {"RUNNING_MODAL"}
-
         addon = context.preferences.addons.get(__package__)
         if addon and not getattr(addon.preferences.settings, "interactive", True):
             return {"PASS_THROUGH"}
 
         in_minimap = _is_in_minimap(event.mouse_region_x, event.mouse_region_y)
 
-        # --- Resize drag MOUSEMOVE ---
-        if self._resize_handle and event.type == "MOUSEMOVE":
-            self._resize_apply_delta(context, event)
-            return {"RUNNING_MODAL"}
-
-        # --- Cursor feedback for resize zones ---
-        if event.type == "MOUSEMOVE" and not self._dragging and not self._mmb_dragging and not self._drag_start:
-            self._update_cursor(context, event)
-
-        # 1. Capture exact Hover State for accurate node highlighting
-        if event.type == "MOUSEMOVE" and not self._dragging and not self._mmb_dragging and not self._resize_handle:
-            old_hovered = st.get("hovered_node")
-            new_hovered = None
-            if in_minimap:
-                tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
-                if tree_coord and context.space_data.edit_tree:
-                    hovered = _find_node_at(context.space_data.edit_tree.nodes, tree_coord[0], tree_coord[1])
-                    if hovered:
-                        new_hovered = hovered.name
-
-            if old_hovered != new_hovered:
-                st["hovered_node"] = new_hovered
-                redraw_ui("NODE_EDITOR")
-
-        # 2. Minimap Internal Layout Panning (Middle Mouse Drag)
-        if event.type == "MIDDLEMOUSE":
-            if event.value == "PRESS" and in_minimap:
-                self._mmb_dragging = True
-                self._mmb_drag_start = (event.mouse_region_x, event.mouse_region_y)
-                return {"RUNNING_MODAL"}
-            elif event.value == "RELEASE" and self._mmb_dragging:
-                self._mmb_dragging = False
-                self._mmb_drag_start = None
-                return {"RUNNING_MODAL"}
-
-        if event.type == "MOUSEMOVE" and self._mmb_dragging and self._mmb_drag_start:
-            dx = event.mouse_region_x - self._mmb_drag_start[0]
-            dy = event.mouse_region_y - self._mmb_drag_start[1]
-            st["pan"][0] += dx
-            st["pan"][1] += dy
-            self._mmb_drag_start = (event.mouse_region_x, event.mouse_region_y)
-            redraw_ui("NODE_EDITOR")
-            return {"RUNNING_MODAL"}
-
-        # 3. Minimap Internal Layout Zooming (Scroll Wheel)
-        if event.type in {"WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
-            if in_minimap:
-                zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
-                old_zoom = st.get("zoom", 1.0)
-                new_zoom = max(0.1, min(old_zoom * zoom_delta, 20.0))
-
-                cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
-                tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
-
-                if scale > 0 and tree_coord is not None:
-                    tx, ty = tree_coord
-                    base_scale = scale / old_zoom
-                    pan_x, pan_y = st.get("pan", [0.0, 0.0])
-
-                    pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - old_zoom)
-                    pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - old_zoom)
-
-                    st["zoom"] = new_zoom
-                    st["pan"] = [pan_x_new, pan_y_new]
-                    redraw_ui("NODE_EDITOR")
-                return {"RUNNING_MODAL"}
-
-        # Frame all nodes in minimap on HOME key
-        if event.type == "HOME" and event.value == "PRESS" and in_minimap:
-            st["zoom"] = 1.0
-            st["pan"] = [0.0, 0.0]
-            redraw_ui("NODE_EDITOR")
-            return {"RUNNING_MODAL"}
-
-        # 4. Main viewport Camera Action / Click Node Selecting (Left / Right Mouse)
-        if event.type in {"LEFTMOUSE", "RIGHTMOUSE"}:
-            if event.value == "RELEASE":
-                if self._dragging:
-                    self._dragging = False
-                    self._drag_start = None
-                    return {"RUNNING_MODAL"}
-                if not self._dragging and self._was_in_minimap:
-                    self._handle_click_selection(context, event)
+        match event.type:
+            case "LEFTMOUSE" | "RIGHTMOUSE":
+                # --- Release ---
+                if event.value == "RELEASE":
+                    if self._resize_handle:
+                        self._resize_handle = None
+                        self._resize_start_mouse = None
+                        self._resize_start_values = None
+                        context.window.cursor_modal_set("DEFAULT")
+                        self._last_cursor = ""
+                        return {"RUNNING_MODAL"}
+                    if self._dragging:
+                        self._dragging = False
+                        self._drag_start = None
+                        return {"RUNNING_MODAL"}
+                    if not self._dragging and self._was_in_minimap:
+                        self._handle_click_selection(context, event)
+                        self._was_in_minimap = False
+                        return {"RUNNING_MODAL"}
                     self._was_in_minimap = False
-                    return {"RUNNING_MODAL"}
-
-                self._was_in_minimap = False
-                self._drag_start = None
-                return {"PASS_THROUGH"}
-
-            if event.value == "PRESS":
+                    self._drag_start = None
+                    return {"PASS_THROUGH"}
+                # --- Press ---
                 self._was_in_minimap = in_minimap
                 if self._was_in_minimap:
-                    # Check for resize handle first
                     if addon:
                         handle = self._get_handle_at(context, event)
                         if handle:
@@ -272,17 +194,87 @@ class NODES_MINIMAP_OT_navigate(Operator):
                     self._drag_start = None
                     return {"PASS_THROUGH"}
 
-        if event.type == "MOUSEMOVE" and self._drag_start is not None:
-            dx = event.mouse_region_x - self._drag_start[0]
-            dy = event.mouse_region_y - self._drag_start[1]
-            if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
-                self._dragging = True
-                if self._was_in_minimap:
-                    self._pan_view(context, dx, dy)
-                    self._drag_start = (event.mouse_region_x, event.mouse_region_y)
-            return {"RUNNING_MODAL"}
+            case "MIDDLEMOUSE":
+                if event.value == "PRESS" and in_minimap:
+                    self._mmb_dragging = True
+                    self._mmb_drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    return {"RUNNING_MODAL"}
+                if event.value == "RELEASE" and self._mmb_dragging:
+                    self._mmb_dragging = False
+                    self._mmb_drag_start = None
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
 
-        return {"PASS_THROUGH"}
+            case "MOUSEMOVE":
+                if self._resize_handle:
+                    self._resize_apply_delta(context, event)
+                    return {"RUNNING_MODAL"}
+                if not self._dragging and not self._mmb_dragging and not self._drag_start:
+                    self._update_cursor(context, event)
+                if not self._dragging and not self._mmb_dragging and not self._resize_handle:
+                    old_hovered = st.get("hovered_node")
+                    new_hovered = None
+                    if in_minimap:
+                        tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
+                        if tree_coord and context.space_data.edit_tree:
+                            hovered = _find_node_at(context.space_data.edit_tree.nodes, tree_coord[0], tree_coord[1])
+                            if hovered:
+                                new_hovered = hovered.name
+                    if old_hovered != new_hovered:
+                        st["hovered_node"] = new_hovered
+                        redraw_ui("NODE_EDITOR")
+                if self._mmb_dragging and self._mmb_drag_start:
+                    dx = event.mouse_region_x - self._mmb_drag_start[0]
+                    dy = event.mouse_region_y - self._mmb_drag_start[1]
+                    st["pan"][0] += dx
+                    st["pan"][1] += dy
+                    self._mmb_drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    redraw_ui("NODE_EDITOR")
+                    return {"RUNNING_MODAL"}
+                if self._drag_start is not None:
+                    dx = event.mouse_region_x - self._drag_start[0]
+                    dy = event.mouse_region_y - self._drag_start[1]
+                    if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
+                        self._dragging = True
+                        if self._was_in_minimap:
+                            self._pan_view(context, dx, dy)
+                            self._drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
+            case "WHEELUPMOUSE" | "WHEELDOWNMOUSE":
+                if in_minimap:
+                    zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
+                    old_zoom = st.get("zoom", 1.0)
+                    new_zoom = max(0.1, min(old_zoom * zoom_delta, 20.0))
+
+                    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
+                    tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
+
+                    if scale > 0 and tree_coord is not None:
+                        tx, ty = tree_coord
+                        base_scale = scale / old_zoom
+                        pan_x, pan_y = st.get("pan", [0.0, 0.0])
+
+                        pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - old_zoom)
+                        pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - old_zoom)
+
+                        st["zoom"] = new_zoom
+                        st["pan"] = [pan_x_new, pan_y_new]
+                        redraw_ui("NODE_EDITOR")
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
+            case "HOME":
+                if event.value == "PRESS" and in_minimap:
+                    st["zoom"] = 1.0
+                    st["pan"] = [0.0, 0.0]
+                    redraw_ui("NODE_EDITOR")
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
+            case _:
+                return {"PASS_THROUGH"}
 
     def _handle_click_selection(self, context: Context, event: Event) -> None:
         space = context.space_data
@@ -433,3 +425,9 @@ class NODES_MINIMAP_OT_navigate(Operator):
         st = _state(self._area_ptr)
         st["modal_active"] = False
         st["modal_area_ptr"] = 0
+
+
+classes = (
+    NODES_MINIMAP_OT_toggle,
+    NODES_MINIMAP_OT_navigate,
+)
