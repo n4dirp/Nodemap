@@ -68,13 +68,7 @@ class AddonLogFormatter(logging.Formatter):
         return f"{timestamp}  {short_name:<16} | {record.getMessage()}"
 
 
-class CAMGRID_PG_scene(PropertyGroup):
-    """Scene-level minimap properties."""
-
-    pass
-
-
-class MinimapPrefs(PropertyGroup):
+class NODES_MINIMAP_PG_settings(PropertyGroup):
     """Preferences for the Nodes Minimap."""
 
     show_by_default: BoolProperty(
@@ -92,7 +86,7 @@ class MinimapPrefs(PropertyGroup):
             ("BOTTOM_LEFT", "Bottom Left", "Display in the bottom-left corner"),
             ("BOTTOM_RIGHT", "Bottom Right", "Display in the bottom-right corner"),
         ],
-        default="BOTTOM_LEFT",
+        default="TOP_LEFT",
     )
 
     minimap_width: IntProperty(
@@ -100,7 +94,7 @@ class MinimapPrefs(PropertyGroup):
         description="Minimap width in pixels",
         default=256,
         min=64,
-        max=800,
+        # soft_max=800,
         subtype="PIXEL",
     )
 
@@ -109,8 +103,26 @@ class MinimapPrefs(PropertyGroup):
         description="Minimap height in pixels",
         default=128,
         min=64,
-        max=600,
+        # soft_max=600,
         subtype="PIXEL",
+    )
+
+    max_width_pct: IntProperty(
+        name="Max Width %",
+        description="Maximum minimap width as percentage of the safe region width",
+        default=30,
+        min=10,
+        max=100,
+        subtype="PERCENTAGE",
+    )
+
+    max_height_pct: IntProperty(
+        name="Max Height %",
+        description="Maximum minimap height as percentage of the safe region height",
+        default=40,
+        min=10,
+        max=100,
+        subtype="PERCENTAGE",
     )
 
     opacity: FloatProperty(
@@ -135,11 +147,11 @@ class MinimapPrefs(PropertyGroup):
     )
 
     node_label_mode: EnumProperty(
-        name="Label Mode",
+        name="",
         description="How to display node labels in the minimap",
         items=[
-            ("COMPACT", "Initials", "Display abbreviated initials"),
-            ("FULL", "Full Name", "Display full name split across lines"),
+            ("COMPACT", "Compact", "Display abbreviated initials"),
+            ("FULL", "Name", "Display full name split across lines"),
         ],
         default="COMPACT",
     )
@@ -153,6 +165,12 @@ class MinimapPrefs(PropertyGroup):
     show_wires: BoolProperty(
         name="Show Wires",
         description="Display node connections in the minimap",
+        default=True,
+    )
+
+    show_wire_color: BoolProperty(
+        name="Socket Wire Colors",
+        description="Color wires by the output socket type",
         default=True,
     )
 
@@ -172,19 +190,19 @@ class MinimapPrefs(PropertyGroup):
         name="Scroll Wheel",
         description="What the scroll wheel controls when hovering the minimap",
         items=[
-            ("MINIMAP", "Minimap Zoom", "Zoom the minimap's internal view"),
-            ("NODE_EDITOR", "Node Editor Zoom", "Zoom the actual node editor viewport"),
+            ("MINIMAP", "Minimap", "Zoom the minimap's internal view"),
+            ("NODE_EDITOR", "Node Editor", "Zoom the actual node editor viewport"),
         ],
         default="MINIMAP",
     )
 
 
-class NodesMinimapAddonPreferences(AddonPreferences):
+class NODES_MINIMAP_AddonPreferences(AddonPreferences):
     """Add-on preferences for Nodes Minimap."""
 
     bl_idname = __package__
 
-    settings: PointerProperty(type=MinimapPrefs)
+    settings: PointerProperty(type=NODES_MINIMAP_PG_settings)
 
     logging_enabled: BoolProperty(
         name="Enable Console Logging",
@@ -196,9 +214,9 @@ class NodesMinimapAddonPreferences(AddonPreferences):
     logging_level: EnumProperty(
         name="Log Level",
         items=[
-            ("INFO", "Info", "+ Major events and state changes"),
-            ("DEBUG", "Debug", "+ Detailed operational information"),
-            ("TRACE", "Verbose", "+ Performance timing and cache operations"),
+            ("INFO", "Info", "Major events and state changes"),
+            ("DEBUG", "Debug", "Detailed operational information"),
+            ("TRACE", "Verbose", "Performance timing and cache operations"),
         ],
         default="INFO",
         update=lambda self, context: _update_logger_from_prefs(),
@@ -209,9 +227,6 @@ class NodesMinimapAddonPreferences(AddonPreferences):
         layout.use_property_split = True
         layout.use_property_decorate = False
 
-        layout.label(text="Mini Map")
-        layout.prop(self.settings, "show_by_default")
-
         layout.label(text="Development")
         row = layout.row(align=True, heading="Console Logging")
         row.prop(self, "logging_enabled", text="")
@@ -221,7 +236,6 @@ class NodesMinimapAddonPreferences(AddonPreferences):
 
 
 classes = (
-    CAMGRID_PG_scene,
-    MinimapPrefs,
-    NodesMinimapAddonPreferences,
+    NODES_MINIMAP_PG_settings,
+    NODES_MINIMAP_AddonPreferences,
 )

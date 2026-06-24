@@ -159,6 +159,11 @@ class NODES_MINIMAP_OT_navigate(Operator):
                         self._resize_start_values = None
                         context.window.cursor_modal_set("DEFAULT")
                         self._last_cursor = ""
+                        st = _state()
+                        st["width_clamped"] = False
+                        st["height_clamped"] = False
+                        st["hovered_handle"] = None
+                        redraw_ui("NODE_EDITOR")
                         return {"RUNNING_MODAL"}
                     if self._dragging:
                         self._dragging = False
@@ -208,6 +213,7 @@ class NODES_MINIMAP_OT_navigate(Operator):
             case "MOUSEMOVE":
                 if self._resize_handle:
                     self._resize_apply_delta(context, event)
+                    redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
                 if not self._dragging and not self._mmb_dragging and not self._drag_start:
                     self._update_cursor(context, event)
@@ -244,15 +250,33 @@ class NODES_MINIMAP_OT_navigate(Operator):
 
             case "WHEELUPMOUSE" | "WHEELDOWNMOUSE":
                 if in_minimap:
+                    if event.ctrl or event.shift:
+                        space = context.space_data
+                        region = context.region
+                        visible = _get_visible_rect(space, region)
+                        if visible:
+                            vw = visible[2] - visible[0]
+                            vh = visible[3] - visible[1]
+                            scroll_factor = 0.05
+                            direction = 1 if event.type == "WHEELUPMOUSE" else -1
+                            pan_x = int(vw * scroll_factor * -direction) if event.ctrl else 0
+                            pan_y = int(vh * scroll_factor * direction) if event.shift else 0
+                            try:
+                                bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                            except RuntimeError:
+                                pass
+                        redraw_ui("NODE_EDITOR")
+                        return {"RUNNING_MODAL"}
+
                     prefs = addon.preferences.settings if addon else None
                     scroll_mode = getattr(prefs, "scroll_wheel_mode", "MINIMAP") if prefs else "MINIMAP"
                     if scroll_mode == "NODE_EDITOR":
                         try:
-                            factor = 0.1
+                            zoom_factor = 0.05
                             if event.type == "WHEELUPMOUSE":
-                                bpy.ops.view2d.zoom_in(zoomfacx=factor, zoomfacy=factor)
+                                bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
                             else:
-                                bpy.ops.view2d.zoom_out(zoomfacx=-factor, zoomfacy=-factor)
+                                bpy.ops.view2d.zoom_out(zoomfacx=-zoom_factor, zoomfacy=-zoom_factor)
                         except RuntimeError:
                             pass
                     else:
@@ -374,9 +398,18 @@ class NODES_MINIMAP_OT_navigate(Operator):
             if self._last_cursor:
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
+            old_handle = st.get("hovered_handle")
+            st["hovered_handle"] = None
+            if old_handle:
+                redraw_ui("NODE_EDITOR")
             return
         handle = self._get_handle_at(context, event)
-        cursor = _CURSOR_MAP.get(handle, "DEFAULT")
+        old_handle = st.get("hovered_handle")
+        st["hovered_handle"] = handle
+        if handle != old_handle:
+            redraw_ui("NODE_EDITOR")
+        is_clamped = handle and (st.get("width_clamped") or st.get("height_clamped"))
+        cursor = "HAND" if is_clamped else _CURSOR_MAP.get(handle, "DEFAULT")
         if cursor != self._last_cursor:
             context.window.cursor_modal_set(cursor)
             self._last_cursor = cursor
@@ -404,8 +437,8 @@ class NODES_MINIMAP_OT_navigate(Operator):
 
         ui_scale = _get_ui_scale()
         sx, sy, ex, ey = _get_safe_bounds(context.area, context.region, context.space_data, corner)
-        max_w = max(64, min(800, int(ex - sx - 10 * ui_scale)))
-        max_h = max(64, min(600, int(ey - sy - 35 * ui_scale)))
+        max_w = max(64, int(ex - sx - 10 * ui_scale))
+        max_h = max(64, int(ey - sy - 35 * ui_scale))
 
         if self._resize_handle in ("W", "C"):
             if corner in ("TOP_RIGHT", "BOTTOM_RIGHT"):
@@ -421,7 +454,15 @@ class NODES_MINIMAP_OT_navigate(Operator):
                 new_h = max(64, min(max_h, int(h0 + dy / ui_scale)))
             settings.minimap_height = new_h
 
-        redraw_ui("NODE_EDITOR")
+        # Detect percentage clamp for visual feedback
+        safe_w = ex - sx
+        safe_h = ey - sy
+        max_mw_pct = getattr(settings, "max_width_pct", 30) / 100.0
+        max_mh_pct = getattr(settings, "max_height_pct", 40) / 100.0
+        st = _state()
+        st["hovered_handle"] = self._resize_handle
+        st["width_clamped"] = settings.minimap_width * ui_scale > safe_w * max_mw_pct
+        st["height_clamped"] = settings.minimap_height * ui_scale > safe_h * max_mh_pct
 
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":
@@ -437,6 +478,9 @@ class NODES_MINIMAP_OT_navigate(Operator):
         st = _state(self._area_ptr)
         st["modal_active"] = False
         st["modal_area_ptr"] = 0
+        st["width_clamped"] = False
+        st["height_clamped"] = False
+        st["hovered_handle"] = None
 
 
 classes = (

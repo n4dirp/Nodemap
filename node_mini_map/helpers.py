@@ -14,6 +14,7 @@ OUTLINE_ALPHA: float = 0.8
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
+    """Redraw all areas matching the given mode, or a specific area by pointer."""
     ctx = bpy.context
     if not ctx or not ctx.window_manager:
         return
@@ -31,6 +32,7 @@ def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
 
 
 def _theme(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
+    """Resolve a dotted theme attribute path to a color tuple, falling back to default."""
     prefs = bpy.context.preferences
     if not prefs.themes:
         return default
@@ -49,6 +51,7 @@ def _theme(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
 
 
 def _theme_float(path: str, default: float) -> float:
+    """Resolve a dotted theme attribute path to a float value, falling back to default."""
     prefs = bpy.context.preferences
     if not prefs.themes:
         return default
@@ -62,6 +65,8 @@ def _theme_float(path: str, default: float) -> float:
 
 
 def _srgb_to_linear(c: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """Convert an sRGB color tuple to linear color space."""
+
     def _conv(ch: float) -> float:
         return ch / 12.92 if ch <= 0.04045 else ((ch + 0.055) / 1.055) ** 2.4
 
@@ -69,21 +74,25 @@ def _srgb_to_linear(c: tuple[float, float, float, float]) -> tuple[float, float,
 
 
 def _rgba(value: tuple[float, ...], alpha: float) -> tuple[float, float, float, float]:
+    """Convert a multi-channel tuple to RGBA using the given alpha."""
     return (float(value[0]), float(value[1]), float(value[2]), float(alpha))
 
 
 def _get_ui_scale() -> float:
+    """Return the Blender UI scale factor from preferences."""
     return float(bpy.context.preferences.system.ui_scale)
 
 
 def _compute_outline_color(rgb: tuple[float, ...]) -> tuple[float, float, float, float]:
+    """Compute black or white outline based on luminance of the given color."""
     luminance = rgb[0] * LUMINANCE_R + rgb[1] * LUMINANCE_G + rgb[2] * LUMINANCE_B
     if luminance > 0.5:
         return (0.0, 0.0, 0.0, OUTLINE_ALPHA)
     return (1.0, 1.0, 1.0, OUTLINE_ALPHA)
 
 
-def color_contrast(color: tuple[float, ...], factor: float = 0.85) -> tuple[float, float, float, float]:
+def _color_contrast(color: tuple[float, ...], factor: float = 0.85) -> tuple[float, float, float, float]:
+    """Darken a color by the given factor to produce a contrast variant."""
     return (float(color[0] * factor), float(color[1] * factor), float(color[2] * factor), 1.0)
 
 
@@ -107,7 +116,8 @@ _COLOR_TAG_TO_THEME_ATTR: dict[str, str] = {
 }
 
 
-def _get_node_color(node, fallback_color: tuple[float, ...]) -> tuple[float, ...]:
+def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> tuple[float, ...]:
+    """Return the node's custom color, theme-mapped color_tag color, or fallback."""
     if getattr(node, "use_custom_color", False):
         return _rgba(node.color, fallback_color[3])
     color_tag = getattr(node, "color_tag", "NONE")
@@ -124,6 +134,7 @@ def _get_safe_bounds(
     space: bpy.types.SpaceNodeEditor | None = None,
     corner: str = "TOP_RIGHT",
 ) -> tuple[int, int, int, int]:
+    """Compute drawable region bounds excluding toolbars, shelves, headers, and UI panels."""
     left = 0
     bottom = 0
     right = region.width
@@ -167,6 +178,7 @@ _DEFAULT_STATE: dict = {
 
 
 def _state(area_ptr: int | None = None) -> dict:
+    """Return the minimap state dict for the given area, initializing defaults if needed."""
     if area_ptr is None:
         try:
             area_ptr = bpy.context.area.as_pointer()
@@ -184,8 +196,10 @@ def _state(area_ptr: int | None = None) -> dict:
     return _minimap_state[area_ptr]
 
 
-def _get_node_dims(node) -> tuple[float, float]:
+def _get_node_dims(node: bpy.types.Node) -> tuple[float, float]:
     """Robust extraction of width and height ensuring positive float values."""
+    if getattr(node, "hide", False):
+        return 100.0, 30.0
     try:
         dims = node.dimensions
         w = abs(dims[0])
@@ -207,6 +221,7 @@ def _get_node_dims(node) -> tuple[float, float]:
 
 
 def _get_node_tree_bounds(nodes: bpy.types.Nodes) -> tuple[float, float, float, float]:
+    """Compute the bounding box of all nodes in a node tree as (min_x, min_y, max_x, max_y)."""
     min_x = min_y = float("inf")
     max_x = max_y = float("-inf")
     for node in nodes:
@@ -250,7 +265,7 @@ def _get_minimap_transform() -> tuple[float, float, float, float, float]:
     return cx, cy, scale, tree_cx, tree_cy
 
 
-def _find_node_at(nodes, tree_x: float, tree_y: float) -> object | None:
+def _find_node_at(nodes: bpy.types.Nodes, tree_x: float, tree_y: float) -> bpy.types.Node | None:
     """Accurately finds hovered node via true box intersection, favoring top-level over frames."""
     best_node = None
     for node in nodes:
@@ -269,6 +284,7 @@ def _find_node_at(nodes, tree_x: float, tree_y: float) -> object | None:
 def _get_visible_rect(
     space: bpy.types.SpaceNodeEditor, region: bpy.types.Region
 ) -> tuple[float, float, float, float] | None:
+    """Return the visible viewport rectangle in tree coordinates, or None if unavailable."""
     try:
         w, h = region.width, region.height
         vr = region.view2d
@@ -297,13 +313,15 @@ def _get_visible_rect(
 
 
 def _theme_rgba(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
+    """Resolve a dotted theme attribute path to an RGBA tuple, ensuring 4 channels."""
     result = _theme(path, default)
     if len(result) == 3:
         return result + (1.0,)
     return result
 
 
-def _get_node_editor_theme_colors():
+def _get_node_editor_theme_colors() -> dict[str, Any]:
+    """Fetch theme color palette for the minimap drawing."""
     return {
         "bg": _theme_rgba("node_editor.node_backdrop", (0.22, 0.22, 0.22, 0.85)),
         "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),

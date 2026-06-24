@@ -10,6 +10,7 @@ from bpy.types import SpaceNodeEditor
 from .minimap_draw import draw_minimap
 from .minimap_ops import classes as operator_classes
 from .panels import classes as panel_classes
+from .panels import draw_minimap_header_button
 from .preferences import _update_logger_from_prefs
 from .preferences import classes as prefs_classes
 
@@ -39,6 +40,7 @@ def register():
         "POST_PIXEL",
     )
 
+    bpy.types.NODE_HT_header.append(draw_minimap_header_button)
     _update_logger_from_prefs()
 
 
@@ -50,6 +52,11 @@ def unregister():
         except (ValueError, RuntimeError):
             pass
         _draw_handler = None
+
+    try:
+        bpy.types.NODE_HT_header.remove(draw_minimap_header_button)
+    except (ValueError, RuntimeError):
+        pass
 
     for cls in reversed(classes):
         try:

@@ -1,15 +1,15 @@
-"""Node Editor minimap settings in the sidebar View tab."""
+"""Node Editor minimap popover in the topbar."""
 
 from bpy.types import Panel
 
 from .helpers import _state
 
 
-class NODES_MINIMAP_PT_panel(Panel):
+class NODES_MINIMAP_PT_popup(Panel):
+    bl_label = "Network Viewer"
     bl_space_type = "NODE_EDITOR"
-    bl_region_type = "UI"
-    bl_category = "Mini Map"
-    bl_label = "Node Mini Map"
+    bl_region_type = "HEADER"
+    bl_ui_units_x = 12
 
     @classmethod
     def poll(cls, context):
@@ -21,85 +21,71 @@ class NODES_MINIMAP_PT_panel(Panel):
         layout.use_property_decorate = False
         overlay = context.space_data.overlay
         layout.enabled = overlay.show_overlays
-
-        st = _state()
-
-        layout.operator("node_mini_map.toggle", text="Mini Map", depress=st.get("enabled", True), icon="META_PLANE")
-
-
-class NODES_MINIMAP_PT_appearance(Panel):
-    bl_space_type = "NODE_EDITOR"
-    bl_region_type = "UI"
-    bl_category = "Mini Map"
-    bl_parent_id = "NODES_MINIMAP_PT_panel"
-    bl_label = "Appearance"
-
-    @classmethod
-    def poll(cls, context):
-        return context.space_data.type == "NODE_EDITOR"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        overlay = context.space_data.overlay
-        layout.enabled = overlay.show_overlays
-
         prefs = context.preferences.addons.get(__package__).preferences
         settings = prefs.settings
 
-        col = layout.column(align=True)
-        col.prop(settings, "position", text="Alignment", expand=False)
+        layout.label(text="Network Viewer")
+        layout.prop(settings, "show_by_default")
 
-        col = layout.column(align=True)
-        col.prop(settings, "minimap_width", text="Size X")
-        col.prop(settings, "minimap_height", text="Y")
+        header, body = layout.panel("appearance", default_closed=False)
+        header.label(text="Appearance")
+        if body:
+            body.use_property_split = True
+            body.use_property_decorate = False
 
-        layout.prop(settings, "opacity", text="Opacity", slider=True)
+            col = body.column(align=True)
+            col.prop(settings, "position", text="Alignment", expand=False)
 
-        row = layout.row(align=True, heading="Node Labels")
-        row.prop(settings, "show_names", text="")
-        sub = row.row(align=True)
-        sub.active = settings.show_names
-        sub.prop(settings, "node_label_mode", text="")
+            col = body.column(align=True)
+            col.prop(settings, "minimap_width", text="Size X")
+            col.prop(settings, "minimap_height", text="Y")
 
-        col = layout.column(align=True, heading="Show")
-        col.prop(settings, "colored_nodes", text="Colored Nodes")
-        col.prop(settings, "show_wires", text="Node Wires")
-        col.prop(settings, "show_node_count", text="Total Count")
+            col = body.column(align=True)
+            col.prop(settings, "max_width_pct", text="Max Width %")
+            col.prop(settings, "max_height_pct", text="Max Height %")
 
+            body.prop(settings, "opacity", text="Opacity", slider=True)
 
-class NODES_MINIMAP_PT_behavior(Panel):
-    bl_space_type = "NODE_EDITOR"
-    bl_region_type = "UI"
-    bl_category = "Mini Map"
-    bl_parent_id = "NODES_MINIMAP_PT_panel"
-    bl_label = "Behavior"
+            row = body.row(align=True, heading="Labels")
+            row.prop(settings, "show_names", text="")
+            sub = row.row(align=True)
+            sub.active = settings.show_names
+            sub.prop(settings, "node_label_mode", text="")
 
-    @classmethod
-    def poll(cls, context):
-        return context.space_data.type == "NODE_EDITOR"
+            col = body.column(align=True, heading="Show")
+            col.prop(settings, "colored_nodes", text="Colored Nodes")
+            col.prop(settings, "show_wires", text="Node Wires")
+            sub = col.row(align=True)
+            sub.active = settings.show_wires
+            sub.prop(settings, "show_wire_color", text="Wire Colors")
+            col.prop(settings, "show_node_count", text="Total Count")
 
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        overlay = context.space_data.overlay
-        layout.enabled = overlay.show_overlays
+        header, body = layout.panel("behavior", default_closed=False)
+        header.label(text="Behavior")
+        if body:
+            body.use_property_split = True
+            body.use_property_decorate = False
 
-        prefs = context.preferences.addons.get(__package__).preferences
-        settings = prefs.settings
-
-        col = layout.column(align=True)
-        col.prop(settings, "interactive", text="Interactive Mini Map")
-        sub = col.column(align=True)
-        sub.active = settings.interactive
-        sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
-        sub.prop(settings, "scroll_wheel_mode", text="Scroll Wheel")
+            col = body.column(align=True)
+            col.prop(settings, "interactive", text="Interactive Minimap")
+            sub = col.column()
+            sub.active = settings.interactive
+            sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+            sub.prop(settings, "scroll_wheel_mode", text="Zoom")
 
 
-classes = (
-    NODES_MINIMAP_PT_panel,
-    NODES_MINIMAP_PT_appearance,
-    NODES_MINIMAP_PT_behavior,
-)
+def draw_minimap_header_button(self, context):
+    if context.area.type != "NODE_EDITOR":
+        return
+    layout = self.layout
+    overlay = context.space_data.overlay
+    layout.enabled = overlay.show_overlays
+    row = layout.row(align=True)
+
+    st = _state()
+    row.operator("node_mini_map.toggle", text="", depress=st.get("enabled", True), icon="META_PLANE")
+
+    row.popover(panel="NODES_MINIMAP_PT_popup", text="")
+
+
+classes = (NODES_MINIMAP_PT_popup,)

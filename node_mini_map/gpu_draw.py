@@ -354,8 +354,16 @@ def _draw_filled_rounded_rect_varying(x, y, w, h, radii, color):
 
 
 def _draw_filled_rounded_rect_with_hole(
-    mx, my, mw, mh, outer_r,
-    ix, iy, iw, ih, inner_r,
+    mx,
+    my,
+    mw,
+    mh,
+    outer_r,
+    ix,
+    iy,
+    iw,
+    ih,
+    inner_r,
     color,
 ):
     if mw <= 0 or mh <= 0 or iw <= 0 or ih <= 0:
