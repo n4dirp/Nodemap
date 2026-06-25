@@ -203,7 +203,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("SELECT", "Select Node", "Select the node under the cursor"),
             ("PAN_SELECT", "Pan + Select", "Center the view and select the node"),
         ],
-        default="SELECT",
+        default="PAN",
     )
 
     right_click_action: EnumProperty(
@@ -214,7 +214,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("SELECT", "Select Node", "Select the node under the cursor"),
             ("PAN_SELECT", "Pan + Select", "Center the view and select the node"),
         ],
-        default="PAN",
+        default="SELECT",
     )
 
 

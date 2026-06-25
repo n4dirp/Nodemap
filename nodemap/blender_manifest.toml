@@ -4,6 +4,7 @@ version = "1.0.0"
 name = "Nodemap"
 tagline = "Minimap overlay for the Node Editor"
 maintainer = "Nadir Perazzo"
+website = "https://github.com/n4dirp/Nodemap"
 type = "add-on"
 tags = ["Node", "User Interface"]
 blender_version_min = "5.1.0"
