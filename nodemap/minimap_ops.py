@@ -53,43 +53,45 @@ def _get_resize_handle(st: dict, corner: str, rx: int, ry: int, ui_scale: float)
     def near(v, target):
         return target - hw <= v <= target + hw
 
-    if corner == "TOP_RIGHT":
-        on_left = mx <= rx <= mx + hw
-        on_bottom = my <= ry <= my + hw
-        if on_left and on_bottom:
-            return "C"
-        if on_left:
-            return "W"
-        if on_bottom:
-            return "H"
-    elif corner == "TOP_LEFT":
-        on_right = mx + mw - hw <= rx <= mx + mw
-        on_bottom = my <= ry <= my + hw
-        if on_right and on_bottom:
-            return "C"
-        if on_right:
-            return "W"
-        if on_bottom:
-            return "H"
-    elif corner == "BOTTOM_RIGHT":
-        on_left = mx <= rx <= mx + hw
-        on_top = my + mh - hw <= ry <= my + mh
-        if on_left and on_top:
-            return "C"
-        if on_left:
-            return "W"
-        if on_top:
-            return "H"
-    elif corner == "BOTTOM_LEFT":
-        on_right = mx + mw - hw <= rx <= mx + mw
-        on_top = my + mh - hw <= ry <= my + mh
-        if on_right and on_top:
-            return "C"
-        if on_right:
-            return "W"
-        if on_top:
-            return "H"
-    return None
+    match corner:
+        case "TOP_RIGHT":
+            on_left = mx <= rx <= mx + hw
+            on_bottom = my <= ry <= my + hw
+            if on_left and on_bottom:
+                return "C"
+            if on_left:
+                return "W"
+            if on_bottom:
+                return "H"
+        case "TOP_LEFT":
+            on_right = mx + mw - hw <= rx <= mx + mw
+            on_bottom = my <= ry <= my + hw
+            if on_right and on_bottom:
+                return "C"
+            if on_right:
+                return "W"
+            if on_bottom:
+                return "H"
+        case "BOTTOM_RIGHT":
+            on_left = mx <= rx <= mx + hw
+            on_top = my + mh - hw <= ry <= my + mh
+            if on_left and on_top:
+                return "C"
+            if on_left:
+                return "W"
+            if on_top:
+                return "H"
+        case "BOTTOM_LEFT":
+            on_right = mx + mw - hw <= rx <= mx + mw
+            on_top = my + mh - hw <= ry <= my + mh
+            if on_right and on_top:
+                return "C"
+            if on_right:
+                return "W"
+            if on_top:
+                return "H"
+        case _:
+            return None
 
 
 class NODEMAP_OT_toggle(Operator):
