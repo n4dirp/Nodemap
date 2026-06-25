@@ -419,7 +419,7 @@ def _draw_viewport_overlay(
     if hole_w > 0 and hole_h > 0:
         node_r = colors.get("node_roundness", 2.0) * ui_scale
         outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
-        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
+        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 1.0 * ui_scale)
 
 
 def _draw_node_count(

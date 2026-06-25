@@ -125,6 +125,7 @@ class NODEMAP_OT_navigate(Operator):
     _resize_start_mouse: tuple[int, int] | None = None
     _resize_start_values: tuple[int, int] | None = None
     _last_cursor: str = ""
+    _pan_acc: list[float]
 
     def modal(self, context: Context, event: Event) -> set[str]:
         if not context.area:
@@ -169,6 +170,7 @@ class NODEMAP_OT_navigate(Operator):
                     if self._dragging:
                         self._dragging = False
                         self._drag_start = None
+                        self._pan_acc = [0.0, 0.0]
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
                         if settings and settings.left_click_action in ("SELECT", "PAN_SELECT"):
@@ -221,6 +223,7 @@ class NODEMAP_OT_navigate(Operator):
                     if self._dragging:
                         self._dragging = False
                         self._drag_start = None
+                        self._pan_acc = [0.0, 0.0]
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
                         if settings and settings.right_click_action in ("SELECT", "PAN_SELECT"):
@@ -411,8 +414,12 @@ class NODEMAP_OT_navigate(Operator):
             view_zoom_x = region.width / vw if vw > 0 else 1.0
             view_zoom_y = region.height / vh if vh > 0 else 1.0
 
-            pan_x = int((dx / scale) * view_zoom_x)
-            pan_y = int((dy / scale) * view_zoom_y)
+            self._pan_acc[0] += (dx / scale) * view_zoom_x
+            self._pan_acc[1] += (dy / scale) * view_zoom_y
+            pan_x = int(self._pan_acc[0])
+            pan_y = int(self._pan_acc[1])
+            self._pan_acc[0] -= pan_x
+            self._pan_acc[1] -= pan_y
             if pan_x != 0 or pan_y != 0:
                 try:
                     bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
@@ -526,6 +533,7 @@ class NODEMAP_OT_navigate(Operator):
         if context.area.type != "NODE_EDITOR":
             return {"CANCELLED"}
         self._area_ptr = context.area.as_pointer()
+        self._pan_acc = [0.0, 0.0]
         st = _state(self._area_ptr)
         st["modal_active"] = True
         st["modal_area_ptr"] = self._area_ptr

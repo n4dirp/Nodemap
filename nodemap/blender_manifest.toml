@@ -5,6 +5,6 @@ name = "Nodemap"
 tagline = "Minimap overlay for the Node Editor"
 maintainer = "Nadir Perazzo"
 type = "add-on"
-tags = ["Node Editor", "User Interface"]
+tags = ["Node", "User Interface"]
 blender_version_min = "5.1.0"
 license = ["SPDX:GPL-3.0-or-later"]
