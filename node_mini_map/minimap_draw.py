@@ -155,6 +155,9 @@ def _draw_frame_nodes(
     font_id: int,
 ) -> None:
     """Draw frame nodes as transparent rounded rects with optional labels."""
+
+    node_r = colors.get("node_roundness", 2.0) * ui_scale
+
     for node in frames:
         w, h = _get_node_dims(node)
 
@@ -173,25 +176,24 @@ def _draw_frame_nodes(
         else:
             frame_color = colors.get("frame_node", colors["node"])
         bg_frame = (frame_color[0], frame_color[1], frame_color[2], frame_alpha)
-        _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, 2.0 * ui_scale, bg_frame)
+        _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, bg_frame)
 
         # Border: highlight hovered frames with the indicator color
-        border_col = colors["indicator"] if is_hovered else frame_color
+        border_col = colors["node_selected"] if node.select else frame_color
         border_col = (*border_col[:3], border_col[3] * master_alpha)
-        _draw_rounded_rect_border(nx, ny, nw_s, nh_s, 2.0 * ui_scale, border_col, 0.5)
+        _draw_rounded_rect_border(nx, ny, nw_s, nh_s, node_r, border_col, 0.5)
 
         # Label: centered above the frame, only if large enough
         frame_label = node.label
         if frame_label and nw_s > 20 * ui_scale and nh_s > 14 * ui_scale:
             label_font_size = max(6, min(int(11 * ui_scale), int(nh_s * 0.2)))
-            label_color = _compute_outline_color(frame_color)
-            label_color = (*label_color[:3], label_color[3] * master_alpha)
+            text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
             blf.size(font_id, label_font_size)
             tw, _ = blf.dimensions(font_id, frame_label)
             if tw < nw_s - 4 * ui_scale:
                 lx = nx + (nw_s - tw) / 2
                 ly = ny + nh_s + 2 * ui_scale
-                _draw_text_with_shadow(font_id, frame_label, lx, ly, label_color, label_font_size)
+                _draw_text_with_shadow(font_id, frame_label, lx, ly, text_color, label_font_size)
                 gpu.state.blend_set("ALPHA")
 
 
@@ -262,7 +264,7 @@ def _draw_regular_nodes(
                 _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, muted_overlay)
                 text_alpha = 0.35
 
-            #    Node label rendering
+            # Node label rendering
             node_label_mode = getattr(settings, "node_label_mode", "COMPACT")
             if getattr(settings, "show_names", True) and nw_s > 6 * ui_scale and nh_s > 6 * ui_scale:
                 label = node.label
@@ -605,7 +607,8 @@ def draw_minimap() -> None:
     gpu.state.blend_set("NONE")
 
     # Overlay: node count text
-    _draw_node_count(settings, nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
+    content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
+    _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
 
 
 def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0, use_socket_color=False):
@@ -615,7 +618,7 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
     wires between the same node pair with a perpendicular offset.
     """
     default_wire_color = (*colors["wire"][:3], colors["wire"][3] * master_alpha)
-    thickness = max(1.5, 2.0 * scale)
+    thickness = max(1, 2.0 * scale)
     spread_gap = 5.0 * scale
 
     # Group wire segments by (source_node, target_node) pair

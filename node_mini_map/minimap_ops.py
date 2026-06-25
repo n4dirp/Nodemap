@@ -146,11 +146,12 @@ class NODES_MINIMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         if addon and not getattr(addon.preferences.settings, "interactive", True):
             return {"PASS_THROUGH"}
+        settings = addon.preferences.settings if addon else None
 
         in_minimap = _is_in_minimap(event.mouse_region_x, event.mouse_region_y)
 
         match event.type:
-            case "LEFTMOUSE" | "RIGHTMOUSE":
+            case "LEFTMOUSE":
                 # --- Release ---
                 if event.value == "RELEASE":
                     if self._resize_handle:
@@ -170,8 +171,10 @@ class NODES_MINIMAP_OT_navigate(Operator):
                         self._drag_start = None
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
-                        self._handle_click_selection(context, event)
+                        if settings and settings.left_click_action in ("SELECT", "PAN_SELECT"):
+                            self._handle_click_selection(context, event)
                         self._was_in_minimap = False
+                        self._drag_start = None
                         return {"RUNNING_MODAL"}
                     self._was_in_minimap = False
                     self._drag_start = None
@@ -185,15 +188,68 @@ class NODES_MINIMAP_OT_navigate(Operator):
                             self._resize_handle = handle
                             self._resize_start_mouse = (event.mouse_region_x, event.mouse_region_y)
                             self._resize_start_values = (
-                                addon.preferences.settings.minimap_width,
-                                addon.preferences.settings.minimap_height,
+                                settings.minimap_width,
+                                settings.minimap_height,
                             )
                             cursor = _CURSOR_MAP[handle]
                             context.window.cursor_modal_set(cursor)
                             self._last_cursor = cursor
                             return {"RUNNING_MODAL"}
                     self._drag_start = (event.mouse_region_x, event.mouse_region_y)
-                    self._center_view_on_mouse(context, event.mouse_region_x, event.mouse_region_y)
+                    if settings and settings.left_click_action in ("PAN", "PAN_SELECT"):
+                        self._center_view_on_mouse(context, event.mouse_region_x, event.mouse_region_y)
+                    return {"RUNNING_MODAL"}
+                else:
+                    self._drag_start = None
+                    return {"PASS_THROUGH"}
+
+            case "RIGHTMOUSE":
+                # --- Release ---
+                if event.value == "RELEASE":
+                    if self._resize_handle:
+                        self._resize_handle = None
+                        self._resize_start_mouse = None
+                        self._resize_start_values = None
+                        context.window.cursor_modal_set("DEFAULT")
+                        self._last_cursor = ""
+                        st = _state()
+                        st["width_clamped"] = False
+                        st["height_clamped"] = False
+                        st["hovered_handle"] = None
+                        redraw_ui("NODE_EDITOR")
+                        return {"RUNNING_MODAL"}
+                    if self._dragging:
+                        self._dragging = False
+                        self._drag_start = None
+                        return {"RUNNING_MODAL"}
+                    if not self._dragging and self._was_in_minimap:
+                        if settings and settings.right_click_action in ("SELECT", "PAN_SELECT"):
+                            self._handle_click_selection(context, event)
+                        self._was_in_minimap = False
+                        self._drag_start = None
+                        return {"RUNNING_MODAL"}
+                    self._was_in_minimap = False
+                    self._drag_start = None
+                    return {"PASS_THROUGH"}
+                # --- Press ---
+                self._was_in_minimap = in_minimap
+                if self._was_in_minimap:
+                    if addon:
+                        handle = self._get_handle_at(context, event)
+                        if handle:
+                            self._resize_handle = handle
+                            self._resize_start_mouse = (event.mouse_region_x, event.mouse_region_y)
+                            self._resize_start_values = (
+                                settings.minimap_width,
+                                settings.minimap_height,
+                            )
+                            cursor = _CURSOR_MAP[handle]
+                            context.window.cursor_modal_set(cursor)
+                            self._last_cursor = cursor
+                            return {"RUNNING_MODAL"}
+                    self._drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    if settings and settings.right_click_action in ("PAN", "PAN_SELECT"):
+                        self._center_view_on_mouse(context, event.mouse_region_x, event.mouse_region_y)
                     return {"RUNNING_MODAL"}
                 else:
                     self._drag_start = None
@@ -245,6 +301,8 @@ class NODES_MINIMAP_OT_navigate(Operator):
                         if self._was_in_minimap:
                             self._pan_view(context, dx, dy)
                             self._drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    return {"RUNNING_MODAL"}
+                if in_minimap:
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 

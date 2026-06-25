@@ -41,8 +41,8 @@ class NODES_MINIMAP_PT_popup(Panel):
             col.prop(settings, "minimap_height", text="Y")
 
             col = body.column(align=True)
-            col.prop(settings, "max_width_pct", text="Max Width %")
-            col.prop(settings, "max_height_pct", text="Max Height %")
+            col.prop(settings, "max_width_pct", text="Max Region X")
+            col.prop(settings, "max_height_pct", text="Y")
 
             body.prop(settings, "opacity", text="Opacity", slider=True)
 
@@ -53,7 +53,7 @@ class NODES_MINIMAP_PT_popup(Panel):
             sub.prop(settings, "node_label_mode", text="")
 
             col = body.column(align=True, heading="Show")
-            col.prop(settings, "colored_nodes", text="Colored Nodes")
+            col.prop(settings, "colored_nodes", text="Node Colors")
             col.prop(settings, "show_wires", text="Node Wires")
             sub = col.row(align=True)
             sub.active = settings.show_wires
@@ -66,12 +66,14 @@ class NODES_MINIMAP_PT_popup(Panel):
             body.use_property_split = True
             body.use_property_decorate = False
 
-            col = body.column(align=True)
+            col = body.column()
             col.prop(settings, "interactive", text="Interactive Minimap")
             sub = col.column()
             sub.active = settings.interactive
+            sub.prop(settings, "left_click_action", text="Left Click")
+            sub.prop(settings, "right_click_action", text="Right Click")
+            sub.prop(settings, "scroll_wheel_mode", text="Scroll Wheel")
             sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
-            sub.prop(settings, "scroll_wheel_mode", text="Zoom")
 
 
 def draw_minimap_header_button(self, context):
@@ -79,12 +81,11 @@ def draw_minimap_header_button(self, context):
         return
     layout = self.layout
     overlay = context.space_data.overlay
-    layout.enabled = overlay.show_overlays
-    row = layout.row(align=True)
-
     st = _state()
-    row.operator("node_mini_map.toggle", text="", depress=st.get("enabled", True), icon="META_PLANE")
 
+    row = layout.row(align=True)
+    row.active = overlay.show_overlays
+    row.operator("node_mini_map.toggle", text="", depress=st.get("enabled", True), icon="META_PLANE")
     row.popover(panel="NODES_MINIMAP_PT_popup", text="")
 
 

@@ -90,36 +90,34 @@ class NODES_MINIMAP_PG_settings(PropertyGroup):
     )
 
     minimap_width: IntProperty(
-        name="X",
+        name="Size X",
         description="Minimap width in pixels",
         default=256,
         min=64,
-        # soft_max=800,
         subtype="PIXEL",
     )
 
     minimap_height: IntProperty(
-        name="Y",
+        name="Size Y",
         description="Minimap height in pixels",
         default=128,
         min=64,
-        # soft_max=600,
         subtype="PIXEL",
     )
 
     max_width_pct: IntProperty(
-        name="Max Width %",
+        name="Max X %",
         description="Maximum minimap width as percentage of the safe region width",
-        default=30,
+        default=75,
         min=10,
         max=100,
         subtype="PERCENTAGE",
     )
 
     max_height_pct: IntProperty(
-        name="Max Height %",
+        name="Max Y %",
         description="Maximum minimap height as percentage of the safe region height",
-        default=40,
+        default=75,
         min=10,
         max=100,
         subtype="PERCENTAGE",
@@ -131,6 +129,7 @@ class NODES_MINIMAP_PG_settings(PropertyGroup):
         default=1.0,
         min=0.1,
         max=1.0,
+        precision=3,
         subtype="FACTOR",
     )
 
@@ -150,8 +149,8 @@ class NODES_MINIMAP_PG_settings(PropertyGroup):
         name="",
         description="How to display node labels in the minimap",
         items=[
-            ("COMPACT", "Compact", "Display abbreviated initials"),
-            ("FULL", "Name", "Display full name split across lines"),
+            ("COMPACT", "Name Initials", "Display abbreviated initials"),
+            ("FULL", "Full Name", "Display full name split across lines"),
         ],
         default="COMPACT",
     )
@@ -177,7 +176,7 @@ class NODES_MINIMAP_PG_settings(PropertyGroup):
     auto_frame_selected: BoolProperty(
         name="Auto Frame Selected",
         description="Automatically frame the selected node when clicking in the minimap",
-        default=False,
+        default=True,
     )
 
     interactive: BoolProperty(
@@ -190,10 +189,32 @@ class NODES_MINIMAP_PG_settings(PropertyGroup):
         name="Scroll Wheel",
         description="What the scroll wheel controls when hovering the minimap",
         items=[
-            ("MINIMAP", "Minimap", "Zoom the minimap's internal view"),
-            ("NODE_EDITOR", "Node Editor", "Zoom the actual node editor viewport"),
+            ("MINIMAP", "Minimap Zoom", "Zoom the minimap's internal view"),
+            ("NODE_EDITOR", "Node Editor Zoom", "Zoom the actual node editor viewport"),
         ],
         default="MINIMAP",
+    )
+
+    left_click_action: EnumProperty(
+        name="Left Click",
+        description="Left click behavior in the minimap",
+        items=[
+            ("PAN", "Pan View", "Center the view on the clicked location"),
+            ("SELECT", "Select Node", "Select the node under the cursor"),
+            ("PAN_SELECT", "Pan + Select", "Center the view and select the node"),
+        ],
+        default="SELECT",
+    )
+
+    right_click_action: EnumProperty(
+        name="Right Click",
+        description="Right click behavior in the minimap",
+        items=[
+            ("PAN", "Pan View", "Center the view on the clicked location"),
+            ("SELECT", "Select Node", "Select the node under the cursor"),
+            ("PAN_SELECT", "Pan + Select", "Center the view and select the node"),
+        ],
+        default="PAN",
     )
 
 
