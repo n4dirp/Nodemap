@@ -1,4 +1,4 @@
-"""Nodes Minimap add-on preferences and logging infrastructure."""
+"""Nodemap add-on preferences and logging infrastructure."""
 
 import logging
 import time
@@ -68,7 +68,7 @@ class AddonLogFormatter(logging.Formatter):
         return f"{timestamp}  {short_name:<16} | {record.getMessage()}"
 
 
-class NODES_MINIMAP_PG_settings(PropertyGroup):
+class NODEMAP_PG_settings(PropertyGroup):
     """Preferences for the Nodes Minimap."""
 
     show_by_default: BoolProperty(
@@ -218,12 +218,12 @@ class NODES_MINIMAP_PG_settings(PropertyGroup):
     )
 
 
-class NODES_MINIMAP_AddonPreferences(AddonPreferences):
+class NODEMAP_AddonPreferences(AddonPreferences):
     """Add-on preferences for Nodes Minimap."""
 
     bl_idname = __package__
 
-    settings: PointerProperty(type=NODES_MINIMAP_PG_settings)
+    settings: PointerProperty(type=NODEMAP_PG_settings)
 
     logging_enabled: BoolProperty(
         name="Enable Console Logging",
@@ -257,6 +257,6 @@ class NODES_MINIMAP_AddonPreferences(AddonPreferences):
 
 
 classes = (
-    NODES_MINIMAP_PG_settings,
-    NODES_MINIMAP_AddonPreferences,
+    NODEMAP_PG_settings,
+    NODEMAP_AddonPreferences,
 )

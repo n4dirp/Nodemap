@@ -1,5 +1,5 @@
-# Node Mini Map - Blender Extension
-# Mini Map overlay for the Node Editor
+# Nodemap - Blender Extension
+# Minimap overlay for the Node Editor
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import logging

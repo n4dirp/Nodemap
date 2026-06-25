@@ -1,12 +1,12 @@
-"""Node Editor minimap popover in the topbar."""
+"""Nodemap popover in the topbar."""
 
 from bpy.types import Panel
 
 from .helpers import _state
 
 
-class NODES_MINIMAP_PT_popup(Panel):
-    bl_label = "Network Viewer"
+class NODEMAP_PT_popup(Panel):
+    bl_label = "Nodemap"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
     bl_ui_units_x = 12
@@ -24,7 +24,7 @@ class NODES_MINIMAP_PT_popup(Panel):
         prefs = context.preferences.addons.get(__package__).preferences
         settings = prefs.settings
 
-        layout.label(text="Network Viewer")
+        layout.label(text="Nodemap")
         layout.prop(settings, "show_by_default")
 
         header, body = layout.panel("appearance", default_closed=False)
@@ -85,8 +85,8 @@ def draw_minimap_header_button(self, context):
 
     row = layout.row(align=True)
     row.active = overlay.show_overlays
-    row.operator("node_mini_map.toggle", text="", depress=st.get("enabled", True), icon="META_PLANE")
-    row.popover(panel="NODES_MINIMAP_PT_popup", text="")
+    row.operator("nodemap.toggle", text="", depress=st.get("enabled", True), icon="META_PLANE")
+    row.popover(panel="NODEMAP_PT_popup", text="")
 
 
-classes = (NODES_MINIMAP_PT_popup,)
+classes = (NODEMAP_PT_popup,)

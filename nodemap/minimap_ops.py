@@ -92,11 +92,11 @@ def _get_resize_handle(st: dict, corner: str, rx: int, ry: int, ui_scale: float)
     return None
 
 
-class NODES_MINIMAP_OT_toggle(Operator):
+class NODEMAP_OT_toggle(Operator):
     """Toggle the minimap overlay on and off."""
 
-    bl_idname = "node_mini_map.toggle"
-    bl_label = "Toggle Minimap"
+    bl_idname = "nodemap.toggle"
+    bl_label = "Toggle Nodemap"
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
@@ -106,11 +106,11 @@ class NODES_MINIMAP_OT_toggle(Operator):
         return {"FINISHED"}
 
 
-class NODES_MINIMAP_OT_navigate(Operator):
+class NODEMAP_OT_navigate(Operator):
     """Navigate the Node Editor view via the minimap."""
 
-    bl_idname = "node_mini_map.navigate"
-    bl_label = "Minimap Navigate"
+    bl_idname = "nodemap.navigate"
+    bl_label = "Nodemap Navigate"
     bl_options = {"INTERNAL"}
 
     _drag_start: tuple[int, int] | None = None
@@ -542,6 +542,6 @@ class NODES_MINIMAP_OT_navigate(Operator):
 
 
 classes = (
-    NODES_MINIMAP_OT_toggle,
-    NODES_MINIMAP_OT_navigate,
+    NODEMAP_OT_toggle,
+    NODEMAP_OT_navigate,
 )

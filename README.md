@@ -1,4 +1,4 @@
-# Nodes Minimap
+# Nodemap
 
 Minimap overlay for the Blender Node Editor.
 
@@ -16,7 +16,7 @@ Minimap overlay for the Blender Node Editor.
 ## Build from Source
 
 ```bash
-git clone https://github.com/n4dirp/NodesMinimap.git
-cd "Nodes Minimap/nodes_minimap"
+git clone https://github.com/n4dirp/Nodemap.git
+cd "Nodemap/nodemap"
 blender --command extension build
 ```

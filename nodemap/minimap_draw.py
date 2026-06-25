@@ -466,7 +466,7 @@ def draw_minimap() -> None:
     if getattr(settings, "interactive", True):
         if not st.get("modal_active", False):
             try:
-                bpy.ops.node_mini_map.navigate("INVOKE_DEFAULT")
+                bpy.ops.nodemap.navigate("INVOKE_DEFAULT")
             except RuntimeError:
                 pass
 

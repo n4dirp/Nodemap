@@ -1,8 +1,8 @@
 schema_version = "1.0.0"
-id = "node_mini_map"
+id = "nodemap"
 version = "1.0.0"
-name = "Node Mini Map"
-tagline = "Overview map overlay for the Node Editor"
+name = "Nodemap"
+tagline = "Minimap overlay for the Node Editor"
 maintainer = "Nadir Perazzo"
 type = "add-on"
 tags = ["Node Editor", "User Interface"]

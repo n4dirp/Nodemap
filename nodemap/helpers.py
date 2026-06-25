@@ -1,4 +1,4 @@
-"""Shared helper utilities for nodes minimap."""
+"""Shared helper utilities for node minimap."""
 
 import logging
 from typing import Any
