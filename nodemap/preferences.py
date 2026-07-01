@@ -125,7 +125,7 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     opacity: FloatProperty(
         name="Opacity",
-        description="Background opacity of the minimap",
+        description="Adjusts the overall opacity of the minimap",
         default=1.0,
         min=0.1,
         max=1.0,
@@ -145,19 +145,25 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
     )
 
+    show_frame_labels: BoolProperty(
+        name="Show Frame Labels",
+        description="Display labels above frame nodes in the minimap",
+        default=True,
+    )
+
     node_label_mode: EnumProperty(
         name="",
-        description="How to display node labels in the minimap",
+        description="How labels appear in the minimap",
         items=[
-            ("COMPACT", "Name Initials", "Display abbreviated initials"),
             ("FULL", "Full Name", "Display full name split across lines"),
+            ("COMPACT", "Name Initials", "Display abbreviated initials"),
         ],
         default="COMPACT",
     )
 
     colored_nodes: BoolProperty(
         name="Colored Nodes",
-        description="Use node custom colors and color tags; when disabled all nodes use the theme default",
+        description="Use custom node colors and color tags",
         default=True,
     )
 
@@ -173,9 +179,15 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
     )
 
+    show_socket_indicators: BoolProperty(
+        name="Socket Indicators",
+        description="Display colored indicator pills on node sockets",
+        default=False,
+    )
+
     auto_frame_selected: BoolProperty(
         name="Auto Frame Selected",
-        description="Automatically frame the selected node when clicking in the minimap",
+        description="Automatically frame the selected node",
         default=True,
     )
 
@@ -189,10 +201,16 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Scroll Wheel",
         description="What the scroll wheel controls when hovering the minimap",
         items=[
-            ("MINIMAP", "Minimap Zoom", "Zoom the minimap's internal view"),
             ("NODE_EDITOR", "Node Editor Zoom", "Zoom the actual node editor viewport"),
+            ("MINIMAP", "Minimap Zoom", "Zoom the minimap's internal view"),
         ],
-        default="MINIMAP",
+        default="NODE_EDITOR",
+    )
+
+    follow_view: BoolProperty(
+        name="Follow View",
+        description="Keep the editor viewport inside the minimap by adjusting the minimap pan automatically",
+        default=False,
     )
 
     left_click_action: EnumProperty(

@@ -6,7 +6,7 @@ from .helpers import _state
 
 
 class NODEMAP_PT_popup(Panel):
-    bl_label = "Nodemap"
+    bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
     bl_ui_units_x = 12
@@ -34,7 +34,7 @@ class NODEMAP_PT_popup(Panel):
             body.use_property_decorate = False
 
             col = body.column(align=True)
-            col.prop(settings, "position", text="Alignment", expand=False)
+            col.prop(settings, "position", text="Alignment")
 
             col = body.column(align=True)
             col.prop(settings, "minimap_width", text="Size X")
@@ -46,19 +46,23 @@ class NODEMAP_PT_popup(Panel):
 
             body.prop(settings, "opacity", text="Opacity", slider=True)
 
-            row = body.row(align=True, heading="Labels")
+            body.prop(settings, "show_node_count", text="Node Count")
+
+            col = body.column(heading="Node Labels")
+            row = col.row(align=True, heading="")
             row.prop(settings, "show_names", text="")
             sub = row.row(align=True)
             sub.active = settings.show_names
-            sub.prop(settings, "node_label_mode", text="")
+            sub.prop(settings, "node_label_mode", text="", expand=False)
+            col.prop(settings, "show_frame_labels", text="Frame Labels")
 
-            col = body.column(align=True, heading="Show")
+            # col = body.column(align=True, heading="Show")
             col.prop(settings, "colored_nodes", text="Node Colors")
+            col.prop(settings, "show_socket_indicators", text="Node Sockets")
             col.prop(settings, "show_wires", text="Node Wires")
             sub = col.row(align=True)
-            sub.active = settings.show_wires
+            sub.active = settings.show_wires | settings.show_socket_indicators
             sub.prop(settings, "show_wire_color", text="Wire Colors")
-            col.prop(settings, "show_node_count", text="Total Count")
 
         header, body = layout.panel("behavior", default_closed=False)
         header.label(text="Behavior")
@@ -72,8 +76,9 @@ class NODEMAP_PT_popup(Panel):
             sub.active = settings.interactive
             sub.prop(settings, "left_click_action", text="Left Click")
             sub.prop(settings, "right_click_action", text="Right Click")
-            sub.prop(settings, "scroll_wheel_mode", text="Scroll Wheel")
+            sub.row().prop(settings, "scroll_wheel_mode", text="Wheel Scroll")
             sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+            sub.prop(settings, "follow_view", text="Follow View")
 
 
 def draw_minimap_header_button(self, context):

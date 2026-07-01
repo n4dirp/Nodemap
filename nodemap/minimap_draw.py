@@ -16,6 +16,7 @@ from .gpu_draw import (
     _draw_text_with_shadow,
 )
 from .helpers import (
+    _clamp_pan_to_viewport,
     _compute_outline_color,
     _get_minimap_transform,
     _get_node_color,
@@ -185,7 +186,12 @@ def _draw_frame_nodes(
 
         # Label: centered above the frame, only if large enough
         frame_label = node.label
-        if frame_label and nw_s > 20 * ui_scale and nh_s > 14 * ui_scale:
+        if (
+            frame_label
+            and getattr(settings, "show_frame_labels", True)
+            and nw_s > 20 * ui_scale
+            and nh_s > 14 * ui_scale
+        ):
             label_font_size = max(6, min(int(11 * ui_scale), int(nh_s * 0.2)))
             text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
             blf.size(font_id, label_font_size)
@@ -211,17 +217,22 @@ def _draw_regular_nodes(
     ui_scale: float,
     bg_color: tuple[float, float, float, float],
     font_id: int,
+    show_socket_indicators: bool = False,
+    use_socket_color: bool = True,
 ) -> None:
     """Draw regular nodes with fill, border, label, and mute overlay."""
-    node_r = colors.get("node_roundness", 2.0) * ui_scale
+    node_r = colors.get("node_roundness", 2.0) * ui_scale * (scale * 2)
     min_dim = 3.0 * ui_scale
 
     for node in regular_nodes:
+        if node.type == "REROUTE":
+            continue
+
         w, h = _get_node_dims(node)
 
         # Transform node tree coords to minimap pixel coords
-        nx = cx + (node.location_absolute.x - tree_cx) * scale
-        ny = cy + (node.location_absolute.y - h - tree_cy) * scale
+        nx = round(cx + (node.location_absolute.x - tree_cx) * scale)
+        ny = round(cy + (node.location_absolute.y - h - tree_cy) * scale)
         nw_s = max(w * scale, 1.0)
         nh_s = max(h * scale, 1.0)
 
@@ -249,7 +260,7 @@ def _draw_regular_nodes(
             _draw_filled_rounded_rect(nx, ny, nw_s, nh_s, node_r, fill_color)
 
             # Border: thicker + selected color for active or hovered nodes
-            border_w = 1.0 * ui_scale if (node.select or is_hovered) else 0.5 * ui_scale
+            border_w = 0.5  # * ui_scale if (node.select or is_hovered) else 0.5 * ui_scale
             border_c = colors["node_selected"] if node.select else colors["node_border"]
             border_c = (*border_c[:3], border_c[3])
             if node.mute:
@@ -305,6 +316,37 @@ def _draw_regular_nodes(
                         _draw_text_with_shadow(font_id, initials, tx, ty, text_color, font_size)
                         gpu.state.blend_set("ALPHA")
 
+            # Socket indicator pills for this node
+            if show_socket_indicators:
+                pw = max(2.0, 8.0 * scale * ui_scale)
+                ph = max(1.0, 8.0 * scale * ui_scale)
+                default_color = (*colors["wire"][:3], master_alpha)
+                sockets = [
+                    (socket, is_output)
+                    for is_output, sock_list in [(False, node.inputs), (True, node.outputs)]
+                    if sock_list
+                    for socket in sock_list
+                    if not getattr(socket, "hide", False) and getattr(socket, "enabled", True)
+                ]
+                for socket, is_output in sockets:
+                    sx_tree, sy_tree = _get_socket_pos(node, socket, is_output)
+                    sx = cx + (sx_tree - tree_cx) * scale
+                    sy = cy + (sy_tree - tree_cy) * scale
+                    if use_socket_color:
+                        try:
+                            socket_color = socket.draw_color(bpy.context, node)
+                            color = (
+                                float(socket_color[0]),
+                                float(socket_color[1]),
+                                float(socket_color[2]),
+                                master_alpha,
+                            )
+                        except Exception:
+                            color = default_color
+                    else:
+                        color = default_color
+                    _draw_pill(sx - pw / 2, sy - ph / 2, pw, ph, color)
+
 
 def _draw_resize_handles(
     mx: float,
@@ -318,7 +360,7 @@ def _draw_resize_handles(
 ) -> None:
     """Draw full-edge resize indicators, colored orange when the percentage cap is active."""
     st = _state()
-    handle = st.get("hovered_handle")
+    handle = st.get("resize_active")
     if not handle:
         return
 
@@ -370,10 +412,10 @@ def _draw_viewport_overlay(
         return
 
     # Transform visible viewport rect from tree coords to minimap pixel coords
-    vx = cx + (visible[0] - tree_cx) * scale
-    vy = cy + (visible[1] - tree_cy) * scale
-    vw = max((visible[2] - visible[0]) * scale, 1.0)
-    vh = max((visible[3] - visible[1]) * scale, 1.0)
+    vx = round(cx + (visible[0] - tree_cx) * scale)
+    vy = round(cy + (visible[1] - tree_cy) * scale)
+    vw = round(max((visible[2] - visible[0]) * scale, 1.0))
+    vh = round(max((visible[3] - visible[1]) * scale, 1.0))
 
     # Clamp viewport rect to minimap interior
     v_left = max(vx, mx)
@@ -419,7 +461,7 @@ def _draw_viewport_overlay(
     if hole_w > 0 and hole_h > 0:
         node_r = colors.get("node_roundness", 2.0) * ui_scale
         outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
-        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 1.0 * ui_scale)
+        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
 
 
 def _draw_node_count(
@@ -443,7 +485,7 @@ def _draw_node_count(
     text_w, _ = blf.dimensions(font_id, info_text)
 
     tx = mx + (mw - text_w) / 2
-    ty = my + (FONT_SIZE * ui_scale)
+    ty = my + (FONT_SIZE * ui_scale) - 2
     text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
     _draw_text_with_shadow(font_id, info_text, tx, ty, text_color, font_size)
 
@@ -494,6 +536,8 @@ def draw_minimap() -> None:
     st["tree_bounds"] = bounds
     st["margin"] = y_margin
     st["padding"] = padding
+
+    _clamp_pan_to_viewport(space, region, st)
 
     #    Draw minimap panel
     gpu.state.blend_set("ALPHA")
@@ -560,6 +604,8 @@ def draw_minimap() -> None:
         ui_scale,
         bg_color,
         font_id,
+        show_socket_indicators=getattr(settings, "show_socket_indicators", False),
+        use_socket_color=getattr(settings, "show_wire_color", True),
     )
 
     # Layer 4: viewport extent overlay with cutout hole
@@ -611,15 +657,59 @@ def draw_minimap() -> None:
     _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
 
 
+def _get_socket_pos(node, socket, is_output):
+    """Return (x, y) in tree coordinates for a socket position.
+
+    Computes position from the node's layout geometry rather than relying
+    on the (unexposed) socket.location API.
+    """
+    w, h = _get_node_dims(node)
+
+    if node.type == "REROUTE":
+        return node.location_absolute.x + w / 2, node.location_absolute.y - h / 2
+
+    x = node.location_absolute.x + (w if is_output else 0)
+
+    visible = [
+        s
+        for s in (node.outputs if is_output else node.inputs)
+        if not getattr(s, "hide", False) and getattr(s, "enabled", True)
+    ]
+
+    if not visible:
+        return x, node.location_absolute.y - h * 0.5
+
+    try:
+        idx = visible.index(socket)
+    except (ValueError, AttributeError):
+        idx = 0
+
+    # header_h = 28
+    top_y = node.location_absolute.y
+    body_top = top_y  # - header_h
+    body_bot = top_y - h  # + 8
+
+    num = len(visible)
+    body_range = body_top - body_bot
+    if body_range <= 0 or num <= 1:
+        y = (body_top + body_bot) * 0.5
+    else:
+        y = body_top - body_range * (idx + 1) / (num + 1)
+
+    return x, y
+
+
 def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0, use_socket_color=False):
     """Draw connection lines between nodes as pill-shaped wires.
 
     Uses actual socket positions for endpoints and spreads overlapping
     wires between the same node pair with a perpendicular offset.
     """
+
+    master_alpha = master_alpha * 0.6
     default_wire_color = (*colors["wire"][:3], colors["wire"][3] * master_alpha)
-    thickness = max(1, 2.0 * scale)
-    spread_gap = 5.0 * scale
+    thickness = max(0.75, 2.0 * scale)
+    # spread_gap = 5.0 * scale
 
     # Group wire segments by (source_node, target_node) pair
     wires_by_pair: dict[tuple[str, str], list[tuple]] = {}
@@ -632,30 +722,16 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
             if not getattr(output, "is_linked", False) or not getattr(output, "links", None):
                 continue
 
-            # Resolve output socket position, fall back to node center
-            out_loc = getattr(output, "location", None)
-            if out_loc is not None:
-                out_x = node.location_absolute.x + out_loc.x
-                out_y = node.location_absolute.y - out_loc.y
-            else:
-                nw, nh = _get_node_dims(node)
-                out_x = node.location_absolute.x + nw / 2
-                out_y = node.location_absolute.y - nh / 2
+            # Compute output socket position from node layout geometry
+            out_x, out_y = _get_socket_pos(node, output, True)
 
             for link in output.links:
                 to_node = link.to_node
                 if not to_node or to_node.name not in nodes.keys() or to_node.type == "FRAME":
                     continue
 
-                # Resolve input socket position, fall back to node center
-                in_loc = getattr(link.to_socket, "location", None)
-                if in_loc is not None:
-                    in_x = to_node.location_absolute.x + in_loc.x
-                    in_y = to_node.location_absolute.y - in_loc.y
-                else:
-                    nw, nh = _get_node_dims(to_node)
-                    in_x = to_node.location_absolute.x + nw / 2
-                    in_y = to_node.location_absolute.y - nh / 2
+                # Compute input socket position from node layout geometry
+                in_x, in_y = _get_socket_pos(to_node, link.to_socket, False)
 
                 # Transform to minimap pixel coords
                 x1 = cx + (out_x - tree_cx) * scale
@@ -703,9 +779,9 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
             x1, y1, x2, y2, dx, dy, length, wire_color = wire
 
             if count > 1:
-                offset = (i - (count - 1) / 2) * spread_gap
-                ox = perp_x * offset
-                oy = perp_y * offset
+                # offset = (i - (count - 1) / 2) * spread_gap
+                ox = perp_x  # * offset
+                oy = perp_y  # * offset
             else:
                 ox = oy = 0.0
 
@@ -777,7 +853,7 @@ def _draw_minimap_scrollbars(
 
 
 def _get_node_initials(name: str) -> str:
-    """Extract 1-2 uppercase initials from a node label, falling back to '?'."""
+    """Extract 1-2 uppercase initials from a node label."""
     name = name.strip()
     if not name:
         return "?"

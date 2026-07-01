@@ -6,6 +6,7 @@ import bpy
 from bpy.types import Context, Event, Operator
 
 from .helpers import (
+    _clamp_pan_to_viewport,
     _find_node_at,
     _get_minimap_transform,
     _get_safe_bounds,
@@ -95,10 +96,10 @@ def _get_resize_handle(st: dict, corner: str, rx: int, ry: int, ui_scale: float)
 
 
 class NODEMAP_OT_toggle(Operator):
-    """Toggle the minimap overlay on and off."""
+    """Display the minimap overlay."""
 
     bl_idname = "nodemap.toggle"
-    bl_label = "Toggle Nodemap"
+    bl_label = "Show Nodemap"
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
@@ -167,6 +168,7 @@ class NODEMAP_OT_navigate(Operator):
                         st["width_clamped"] = False
                         st["height_clamped"] = False
                         st["hovered_handle"] = None
+                        st["resize_active"] = None
                         redraw_ui("NODE_EDITOR")
                         return {"RUNNING_MODAL"}
                     if self._dragging:
@@ -190,6 +192,8 @@ class NODEMAP_OT_navigate(Operator):
                         handle = self._get_handle_at(context, event)
                         if handle:
                             self._resize_handle = handle
+                            st["resize_active"] = handle
+                            redraw_ui("NODE_EDITOR")
                             self._resize_start_mouse = (event.mouse_region_x, event.mouse_region_y)
                             self._resize_start_values = (
                                 settings.minimap_width,
@@ -220,6 +224,7 @@ class NODEMAP_OT_navigate(Operator):
                         st["width_clamped"] = False
                         st["height_clamped"] = False
                         st["hovered_handle"] = None
+                        st["resize_active"] = None
                         redraw_ui("NODE_EDITOR")
                         return {"RUNNING_MODAL"}
                     if self._dragging:
@@ -243,6 +248,8 @@ class NODEMAP_OT_navigate(Operator):
                         handle = self._get_handle_at(context, event)
                         if handle:
                             self._resize_handle = handle
+                            st["resize_active"] = handle
+                            redraw_ui("NODE_EDITOR")
                             self._resize_start_mouse = (event.mouse_region_x, event.mouse_region_y)
                             self._resize_start_values = (
                                 settings.minimap_width,
@@ -295,6 +302,7 @@ class NODEMAP_OT_navigate(Operator):
                     dy = event.mouse_region_y - self._mmb_drag_start[1]
                     st["pan"][0] += dx
                     st["pan"][1] += dy
+                    _clamp_pan_to_viewport(context.space_data, context.region, st)
                     self._mmb_drag_start = (event.mouse_region_x, event.mouse_region_y)
                     redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
@@ -360,6 +368,7 @@ class NODEMAP_OT_navigate(Operator):
 
                             st["zoom"] = new_zoom
                             st["pan"] = [pan_x_new, pan_y_new]
+                            _clamp_pan_to_viewport(context.space_data, context.region, st)
                     redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
@@ -549,6 +558,7 @@ class NODEMAP_OT_navigate(Operator):
         st["width_clamped"] = False
         st["height_clamped"] = False
         st["hovered_handle"] = None
+        st["resize_active"] = None
 
 
 classes = (

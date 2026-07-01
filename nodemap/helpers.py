@@ -265,6 +265,75 @@ def _get_minimap_transform() -> tuple[float, float, float, float, float]:
     return cx, cy, scale, tree_cx, tree_cy
 
 
+def _clamp_pan_to_viewport(space, region, st) -> None:
+    """Clamp *st['pan']* so the editor viewport stays inside the minimap (follow mode).
+
+    No-op when the ``follow_view`` preference is off.
+    """
+    addon = bpy.context.preferences.addons.get(__package__)
+    if not addon or not getattr(addon.preferences.settings, "follow_view", False):
+        return
+
+    visible = _get_visible_rect(space, region)
+    if not visible:
+        return
+
+    rect = st.get("rect", (0, 0, 100, 100))
+    bounds = st.get("tree_bounds", (0, 0, 100, 100))
+    padding = st.get("padding", 6 * _get_ui_scale())
+    zoom = st.get("zoom", 1.0)
+    pan = st.get("pan", [0.0, 0.0])
+
+    mx, my, mw, mh = rect
+    inner_l = mx + padding
+    inner_b = my + padding
+    inner_r = mx + mw - padding
+    inner_t = my + mh - padding
+    inner_w = mw - 2 * padding
+    inner_h = mh - 2 * padding
+
+    bbox_w = bounds[2] - bounds[0]
+    bbox_h = bounds[3] - bounds[1]
+    base_scale = min(inner_w / max(bbox_w, 1.0), inner_h / max(bbox_h, 1.0))
+    scale = base_scale * zoom
+
+    cx = mx + padding + inner_w / 2 + pan[0]
+    cy = my + padding + inner_h / 2 + pan[1]
+    tree_cx = (bounds[0] + bounds[2]) / 2
+    tree_cy = (bounds[1] + bounds[3]) / 2
+
+    # Transform viewport corners to minimap pixel space
+    vl, vb, vr, vt = visible
+    vx = cx + (vl - tree_cx) * scale
+    vy = cy + (vb - tree_cy) * scale
+    vw = (vr - vl) * scale
+    vh = (vt - vb) * scale
+
+    dx = 0.0
+    dy = 0.0
+
+    if vw <= inner_w:
+        if vx < inner_l:
+            dx = inner_l - vx
+        elif vx + vw > inner_r:
+            dx = inner_r - (vx + vw)
+    else:
+        dx = (inner_l + inner_r) / 2 - (vx + vw / 2)
+
+    if vh <= inner_h:
+        if vy < inner_b:
+            dy = inner_b - vy
+        elif vy + vh > inner_t:
+            dy = inner_t - (vy + vh)
+    else:
+        dy = (inner_b + inner_t) / 2 - (vy + vh / 2)
+
+    if abs(dx) > 0.5:
+        st["pan"][0] += dx
+    if abs(dy) > 0.5:
+        st["pan"][1] += dy
+
+
 def _find_node_at(nodes: bpy.types.Nodes, tree_x: float, tree_y: float) -> bpy.types.Node | None:
     """Accurately finds hovered node via true box intersection, favoring top-level over frames."""
     best_node = None
