@@ -1,5 +1,7 @@
 """GPU drawing helpers for nodes minimap overlay."""
 
+import math
+
 import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
@@ -15,6 +17,7 @@ _FILL_SDF_HOLE_SHADER: gpu.types.GPUShader | None = None
 _BORDER_SDF_SHADER: gpu.types.GPUShader | None = None
 _PILL_SHADER: gpu.types.GPUShader | None = None
 _PILL_BORDER_SHADER: gpu.types.GPUShader | None = None
+_BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
 
 _FILL_VERT_SRC = """
 void main() {
@@ -117,6 +120,27 @@ void main() {
     float inner = sdRoundRect(vUv, halfSize - bw, r2);
     float dist = max(outer, -inner);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_BATCH_PILL_VERT_SRC = """
+void main() {
+    vUv = uv;
+    vHalfSize = halfSize;
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_BATCH_PILL_FRAG_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float r = min(vHalfSize.x, vHalfSize.y);
+    float dist = sdRoundRect(vUv, vHalfSize, r);
+    float alpha = 1.0 - smoothstep(-0.5, 0.5, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
 }
 """
@@ -247,6 +271,104 @@ def _get_pill_border_shader() -> gpu.types.GPUShader:
         _PILL_BORDER_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _PILL_BORDER_SHADER
+
+
+def _get_batch_pill_shader() -> gpu.types.GPUShader:
+    """Pill SDF shader taking *halfSize* as a per-vertex attribute (for batching)."""
+    global _BATCH_PILL_SHADER
+    if _BATCH_PILL_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("batch_pill_iface")
+        vert_out.smooth("VEC2", "vUv")
+        vert_out.smooth("VEC2", "vHalfSize")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_in(2, "VEC2", "halfSize")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_BATCH_PILL_VERT_SRC)
+        info.fragment_source(_BATCH_PILL_FRAG_SRC)
+        _BATCH_PILL_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _BATCH_PILL_SHADER
+
+
+def _batch_draw_pills(
+    wires: list[tuple[float, float, float, float]],
+    thickness: float,
+    color: tuple[float, float, float, float],
+) -> None:
+    """Draw multiple pill-shaped wires in a single GPU batch.
+
+    Each wire is ``(center_x, center_y, length, angle)`` in pixel-space
+    coordinates.  All wires share the same *thickness* and *color*.
+    """
+    if not wires:
+        return
+
+    shader = _get_batch_pill_shader()
+    pad = 2.0
+    hh = thickness / 2
+
+    all_pos: list[tuple[float, float, float]] = []
+    all_uv: list[tuple[float, float]] = []
+    all_half_size: list[tuple[float, float]] = []
+
+    for mx, my, length, angle in wires:
+        hw = length / 2
+        cos_a = math.cos(angle)
+        sin_a = math.sin(angle)
+
+        # Local-space corners with padding for AA margin
+        lx0 = -hw - pad
+        ly0 = -hh - pad
+        lx1 = hw + pad
+        ly1 = hh + pad
+
+        # Pre-transform corners to world space (rotate + translate)
+        all_pos.extend(
+            [
+                (mx + lx0 * cos_a - ly0 * sin_a, my + lx0 * sin_a + ly0 * cos_a, 0.0),
+                (mx + lx1 * cos_a - ly0 * sin_a, my + lx1 * sin_a + ly0 * cos_a, 0.0),
+                (mx + lx1 * cos_a - ly1 * sin_a, my + lx1 * sin_a + ly1 * cos_a, 0.0),
+                (mx + lx0 * cos_a - ly1 * sin_a, my + lx0 * sin_a + ly1 * cos_a, 0.0),
+            ]
+        )
+
+        all_uv.extend(
+            [
+                (lx0, ly0),
+                (lx1, ly0),
+                (lx1, ly1),
+                (lx0, ly1),
+            ]
+        )
+
+        all_half_size.extend([(hw, hh)] * 4)
+
+    # Build index buffer: 2 triangles per quad, 4 verts per wire
+    indices: list[tuple[int, int, int]] = []
+    for i in range(len(wires)):
+        base = i * 4
+        indices.append((base, base + 1, base + 2))
+        indices.append((base + 2, base + 3, base))
+
+    batch = batch_for_shader(
+        shader,
+        "TRIS",
+        {"pos": all_pos, "uv": all_uv, "halfSize": all_half_size},
+        indices=indices,
+    )
+
+    shader.bind()
+    shader.uniform_float(
+        "ModelViewProjectionMatrix",
+        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+    )
+    shader.uniform_float("color", _srgb_to_linear(color))
+    batch.draw(shader)
 
 
 def _theme_rgba(path: str, default: tuple[float, ...]):

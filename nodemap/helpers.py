@@ -152,8 +152,8 @@ def _get_safe_bounds(
 
     scale = _get_ui_scale()
 
-    if space and corner == "TOP_LEFT" and getattr(space.overlay, "show_overlays", False):
-        top = min(top, region.height - int(10 * scale))
+    if space and corner in ("TOP_LEFT", "TOP_RIGHT") and getattr(space.overlay, "show_overlays", False):
+        top = min(top, region.height - int(8 * scale))
 
     if space and getattr(space, "show_region_asset_shelf", False):
         bottom = max(bottom, int(10 * scale))
@@ -174,6 +174,7 @@ _DEFAULT_STATE: dict = {
     "pan": [0.0, 0.0],
     "modal_active": False,
     "enabled": True,
+    "frame_all_btn": None,
 }
 
 
@@ -318,7 +319,10 @@ def _clamp_pan_to_viewport(space, region, st) -> None:
         elif vx + vw > inner_r:
             dx = inner_r - (vx + vw)
     else:
-        dx = (inner_l + inner_r) / 2 - (vx + vw / 2)
+        if vx < inner_r - vw:
+            dx = inner_r - vw - vx
+        elif vx > inner_l:
+            dx = inner_l - vx
 
     if vh <= inner_h:
         if vy < inner_b:
@@ -326,7 +330,10 @@ def _clamp_pan_to_viewport(space, region, st) -> None:
         elif vy + vh > inner_t:
             dy = inner_t - (vy + vh)
     else:
-        dy = (inner_b + inner_t) / 2 - (vy + vh / 2)
+        if vy < inner_t - vh:
+            dy = inner_t - vh - vy
+        elif vy > inner_b:
+            dy = inner_b - vy
 
     if abs(dx) > 0.5:
         st["pan"][0] += dx
@@ -379,6 +386,69 @@ def _get_visible_rect(
     except Exception as e:
         logger.log(5, "_get_visible_rect failed: %s", e)
         return None
+
+
+def frame_all() -> None:
+    """Adjust minimap zoom/pan to frame the entire node tree.
+
+    When ``follow_view`` is enabled the editor viewport is included in the
+    fit so that clamping cannot clip nodes afterward.
+    """
+    st = _state()
+    space = bpy.context.space_data
+    region = bpy.context.region
+    if not space or not region:
+        return
+    node_tree = space.edit_tree
+    if not node_tree:
+        return
+
+    bounds = _get_node_tree_bounds(node_tree.nodes)
+    st["tree_bounds"] = bounds
+
+    addon = bpy.context.preferences.addons.get(__package__)
+    follow = addon and getattr(addon.preferences.settings, "follow_view", False)
+
+    if not follow:
+        st["zoom"] = 1.0
+        st["pan"] = [0.0, 0.0]
+        redraw_ui("NODE_EDITOR")
+        return
+
+    visible = _get_visible_rect(space, region)
+    if visible:
+        c_min_x = min(bounds[0], visible[0])
+        c_min_y = min(bounds[1], visible[1])
+        c_max_x = max(bounds[2], visible[2])
+        c_max_y = max(bounds[3], visible[3])
+    else:
+        c_min_x, c_min_y, c_max_x, c_max_y = bounds
+
+    rect = st.get("rect", (0, 0, 100, 100))
+    padding = st.get("padding", 6 * _get_ui_scale())
+    _, _, mw, mh = rect
+    inner_w = max(mw - 2 * padding, 1.0)
+    inner_h = max(mh - 2 * padding, 1.0)
+
+    bbox_w = max(bounds[2] - bounds[0], 1.0)
+    bbox_h = max(bounds[3] - bounds[1], 1.0)
+    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+
+    combined_w = max(c_max_x - c_min_x, 1.0)
+    combined_h = max(c_max_y - c_min_y, 1.0)
+    zoom = min(inner_w / (base_scale * combined_w), inner_h / (base_scale * combined_h), 1.0)
+
+    tree_cx = (bounds[0] + bounds[2]) / 2
+    tree_cy = (bounds[1] + bounds[3]) / 2
+    combined_cx = (c_min_x + c_max_x) / 2
+    combined_cy = (c_min_y + c_max_y) / 2
+
+    st["zoom"] = zoom
+    st["pan"] = [
+        -(combined_cx - tree_cx) * base_scale * zoom,
+        -(combined_cy - tree_cy) * base_scale * zoom,
+    ]
+    redraw_ui("NODE_EDITOR")
 
 
 def _theme_rgba(path: str, default: tuple[float, ...]) -> tuple[float, ...]:

@@ -139,6 +139,12 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
     )
 
+    show_frame_all_btn: BoolProperty(
+        name="Frame All Button",
+        description="Show a frame-all button inside the minimap when zoomed in",
+        default=False,
+    )
+
     show_names: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
@@ -182,7 +188,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_socket_indicators: BoolProperty(
         name="Socket Indicators",
         description="Display colored indicator pills on node sockets",
-        default=False,
+        default=True,
     )
 
     auto_frame_selected: BoolProperty(
@@ -199,7 +205,7 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     scroll_wheel_mode: EnumProperty(
         name="Scroll Wheel",
-        description="What the scroll wheel controls when hovering the minimap",
+        description="What the scroll wheel controls when hovering the minimap.\nAlt key to switch action",
         items=[
             ("NODE_EDITOR", "Node Editor Zoom", "Zoom the actual node editor viewport"),
             ("MINIMAP", "Minimap Zoom", "Zoom the minimap's internal view"),

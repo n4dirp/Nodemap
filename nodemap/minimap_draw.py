@@ -1,17 +1,25 @@
 """Minimap rendering in the Node Editor."""
 
+import io
 import logging
 import math
+import time
 
 import blf
 import bpy
 import gpu
-from mathutils import Matrix
+
+try:
+    import cProfile
+
+    _HAS_C_PROFILE = True
+except ImportError:
+    _HAS_C_PROFILE = False
 
 from .gpu_draw import (
+    _batch_draw_pills,
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_with_hole,
-    _draw_pill,
     _draw_rounded_rect_border,
     _draw_text_with_shadow,
 )
@@ -28,11 +36,99 @@ from .helpers import (
     _get_visible_rect,
     _state,
 )
+from .preferences import TRACE_LEVEL
 
 logger = logging.getLogger(__package__)
 
 FONT_SIZE = 11
 MAP_PADDING = 10
+FRAME_ALL_BTN_SIZE = 16
+FRAME_ALL_BTN_MARGIN = 1
+
+
+class _Timer:
+    """Context manager that logs elapsed milliseconds at TRACE level.
+
+    Becomes a no-op when TRACE logging is not enabled (zero overhead).
+    """
+
+    __slots__ = ("_name", "_start", "_active")
+
+    def __init__(self, name: str):
+        self._name = name
+        self._active = logger.isEnabledFor(TRACE_LEVEL)
+
+    def __enter__(self):
+        if self._active:
+            self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        if self._active:
+            elapsed = (time.perf_counter() - self._start) * 1000
+            logger.trace("TIMER %s: %.3f ms", self._name, elapsed)
+
+
+# Profile for N frames, then dump sorted stats via logger.trace
+_PROFILE_FRAMES = 300
+
+
+def _maybe_start_profiler(st: dict) -> None:
+    """Start cProfile if TRACE is enabled and profiling is not already active.
+
+    Stores the profiler in *st* so each area gets its own session.
+    """
+    if not _HAS_C_PROFILE:
+        return
+    if not logger.isEnabledFor(TRACE_LEVEL):
+        return
+    if st.get("_profiling_active"):
+        return
+    prefs = bpy.context.preferences.addons[__package__].preferences
+    if not getattr(prefs, "logging_enabled", False) or getattr(prefs, "logging_level", "INFO") != "TRACE":
+        return
+    try:
+        profiler = cProfile.Profile()
+        profiler.enable()
+    except ValueError:
+        st["_profiler"] = None
+        st["_profiling_active"] = False
+        return
+    st["_profiler"] = profiler
+    st["_profiling_active"] = True
+    st["_profiling_frame_count"] = 0
+    logger.trace("PROFILER: started (will dump after %d frames)", _PROFILE_FRAMES)
+
+
+def _maybe_stop_profiler(st: dict) -> None:
+    """Increment frame count; dump profile stats after *_PROFILE_FRAMES* frames."""
+    if not _HAS_C_PROFILE:
+        return
+    if not st.get("_profiling_active"):
+        return
+    st["_profiling_frame_count"] = st.get("_profiling_frame_count", 0) + 1
+    if st["_profiling_frame_count"] < _PROFILE_FRAMES:
+        return
+    profiler = st.get("_profiler")
+    if profiler is None:
+        st["_profiling_active"] = False
+        return
+    try:
+        profiler.disable()
+        profiler.create_stats()
+
+        if not profiler.stats:
+            return
+
+        s = io.StringIO()
+        sorted_funcs = sorted(profiler.stats.items(), key=lambda x: x[1][3], reverse=True)
+        for func, (cc, nc, tt, ct, callers) in sorted_funcs[:40]:
+            filename, lineno, funcname = func
+            label = f"{funcname}:{lineno}" if funcname else f"{filename}:{lineno}"
+            s.write(f"{label:<50s} {tt:8.3f}s {ct:8.3f}s {nc:6d}\n")
+        logger.trace("PROFILER: stats after %d frames\n%s", _PROFILE_FRAMES, s.getvalue())
+    finally:
+        st["_profiling_active"] = False
 
 
 def _early_exit(context, space, st) -> bool:
@@ -224,6 +320,11 @@ def _draw_regular_nodes(
     node_r = colors.get("node_roundness", 2.0) * ui_scale * (scale * 2)
     min_dim = 3.0 * ui_scale
 
+    pills_by_color: dict[tuple[float, ...], list[tuple[float, float, float, float]]] = {}
+    if show_socket_indicators:
+        pw = max(2.0, 8.0 * scale * ui_scale)
+        ph = max(2.0, 8.0 * scale * ui_scale)
+
     for node in regular_nodes:
         if node.type == "REROUTE":
             continue
@@ -316,36 +417,44 @@ def _draw_regular_nodes(
                         _draw_text_with_shadow(font_id, initials, tx, ty, text_color, font_size)
                         gpu.state.blend_set("ALPHA")
 
-            # Socket indicator pills for this node
+            # Socket indicator pills (collected by color for batched draw)
             if show_socket_indicators:
-                pw = max(2.0, 8.0 * scale * ui_scale)
-                ph = max(1.0, 8.0 * scale * ui_scale)
                 default_color = (*colors["wire"][:3], master_alpha)
-                sockets = [
-                    (socket, is_output)
-                    for is_output, sock_list in [(False, node.inputs), (True, node.outputs)]
-                    if sock_list
-                    for socket in sock_list
-                    if not getattr(socket, "hide", False) and getattr(socket, "enabled", True)
-                ]
-                for socket, is_output in sockets:
-                    sx_tree, sy_tree = _get_socket_pos(node, socket, is_output)
-                    sx = cx + (sx_tree - tree_cx) * scale
-                    sy = cy + (sy_tree - tree_cy) * scale
-                    if use_socket_color:
-                        try:
-                            socket_color = socket.draw_color(bpy.context, node)
-                            color = (
-                                float(socket_color[0]),
-                                float(socket_color[1]),
-                                float(socket_color[2]),
-                                master_alpha,
-                            )
-                        except Exception:
+                body_top = node.location_absolute.y
+                body_bot = body_top - h
+                body_range = body_top - body_bot
+                for is_output, sock_list in [(False, node.inputs), (True, node.outputs)]:
+                    visible = [s for s in sock_list if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
+                    if not visible:
+                        continue
+                    x_base = node.location_absolute.x + (w if is_output else 0)
+                    num = len(visible)
+                    for idx, socket in enumerate(visible):
+                        if body_range <= 0 or num <= 1:
+                            sy_tree = (body_top + body_bot) * 0.5
+                        else:
+                            sy_tree = body_top - body_range * (idx + 1) / (num + 1)
+                        sx = cx + (x_base - tree_cx) * scale
+                        sy = cy + (sy_tree - tree_cy) * scale
+                        if use_socket_color:
+                            try:
+                                socket_color = socket.draw_color(bpy.context, node)
+                                color = (
+                                    float(socket_color[0]),
+                                    float(socket_color[1]),
+                                    float(socket_color[2]),
+                                    master_alpha,
+                                )
+                            except Exception:
+                                color = default_color
+                        else:
                             color = default_color
-                    else:
-                        color = default_color
-                    _draw_pill(sx - pw / 2, sy - ph / 2, pw, ph, color)
+                        pills_by_color.setdefault(color, []).append((sx, sy, pw, 0.0))
+
+    # Batched socket indicator pills (one draw call per unique color)
+    if show_socket_indicators and pills_by_color:
+        for color, group in pills_by_color.items():
+            _batch_draw_pills(group, ph, color)
 
 
 def _draw_resize_handles(
@@ -426,7 +535,7 @@ def _draw_viewport_overlay(
     hole_w = v_right - v_left
     hole_h = v_top - v_bottom
 
-    overlay = (0.0, 0.0, 0.0, 0.45 * master_alpha)
+    overlay = (0.0, 0.0, 0.0, 0.5 * master_alpha)
 
     # Temporarily disable scissor so the overlay covers the full rounded panel edge
     scissor_overlay = scissor_active
@@ -460,7 +569,7 @@ def _draw_viewport_overlay(
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
         node_r = colors.get("node_roundness", 2.0) * ui_scale
-        outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
+        outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha * 0.5)
         _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
 
 
@@ -479,15 +588,21 @@ def _draw_node_count(
     if not getattr(settings, "show_node_count", True):
         return
 
-    info_text = f"{len(nodes)} Nodes"
+    info_text = f"{len(nodes)}"
     font_size = int(FONT_SIZE * ui_scale)
     blf.size(font_id, font_size)
     text_w, _ = blf.dimensions(font_id, info_text)
 
-    tx = mx + (mw - text_w) / 2
-    ty = my + (FONT_SIZE * ui_scale) - 2
-    text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
-    _draw_text_with_shadow(font_id, info_text, tx, ty, text_color, font_size)
+    pad = 1
+    tx = mx + (mw - text_w) - 10 * ui_scale
+    ty = my + (FONT_SIZE * ui_scale) - 3
+    text_color = (*colors["text"][:3], colors["text"][3] * 0.85 * master_alpha)
+
+    # btn_size = FRAME_ALL_BTN_SIZE * ui_scale
+    # panel_r = colors.get("panel_roundness", 4.0)
+    # _draw_filled_rounded_rect(tx, ty, text_w + pad * 2, btn_size, panel_r, colors["node"])
+
+    _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
 
 
 def draw_minimap() -> None:
@@ -521,115 +636,159 @@ def draw_minimap() -> None:
     if bounds[2] - bounds[0] <= 0 or bounds[3] - bounds[1] <= 0:
         return
 
+    # Start cProfile for this area (only when TRACE logging is on)
+    _maybe_start_profiler(st)
+
+    # Log active settings every frame at TRACE level
+    logger.trace(
+        "SETTINGS %d nodes | show_wires=%d show_names=%d label_mode=%s"
+        " colored_nodes=%d socket_indicators=%d wire_color=%d frame_labels=%d",
+        len(nodes),
+        getattr(settings, "show_wires", True),
+        getattr(settings, "show_names", True),
+        getattr(settings, "node_label_mode", "COMPACT"),
+        getattr(settings, "colored_nodes", True),
+        getattr(settings, "show_socket_indicators", False),
+        getattr(settings, "show_wire_color", True),
+        getattr(settings, "show_frame_labels", True),
+    )
+
     #    Compute dimensions and layout
-    ui_scale = _get_ui_scale()
-    colors = _get_node_editor_theme_colors()
-    master_alpha = getattr(settings, "opacity", 0.85)
-    corner = getattr(settings, "position", "TOP_RIGHT")
+    with _Timer("setup"):
+        ui_scale = _get_ui_scale()
+        colors = _get_node_editor_theme_colors()
+        master_alpha = getattr(settings, "opacity", 0.85)
+        corner = getattr(settings, "position", "TOP_RIGHT")
 
-    rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, st)
-    if rect is None:
-        return
-    mx, my, mw, mh, padding, y_margin = rect
+        rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, st)
+        if rect is None:
+            return
+        mx, my, mw, mh, padding, y_margin = rect
 
-    st["rect"] = (mx, my, mw, mh)
-    st["tree_bounds"] = bounds
-    st["margin"] = y_margin
-    st["padding"] = padding
+        st["rect"] = (mx, my, mw, mh)
+        st["tree_bounds"] = bounds
+        st["margin"] = y_margin
+        st["padding"] = padding
 
-    _clamp_pan_to_viewport(space, region, st)
+        _clamp_pan_to_viewport(space, region, st)
 
     #    Draw minimap panel
     gpu.state.blend_set("ALPHA")
 
-    bg_color, panel_r = _draw_background(mx, my, mw, mh, colors, master_alpha)
+    with _Timer("draw_background"):
+        bg_color, panel_r = _draw_background(mx, my, mw, mh, colors, master_alpha)
 
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
     st["scale"] = scale
 
     # Clip node/wire content to minimap interior
-    scissor_active = _setup_scissor(mx, my, mw, mh)
+    with _Timer("setup_scissor"):
+        scissor_active = _setup_scissor(mx, my, mw, mh)
 
     hovered_node_name = st.get("hovered_node")
     font_id = 0
 
     #    Draw layers back to front
-    frames = [n for n in nodes if n.type == "FRAME"]
-    regular_nodes = [n for n in nodes if n.type != "FRAME"]
-    if not getattr(settings, "show_wires", True):
-        regular_nodes = [n for n in regular_nodes if n.type != "REROUTE"]
+    with _Timer("classify"):
+        frames = [n for n in nodes if n.type == "FRAME"]
+        regular_nodes = [n for n in nodes if n.type != "FRAME"]
+        if not getattr(settings, "show_wires", True):
+            regular_nodes = [n for n in regular_nodes if n.type != "REROUTE"]
 
     # Layer 1: frame node backgrounds
-    _draw_frame_nodes(
-        frames,
-        cx,
-        cy,
-        scale,
-        tree_cx,
-        tree_cy,
-        colors,
-        settings,
-        master_alpha,
-        hovered_node_name,
-        ui_scale,
-        font_id,
-    )
+    with _Timer("draw_frames"):
+        _draw_frame_nodes(
+            frames,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            colors,
+            settings,
+            master_alpha,
+            hovered_node_name,
+            ui_scale,
+            font_id,
+        )
 
     # Layer 2: connection wires
     if getattr(settings, "show_wires", True):
-        _draw_wires(
-            nodes,
-            tree_cx,
-            tree_cy,
-            scale,
-            cx,
-            cy,
-            colors,
-            master_alpha,
-            getattr(settings, "show_wire_color", True),
-        )
+        with _Timer("draw_wires"):
+            _draw_wires(
+                nodes,
+                tree_cx,
+                tree_cy,
+                scale,
+                cx,
+                cy,
+                colors,
+                master_alpha,
+                getattr(settings, "show_wire_color", True),
+            )
 
     # Layer 3: regular (non-frame) nodes
-    _draw_regular_nodes(
-        regular_nodes,
-        cx,
-        cy,
-        scale,
-        tree_cx,
-        tree_cy,
-        colors,
-        settings,
-        master_alpha,
-        hovered_node_name,
-        ui_scale,
-        bg_color,
-        font_id,
-        show_socket_indicators=getattr(settings, "show_socket_indicators", False),
-        use_socket_color=getattr(settings, "show_wire_color", True),
-    )
+    with _Timer("draw_nodes"):
+        _draw_regular_nodes(
+            regular_nodes,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            colors,
+            settings,
+            master_alpha,
+            hovered_node_name,
+            ui_scale,
+            bg_color,
+            font_id,
+            show_socket_indicators=getattr(settings, "show_socket_indicators", False),
+            use_socket_color=getattr(settings, "show_wire_color", True),
+        )
 
     # Layer 4: viewport extent overlay with cutout hole
-    _draw_viewport_overlay(
-        space,
-        region,
-        mx,
-        my,
-        mw,
-        mh,
-        cx,
-        cy,
-        scale,
-        tree_cx,
-        tree_cy,
-        colors,
-        master_alpha,
-        panel_r,
-        ui_scale,
-        scissor_active,
-    )
+    with _Timer("draw_viewport"):
+        _draw_viewport_overlay(
+            space,
+            region,
+            mx,
+            my,
+            mw,
+            mh,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            colors,
+            master_alpha,
+            panel_r,
+            ui_scale,
+            scissor_active,
+        )
 
     # Layer 5: scrollbar thumbs when zoomed past tree bounds
-    _draw_minimap_scrollbars(
+    with _Timer("draw_scrollbars"):
+        _draw_minimap_scrollbars(
+            mx,
+            my,
+            mw,
+            mh,
+            padding,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            bounds,
+            colors,
+            ui_scale,
+            master_alpha,
+        )
+
+    # Frame-all button in the top-left corner (only when scrollbars visible)
+    _draw_frame_all_button(
         mx,
         my,
         mw,
@@ -647,14 +806,19 @@ def draw_minimap() -> None:
     )
 
     # Resize handle indicators
-    _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner)
+    with _Timer("draw_resize_handles"):
+        _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner)
 
     _teardown_scissor(scissor_active)
     gpu.state.blend_set("NONE")
 
     # Overlay: node count text
-    content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
-    _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
+    with _Timer("draw_node_count"):
+        content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
+        _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
+
+    # Stop & dump profile stats after N frames
+    _maybe_stop_profiler(st)
 
 
 def _get_socket_pos(node, socket, is_output):
@@ -702,38 +866,85 @@ def _get_socket_pos(node, socket, is_output):
 def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0, use_socket_color=False):
     """Draw connection lines between nodes as pill-shaped wires.
 
-    Uses actual socket positions for endpoints and spreads overlapping
-    wires between the same node pair with a perpendicular offset.
+    Uses actual socket positions for endpoints.  Wires are grouped by
+    color and drawn in a single GPU batch per color group.
     """
 
-    master_alpha = master_alpha * 0.6
+    master_alpha = master_alpha * 1.0
     default_wire_color = (*colors["wire"][:3], colors["wire"][3] * master_alpha)
-    thickness = max(0.75, 2.0 * scale)
-    # spread_gap = 5.0 * scale
+    thickness = max(1.0, 2.0 * scale)
 
-    # Group wire segments by (source_node, target_node) pair
-    wires_by_pair: dict[tuple[str, str], list[tuple]] = {}
+    # Precompute socket positions per node (O(N) per side, no redundant index())
+    out_pos: dict[str, dict[str, tuple[float, float]]] = {}
+    in_pos: dict[str, dict[str, tuple[float, float]]] = {}
+    for node in nodes:
+        if node.type == "FRAME":
+            continue
+        w, h = _get_node_dims(node)
+        if node.type == "REROUTE":
+            cx_n = node.location_absolute.x + w / 2
+            cy_n = node.location_absolute.y - h / 2
+            out_pos[node.name] = {s.identifier: (cx_n, cy_n) for s in node.outputs}
+            in_pos[node.name] = {s.identifier: (cx_n, cy_n) for s in node.inputs}
+        else:
+            body_top = node.location_absolute.y
+            body_bot = body_top - h
+            body_range = body_top - body_bot
+            visible_outs = [s for s in node.outputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
+            if visible_outs:
+                x_base = node.location_absolute.x + w
+                num = len(visible_outs)
+                out_dict: dict[str, tuple[float, float]] = {}
+                for idx, sock in enumerate(visible_outs):
+                    if body_range <= 0 or num <= 1:
+                        sy = (body_top + body_bot) * 0.5
+                    else:
+                        sy = body_top - body_range * (idx + 1) / (num + 1)
+                    out_dict[sock.identifier] = (x_base, sy)
+                out_pos[node.name] = out_dict
+            visible_ins = [s for s in node.inputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
+            if visible_ins:
+                x_base = node.location_absolute.x
+                num = len(visible_ins)
+                in_dict: dict[str, tuple[float, float]] = {}
+                for idx, sock in enumerate(visible_ins):
+                    if body_range <= 0 or num <= 1:
+                        sy = (body_top + body_bot) * 0.5
+                    else:
+                        sy = body_top - body_range * (idx + 1) / (num + 1)
+                    in_dict[sock.identifier] = (x_base, sy)
+                in_pos[node.name] = in_dict
+
+    # Collect wires grouped by color for batched drawing
+    wires_by_color: dict[tuple[float, ...], list[tuple[float, float, float, float]]] = {}
 
     for node in nodes:
         if node.type == "FRAME" or not getattr(node, "outputs", None):
+            continue
+        node_out_pos = out_pos.get(node.name)
+        if not node_out_pos:
             continue
 
         for output in node.outputs:
             if not getattr(output, "is_linked", False) or not getattr(output, "links", None):
                 continue
-
-            # Compute output socket position from node layout geometry
-            out_x, out_y = _get_socket_pos(node, output, True)
+            out_pos_tuple = node_out_pos.get(output.identifier)
+            if not out_pos_tuple:
+                continue
+            out_x, out_y = out_pos_tuple
 
             for link in output.links:
                 to_node = link.to_node
                 if not to_node or to_node.name not in nodes.keys() or to_node.type == "FRAME":
                     continue
+                node_in_pos = in_pos.get(to_node.name)
+                if not node_in_pos:
+                    continue
+                in_pos_tuple = node_in_pos.get(link.to_socket.identifier)
+                if not in_pos_tuple:
+                    continue
+                in_x, in_y = in_pos_tuple
 
-                # Compute input socket position from node layout geometry
-                in_x, in_y = _get_socket_pos(to_node, link.to_socket, False)
-
-                # Transform to minimap pixel coords
                 x1 = cx + (out_x - tree_cx) * scale
                 y1 = cy + (out_y - tree_cy) * scale
                 x2 = cx + (in_x - tree_cx) * scale
@@ -745,7 +956,6 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
                 if length < 0.5:
                     continue
 
-                # Resolve wire color
                 if use_socket_color:
                     try:
                         socket_color = output.draw_color(bpy.context, node)
@@ -760,40 +970,15 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
                 else:
                     wire_color = default_wire_color
 
-                pair_key = (node.name, to_node.name)
-                wires_by_pair.setdefault(pair_key, []).append((x1, y1, x2, y2, dx, dy, length, wire_color))
+                angle = math.atan2(dy, dx)
+                mx = (x1 + x2) / 2
+                my = (y1 + y2) / 2
 
-    # Draw each group, applying perpendicular spread for parallel wires
-    for group in wires_by_pair.values():
-        count = len(group)
-        if count == 0:
-            continue
+                wires_by_color.setdefault(wire_color, []).append((mx, my, length, angle))
 
-        # Perpendicular unit vector derived from the first wire's direction
-        _, _, _, _, ref_dx, ref_dy, _, _ = group[0]
-        ref_len = math.hypot(ref_dx, ref_dy) or 1
-        perp_x = -ref_dy / ref_len
-        perp_y = ref_dx / ref_len
-
-        for i, wire in enumerate(group):
-            x1, y1, x2, y2, dx, dy, length, wire_color = wire
-
-            if count > 1:
-                # offset = (i - (count - 1) / 2) * spread_gap
-                ox = perp_x  # * offset
-                oy = perp_y  # * offset
-            else:
-                ox = oy = 0.0
-
-            angle = math.atan2(dy, dx)
-            mx = (x1 + x2) / 2 + ox
-            my = (y1 + y2) / 2 + oy
-
-            gpu.matrix.push()
-            gpu.matrix.translate((mx, my, 0))
-            gpu.matrix.multiply_matrix(Matrix.Rotation(angle, 4, "Z"))
-            _draw_pill(-length / 2, -thickness / 2, length, thickness, wire_color)
-            gpu.matrix.pop()
+    # Draw one batch per unique color
+    for wire_color, group in wires_by_color.items():
+        _batch_draw_pills(group, thickness, wire_color)
 
 
 def _draw_minimap_scrollbars(
@@ -833,7 +1018,7 @@ def _draw_minimap_scrollbars(
     bar_thick = max(2, int(3 * ui_scale))
     bar_off = int(2 * ui_scale)
     min_thumb = int(6 * ui_scale)
-    scroll_color = (*colors["scroll_item"][:3], colors["scroll_item"][3] * master_alpha)
+    scroll_color = (*colors["scroll_item"][:3], colors["scroll_item"][3] * master_alpha * 0.5)
 
     # Horizontal scrollbar (bottom edge)
     if visible_w < bbox_w:
@@ -852,6 +1037,74 @@ def _draw_minimap_scrollbars(
         _draw_filled_rounded_rect(thumb_x2, thumb_y2, bar_thick, thumb_h, bar_thick * 0.5, scroll_color)
 
 
+def _draw_frame_all_button(
+    mx, my, mw, mh, padding, cx, cy, scale, tree_cx, tree_cy, bounds, colors, ui_scale, master_alpha
+):
+    """Draw a frame-all button at the top-left of the minimap inner area when scrollbars are visible."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    settings = getattr(addon.preferences, "settings", None) if addon else None
+    if not settings or not getattr(settings, "show_frame_all_btn", True):
+        _state()["frame_all_btn"] = None
+        return
+    inner_l = mx + padding
+    # inner_r = mx + mw - padding
+    # inner_b = my + padding
+    inner_t = my + mh - padding
+
+    bbox_l, bbox_b, bbox_r, bbox_t = bounds
+    bbox_w = bbox_r - bbox_l
+    bbox_h = bbox_t - bbox_b
+    if bbox_w <= 0 or bbox_h <= 0:
+        return
+
+    # tree_l = tree_cx + (inner_l - cx) / scale
+    # tree_r = tree_cx + (inner_r - cx) / scale
+    # tree_b = tree_cy + (inner_b - cy) / scale
+    # tree_t = tree_cy + (inner_t - cy) / scale
+
+    # v_left = max(bbox_l, min(bbox_r, tree_l))
+    # v_right = max(bbox_l, min(bbox_r, tree_r))
+    # v_bottom = max(bbox_b, min(bbox_t, tree_b))
+    # v_top = max(bbox_b, min(bbox_t, tree_t))
+
+    # visible_w = v_right - v_left
+    # visible_h = v_top - v_bottom
+
+    st = _state()
+    # if visible_w >= bbox_w and visible_h >= bbox_h:
+    #     st["frame_all_btn"] = None
+    #     return
+
+    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
+    margin = FRAME_ALL_BTN_MARGIN * ui_scale
+    x = inner_l + margin
+    y = inner_t - btn_size - margin
+    # r = colors.get("panel_roundness", 4.0)
+    # btn_color = (*colors["bg"][:3], colors["bg"][3] * master_alpha * 0.3)
+    ico_color = (*colors["text"][:3], colors["text"][3] * master_alpha * 0.7)
+    # _draw_filled_rounded_rect(x, y, btn_size, btn_size, 4, btn_color)
+
+    # Corner brackets icon (four brackets pointing outward)
+    i = 2 * ui_scale
+    t = max(1, int(1.5 * ui_scale))
+    arm = btn_size * 0.3
+
+    # Top-left bracket
+    _draw_filled_rounded_rect(x + i, y + i, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + i, y + i, t, arm, t * 0.5, ico_color)
+    # Top-right bracket
+    _draw_filled_rounded_rect(x + btn_size - i - arm, y + i, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + btn_size - i - t, y + i, t, arm, t * 0.5, ico_color)
+    # Bottom-left bracket
+    _draw_filled_rounded_rect(x + i, y + btn_size - i - t, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + i, y + btn_size - i - arm, t, arm, t * 0.5, ico_color)
+    # Bottom-right bracket
+    _draw_filled_rounded_rect(x + btn_size - i - arm, y + btn_size - i - t, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + btn_size - i - t, y + btn_size - i - arm, t, arm, t * 0.5, ico_color)
+
+    st["frame_all_btn"] = (x, y, btn_size, btn_size)
+
+
 def _get_node_initials(name: str) -> str:
     """Extract 1-2 uppercase initials from a node label."""
     name = name.strip()
@@ -860,7 +1113,11 @@ def _get_node_initials(name: str) -> str:
     words = name.split()
     if len(words) >= 2:
         return "".join(w[0] for w in words).upper()[:2]
-    return words[0][0].upper()
+    word = words[0]
+    for i, ch in enumerate(word):
+        if ch.isalpha():
+            return word[:i] + ch.upper()
+    return word[0].upper()
 
 
 def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: float, max_lines: int = 3) -> list[str]:
