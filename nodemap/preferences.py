@@ -4,7 +4,7 @@ import logging
 import time
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.types import AddonPreferences, PropertyGroup
 
 TRACE_LEVEL = 5
@@ -133,6 +133,22 @@ class NODEMAP_PG_settings(PropertyGroup):
         subtype="FACTOR",
     )
 
+    custom_bg_color: BoolProperty(
+        name="Custom Background",
+        description="Use a custom background color instead of the Blender theme color",
+        default=False,
+    )
+
+    bg_color: FloatVectorProperty(
+        name="Background Color",
+        description="Custom background color for the minimap overlay",
+        default=(0.1, 0.1, 0.1, 0.95),
+        size=4,
+        min=0.0,
+        max=1.0,
+        subtype="COLOR_GAMMA",
+    )
+
     show_node_count: BoolProperty(
         name="Show Node Count",
         description="Display node count at the bottom of the minimap",
@@ -141,13 +157,19 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     show_frame_all_btn: BoolProperty(
         name="Frame All Button",
-        description="Show a frame-all button inside the minimap when zoomed in",
+        description="Show a frame-all button inside the minimap",
         default=False,
     )
 
     show_names: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
+        default=True,
+    )
+
+    show_frames: BoolProperty(
+        name="Show Frames",
+        description="Display frame node backgrounds in the minimap",
         default=True,
     )
 

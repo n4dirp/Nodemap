@@ -386,6 +386,7 @@ class NODEMAP_OT_navigate(Operator):
                     scroll_mode = getattr(prefs, "scroll_wheel_mode", "MINIMAP") if prefs else "MINIMAP"
                     if event.alt:
                         scroll_mode = "NODE_EDITOR" if scroll_mode == "MINIMAP" else "MINIMAP"
+
                     if scroll_mode == "NODE_EDITOR":
                         try:
                             zoom_factor = 0.05
@@ -397,23 +398,43 @@ class NODEMAP_OT_navigate(Operator):
                             pass
                     else:
                         zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
-                        old_zoom = st.get("zoom", 1.0)
-                        new_zoom = max(0.1, min(old_zoom * zoom_delta, 20.0))
+                        # Base the manual scroll jump off the effective visual zoom rather than
+                        # the invisible stored preference to ensure a smooth transition out of the auto-clamp
+                        effective_zoom = st.get("zoom", 1.0)
 
-                        cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
-                        tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
+                        is_constrained = False
+                        if addon and getattr(addon.preferences.settings, "follow_view", False):
+                            # If effective zoom is strictly less than base_zoom, it means the viewport
+                            # indicator hit the minimap boundary and forced an auto-zoom out.
+                            if effective_zoom < st.get("base_zoom", 1.0) - 0.001:
+                                is_constrained = True
 
-                        if scale > 0 and tree_coord is not None:
-                            tx, ty = tree_coord
-                            base_scale = scale / old_zoom
-                            pan_x, pan_y = st.get("pan", [0.0, 0.0])
+                        # Intercept scroll UP if constrained and zoom the Node Editor instead
+                        if is_constrained and event.type == "WHEELUPMOUSE":
+                            try:
+                                zoom_factor = 0.05
+                                bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
+                            except RuntimeError:
+                                pass
+                        else:
+                            new_zoom = max(0.1, min(effective_zoom * zoom_delta, 20.0))
 
-                            pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - old_zoom)
-                            pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - old_zoom)
+                            cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
+                            tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
 
-                            st["zoom"] = new_zoom
-                            st["pan"] = [pan_x_new, pan_y_new]
-                            _clamp_pan_to_viewport(context.space_data, context.region, st)
+                            if scale > 0 and tree_coord is not None:
+                                tx, ty = tree_coord
+                                base_scale = scale / effective_zoom
+                                pan_x, pan_y = st.get("pan", [0.0, 0.0])
+
+                                pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - effective_zoom)
+                                pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - effective_zoom)
+
+                                st["base_zoom"] = new_zoom
+                                st["zoom"] = new_zoom
+                                st["pan"] = [pan_x_new, pan_y_new]
+                                _clamp_pan_to_viewport(context.space_data, context.region, st)
+
                     redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
@@ -455,7 +476,17 @@ class NODEMAP_OT_navigate(Operator):
         redraw_ui("NODE_EDITOR")
 
     def _pan_view(self, context: Context, dx: int, dy: int) -> None:
-        scale = _state().get("scale", 1.0)
+        st = _state()
+        rect = st.get("rect", (0, 0, 100, 100))
+        bounds = st.get("tree_bounds", (0, 0, 100, 100))
+        padding = st.get("padding", 6 * _get_ui_scale())
+        mx, my, mw, mh = rect
+        inner_w = max(mw - 2 * padding, 1.0)
+        inner_h = max(mh - 2 * padding, 1.0)
+        bbox_w = max(bounds[2] - bounds[0], 1.0)
+        bbox_h = max(bounds[3] - bounds[1], 1.0)
+        base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+        scale = base_scale * st.get("zoom", 1.0)
         if scale <= 0:
             return
         space = context.space_data
@@ -463,10 +494,10 @@ class NODEMAP_OT_navigate(Operator):
         visible = _get_visible_rect(space, region)
 
         if visible:
-            vw = visible[2] - visible[0]
-            vh = visible[3] - visible[1]
-            view_zoom_x = region.width / vw if vw > 0 else 1.0
-            view_zoom_y = region.height / vh if vh > 0 else 1.0
+            vw_rect = visible[2] - visible[0]
+            vh_rect = visible[3] - visible[1]
+            view_zoom_x = region.width / vw_rect if vw_rect > 0 else 1.0
+            view_zoom_y = region.height / vh_rect if vh_rect > 0 else 1.0
 
             self._pan_acc[0] += (dx / scale) * view_zoom_x
             self._pan_acc[1] += (dy / scale) * view_zoom_y
@@ -474,14 +505,45 @@ class NODEMAP_OT_navigate(Operator):
             pan_y = int(self._pan_acc[1])
             self._pan_acc[0] -= pan_x
             self._pan_acc[1] -= pan_y
+
             if pan_x != 0 or pan_y != 0:
                 try:
+                    st = _state()
+                    pan_before = st["pan"][0], st["pan"][1]
+
                     bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                    _clamp_pan_to_viewport(space, region, st)
+
+                    clamp_dx = st["pan"][0] - pan_before[0]
+                    clamp_dy = st["pan"][1] - pan_before[1]
+
+                    if clamp_dx != 0 or clamp_dy != 0:
+                        self._pan_acc[0] += (-clamp_dx / scale) * view_zoom_x
+                        self._pan_acc[1] += (-clamp_dy / scale) * view_zoom_y
+
+                        extra_pan_x = int(self._pan_acc[0])
+                        extra_pan_y = int(self._pan_acc[1])
+                        self._pan_acc[0] -= extra_pan_x
+                        self._pan_acc[1] -= extra_pan_y
+
+                        if extra_pan_x != 0 or extra_pan_y != 0:
+                            bpy.ops.view2d.pan(deltax=extra_pan_x, deltay=extra_pan_y)
+                            _clamp_pan_to_viewport(space, region, st)
                 except RuntimeError:
                     pass
 
     def _redirect_to_view2d(self, context: Context, dx: float, dy: float) -> None:
-        scale = _state().get("scale", 1.0)
+        st = _state()
+        rect = st.get("rect", (0, 0, 100, 100))
+        bounds = st.get("tree_bounds", (0, 0, 100, 100))
+        padding = st.get("padding", 6 * _get_ui_scale())
+        mx, my, mw, mh = rect
+        inner_w = max(mw - 2 * padding, 1.0)
+        inner_h = max(mh - 2 * padding, 1.0)
+        bbox_w = max(bounds[2] - bounds[0], 1.0)
+        bbox_h = max(bounds[3] - bounds[1], 1.0)
+        base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+        scale = base_scale * st.get("zoom", 1.0)
         if scale <= 0:
             return
         space = context.space_data
@@ -530,6 +592,7 @@ class NODEMAP_OT_navigate(Operator):
             if pan_x != 0 or pan_y != 0:
                 try:
                     bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                    _clamp_pan_to_viewport(space, region, _state())
                 except RuntimeError:
                     pass
 

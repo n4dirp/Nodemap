@@ -171,6 +171,7 @@ _DEFAULT_STATE: dict = {
     "scale": 1.0,
     "hovered_node": None,
     "zoom": 1.0,
+    "base_zoom": 1.0,
     "pan": [0.0, 0.0],
     "modal_active": False,
     "enabled": True,
@@ -244,17 +245,48 @@ def _get_minimap_transform() -> tuple[float, float, float, float, float]:
     rect = st.get("rect", (0, 0, 100, 100))
     bounds = st.get("tree_bounds", (0, 0, 100, 100))
     padding = st.get("padding", 6 * _get_ui_scale())
-    zoom = st.get("zoom", 1.0)
+
+    if "base_zoom" not in st:
+        st["base_zoom"] = st.get("zoom", 1.0)
+
+    base_zoom = st["base_zoom"]
+    zoom = base_zoom
     pan = st.get("pan", [0.0, 0.0])
 
     mx, my, mw, mh = rect
-    inner_w = mw - 2 * padding
-    inner_h = mh - 2 * padding
+    inner_w = max(mw - 2 * padding, 1.0)
+    inner_h = max(mh - 2 * padding, 1.0)
 
-    bbox_w = bounds[2] - bounds[0]
-    bbox_h = bounds[3] - bounds[1]
+    bbox_w = max(bounds[2] - bounds[0], 1.0)
+    bbox_h = max(bounds[3] - bounds[1], 1.0)
 
-    base_scale = min(inner_w / max(bbox_w, 1.0), inner_h / max(bbox_h, 1.0))
+    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+
+    # Dynamic Auto-Zoom if follow_view is active
+    addon = bpy.context.preferences.addons.get(__package__)
+    if addon and getattr(addon.preferences.settings, "follow_view", False):
+        space = bpy.context.space_data
+        region = bpy.context.region
+        if space and space.type == "NODE_EDITOR" and region:
+            visible = _get_visible_rect(space, region)
+            if visible:
+                vw = max(visible[2] - visible[0], 1.0)
+                vh = max(visible[3] - visible[1], 1.0)
+
+                req_zoom_w = (inner_w / vw) / base_scale
+                req_zoom_h = (inner_h / vh) / base_scale
+                min_req_zoom = min(req_zoom_w, req_zoom_h)
+
+                # If viewport indicator exceeds bounds, dynamically zoom out to fit it perfectly
+                if min_req_zoom < zoom:
+                    zoom = min_req_zoom
+
+                st["zoom"] = zoom
+                # Execute clamping passively during draw so panning outside the minimap updates bounds
+                _clamp_pan_to_viewport(space, region, st)
+                pan = st["pan"]
+
+    st["zoom"] = zoom
     scale = base_scale * zoom
 
     cx = mx + padding + inner_w / 2 + pan[0]
@@ -290,8 +322,8 @@ def _clamp_pan_to_viewport(space, region, st) -> None:
     inner_b = my + padding
     inner_r = mx + mw - padding
     inner_t = my + mh - padding
-    inner_w = mw - 2 * padding
-    inner_h = mh - 2 * padding
+    inner_w = max(mw - 2 * padding, 1.0)
+    inner_h = max(mh - 2 * padding, 1.0)
 
     bbox_w = bounds[2] - bounds[0]
     bbox_h = bounds[3] - bounds[1]
@@ -381,7 +413,6 @@ def _get_visible_rect(
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
         result = (min(xs), min(ys), max(xs), max(ys))
-        # logger.log(5, "Visible rect: %s (region %dx%d, %d/4 corners valid)", result, w, h, len(points))
         return result
     except Exception as e:
         logger.log(5, "_get_visible_rect failed: %s", e)
@@ -410,6 +441,7 @@ def frame_all() -> None:
     follow = addon and getattr(addon.preferences.settings, "follow_view", False)
 
     if not follow:
+        st["base_zoom"] = 1.0
         st["zoom"] = 1.0
         st["pan"] = [0.0, 0.0]
         redraw_ui("NODE_EDITOR")
@@ -443,6 +475,7 @@ def frame_all() -> None:
     combined_cx = (c_min_x + c_max_x) / 2
     combined_cy = (c_min_y + c_max_y) / 2
 
+    st["base_zoom"] = zoom
     st["zoom"] = zoom
     st["pan"] = [
         -(combined_cx - tree_cx) * base_scale * zoom,
@@ -461,8 +494,15 @@ def _theme_rgba(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
 
 def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    theme_bg = _theme_rgba("node_editor.node_backdrop", (0.22, 0.22, 0.22, 0.95))
+    if addon and getattr(addon.preferences.settings, "custom_bg_color", False):
+        bg = tuple(getattr(addon.preferences.settings, "bg_color", (0.22, 0.22, 0.22, 0.85)))
+    else:
+        bg = theme_bg
+
     return {
-        "bg": _theme_rgba("node_editor.node_backdrop", (0.22, 0.22, 0.22, 0.85)),
+        "bg": bg,
         "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
         "node": _theme_rgba("user_interface.wcol_regular.inner", (0.25, 0.25, 0.25, 1.0)),
         "node_selected": _theme_rgba("node_editor.node_active", (0.28, 0.45, 0.7, 1.0)),

@@ -210,7 +210,7 @@ def _draw_background(
     mx: float, my: float, mw: float, mh: float, colors: dict, master_alpha: float
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
-    bg_color = colors["bg"][:3] + (master_alpha,)
+    bg_color = tuple(colors["bg"][:3]) + (colors["bg"][3] * master_alpha,)
     panel_r = colors.get("panel_roundness", 4.0)
     _draw_filled_rounded_rect(mx, my, mw, mh, panel_r, bg_color)
     border_color = (*colors["bg_border"][:3], colors["bg_border"][3] * master_alpha)
@@ -264,8 +264,7 @@ def _draw_frame_nodes(
         nw_s = max(w * scale, 1.0)
         nh_s = max(h * scale, 1.0)
 
-        is_hovered = node.name == hovered_node_name
-        frame_alpha = (0.6 if is_hovered else 0.5) * master_alpha
+        frame_alpha = 0.6 * master_alpha
 
         # Fill: use theme or per-node custom color
         if getattr(settings, "colored_nodes", True):
@@ -320,13 +319,36 @@ def _draw_regular_nodes(
     node_r = colors.get("node_roundness", 2.0) * ui_scale * (scale * 2)
     min_dim = 3.0 * ui_scale
 
-    pills_by_color: dict[tuple[float, ...], list[tuple[float, float, float, float]]] = {}
     if show_socket_indicators:
         pw = max(2.0, 8.0 * scale * ui_scale)
         ph = max(2.0, 8.0 * scale * ui_scale)
 
+    reroute_dot_size = max(2.0, 6.0 * scale * ui_scale)
+
     for node in regular_nodes:
         if node.type == "REROUTE":
+            if not getattr(settings, "show_wires", True):
+                continue
+            w, h = _get_node_dims(node)
+            center_x = node.location_absolute.x + w / 2
+            center_y = node.location_absolute.y - h / 2
+            sx = cx + (center_x - tree_cx) * scale
+            sy = cy + (center_y - tree_cy) * scale
+            if use_socket_color:
+                try:
+                    sock = node.outputs[0] if node.outputs else node.inputs[0]
+                    sock_color = sock.draw_color(bpy.context, node)
+                    dot_color = (
+                        float(sock_color[0]),
+                        float(sock_color[1]),
+                        float(sock_color[2]),
+                        master_alpha,
+                    )
+                except Exception:
+                    dot_color = (*colors["wire"][:3], master_alpha)
+            else:
+                dot_color = (*colors["wire"][:3], master_alpha)
+            _batch_draw_pills([(sx, sy, reroute_dot_size, 0.0)], reroute_dot_size, dot_color)
             continue
 
         w, h = _get_node_dims(node)
@@ -337,22 +359,23 @@ def _draw_regular_nodes(
         nw_s = max(w * scale, 1.0)
         nh_s = max(h * scale, 1.0)
 
-        is_hovered = node.name == hovered_node_name
+        # is_hovered = node.name == hovered_node_name
 
         # Resolve fill color: custom, theme-mapped by color_tag, or default
         if getattr(settings, "colored_nodes", True):
             fill_color = _get_node_color(node, colors["node"])
         else:
             fill_color = colors["node"]
+
         fill_color = (*fill_color[:3], fill_color[3] * master_alpha)
-        if is_hovered:
-            # Brighten hovered nodes for visual feedback
-            fill_color = (
-                min(fill_color[0] * 1.35, 1.0),
-                min(fill_color[1] * 1.35, 1.0),
-                min(fill_color[2] * 1.35, 1.0),
-                fill_color[3],
-            )
+        # if is_hovered:
+        #     # Brighten hovered nodes for visual feedback
+        #     fill_color = (
+        #         min(fill_color[0] * 1.35, 1.0),
+        #         min(fill_color[1] * 1.35, 1.0),
+        #         min(fill_color[2] * 1.35, 1.0),
+        #         fill_color[3],
+        #     )
 
         if nw_s < min_dim or nh_s < min_dim:
             # Tiny nodes: draw as minimal dots, skip border/label
@@ -419,6 +442,7 @@ def _draw_regular_nodes(
 
             # Socket indicator pills (collected by color for batched draw)
             if show_socket_indicators:
+                pills_by_color: dict[tuple[float, ...], list[tuple[float, float, float, float]]] = {}
                 default_color = (*colors["wire"][:3], master_alpha)
                 body_top = node.location_absolute.y
                 body_bot = body_top - h
@@ -451,10 +475,9 @@ def _draw_regular_nodes(
                             color = default_color
                         pills_by_color.setdefault(color, []).append((sx, sy, pw, 0.0))
 
-    # Batched socket indicator pills (one draw call per unique color)
-    if show_socket_indicators and pills_by_color:
-        for color, group in pills_by_color.items():
-            _batch_draw_pills(group, ph, color)
+                # Flush per-node socket pills to preserve z-order
+                for color, group in pills_by_color.items():
+                    _batch_draw_pills(group, ph, color)
 
 
 def _draw_resize_handles(
@@ -569,7 +592,7 @@ def _draw_viewport_overlay(
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
         node_r = colors.get("node_roundness", 2.0) * ui_scale
-        outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha * 0.5)
+        outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha * 0.6)
         _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
 
 
@@ -692,25 +715,24 @@ def draw_minimap() -> None:
     with _Timer("classify"):
         frames = [n for n in nodes if n.type == "FRAME"]
         regular_nodes = [n for n in nodes if n.type != "FRAME"]
-        if not getattr(settings, "show_wires", True):
-            regular_nodes = [n for n in regular_nodes if n.type != "REROUTE"]
 
     # Layer 1: frame node backgrounds
-    with _Timer("draw_frames"):
-        _draw_frame_nodes(
-            frames,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            colors,
-            settings,
-            master_alpha,
-            hovered_node_name,
-            ui_scale,
-            font_id,
-        )
+    if getattr(settings, "show_frames", True):
+        with _Timer("draw_frames"):
+            _draw_frame_nodes(
+                frames,
+                cx,
+                cy,
+                scale,
+                tree_cx,
+                tree_cy,
+                colors,
+                settings,
+                master_alpha,
+                hovered_node_name,
+                ui_scale,
+                font_id,
+            )
 
     # Layer 2: connection wires
     if getattr(settings, "show_wires", True):
@@ -1018,7 +1040,7 @@ def _draw_minimap_scrollbars(
     bar_thick = max(2, int(3 * ui_scale))
     bar_off = int(2 * ui_scale)
     min_thumb = int(6 * ui_scale)
-    scroll_color = (*colors["scroll_item"][:3], colors["scroll_item"][3] * master_alpha * 0.5)
+    scroll_color = (*colors["scroll_item"][:3], colors["scroll_item"][3] * master_alpha * 0.65)
 
     # Horizontal scrollbar (bottom edge)
     if visible_w < bbox_w:
@@ -1046,7 +1068,7 @@ def _draw_frame_all_button(
     if not settings or not getattr(settings, "show_frame_all_btn", True):
         _state()["frame_all_btn"] = None
         return
-    inner_l = mx + padding
+    inner_l = mx
     # inner_r = mx + mw - padding
     # inner_b = my + padding
     inner_t = my + mh - padding
@@ -1077,7 +1099,7 @@ def _draw_frame_all_button(
 
     btn_size = FRAME_ALL_BTN_SIZE * ui_scale
     margin = FRAME_ALL_BTN_MARGIN * ui_scale
-    x = inner_l + margin
+    x = inner_l + mw - btn_size - margin - padding
     y = inner_t - btn_size - margin
     # r = colors.get("panel_roundness", 4.0)
     # btn_color = (*colors["bg"][:3], colors["bg"][3] * master_alpha * 0.3)
