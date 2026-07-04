@@ -65,7 +65,7 @@ class NODEMAP_PT_popup(Panel):
 
             body.separator()
 
-            col = body.row(heading="Colorize", align=True)
+            col = body.row(heading="Colored", align=True)
             col.prop(settings, "colored_nodes", text="Nodes")
             sub = col.row(align=True)
             sub.active = settings.show_wires | settings.show_socket_indicators
