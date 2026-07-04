@@ -115,6 +115,7 @@ class NODEMAP_OT_frame_all(Operator):
 
     bl_idname = "nodemap.frame_all"
     bl_label = "Frame All"
+    bl_description = "Reset the minimap view to show all nodes.\nShortcut: Home"
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:

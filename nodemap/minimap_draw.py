@@ -998,6 +998,17 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
 
                 wires_by_color.setdefault(wire_color, []).append((mx, my, length, angle))
 
+    # Shadow pass: offset all wires slightly for a drop-shadow effect
+    shadow_offset = 1.5
+    shadow_alpha = 0.35 * master_alpha
+    if wires_by_color and shadow_alpha > 0:
+        shadow_group = [
+            (mx + shadow_offset, my - shadow_offset, length, angle)
+            for group in wires_by_color.values()
+            for mx, my, length, angle in group
+        ]
+        _batch_draw_pills(shadow_group, thickness * 1.5, (0.0, 0.0, 0.0, shadow_alpha))
+
     # Draw one batch per unique color
     for wire_color, group in wires_by_color.items():
         _batch_draw_pills(group, thickness, wire_color)
