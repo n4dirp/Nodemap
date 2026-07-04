@@ -369,8 +369,9 @@ class NODEMAP_OT_navigate(Operator):
                         region = context.region
                         visible = _get_visible_rect(space, region)
                         if visible:
-                            vw = visible[2] - visible[0]
-                            vh = visible[3] - visible[1]
+                            ui_scale = _get_ui_scale()
+                            vw = (visible[2] - visible[0]) * ui_scale
+                            vh = (visible[3] - visible[1]) * ui_scale
                             scroll_factor = 0.05
                             direction = 1 if event.type == "WHEELUPMOUSE" else -1
                             pan_x = int(vw * scroll_factor * -direction) if event.ctrl else 0

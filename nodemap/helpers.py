@@ -392,7 +392,10 @@ def _find_node_at(nodes: bpy.types.Nodes, tree_x: float, tree_y: float) -> bpy.t
 def _get_visible_rect(
     space: bpy.types.SpaceNodeEditor, region: bpy.types.Region
 ) -> tuple[float, float, float, float] | None:
-    """Return the visible viewport rectangle in tree coordinates, or None if unavailable."""
+    """Return the visible viewport rectangle in tree coordinates, or None if unavailable.
+
+    Accounts for Blender UI scaling to return unscaled tree coordinates.
+    """
     try:
         w, h = region.width, region.height
         vr = region.view2d
@@ -410,8 +413,10 @@ def _get_visible_rect(
         if not points:
             logger.log(5, "_get_visible_rect: all corners returned None (region %dx%d)", w, h)
             return None
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
+
+        ui_scale = _get_ui_scale()
+        xs = [p[0] / ui_scale for p in points]
+        ys = [p[1] / ui_scale for p in points]
         result = (min(xs), min(ys), max(xs), max(ys))
         return result
     except Exception as e:
