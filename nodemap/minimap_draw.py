@@ -259,8 +259,8 @@ def _draw_frame_nodes(
         w, h = _get_node_dims(node)
 
         # Transform node tree coords to minimap pixel coords
-        nx = cx + (node.location_absolute.x - tree_cx) * scale
-        ny = cy + (node.location_absolute.y - h - tree_cy) * scale
+        nx = round(cx + (node.location_absolute.x - tree_cx) * scale)
+        ny = round(cy + (node.location_absolute.y - h - tree_cy) * scale)
         nw_s = max(w * scale, 1.0)
         nh_s = max(h * scale, 1.0)
 
@@ -359,8 +359,6 @@ def _draw_regular_nodes(
         nw_s = max(w * scale, 1.0)
         nh_s = max(h * scale, 1.0)
 
-        # is_hovered = node.name == hovered_node_name
-
         # Resolve fill color: custom, theme-mapped by color_tag, or default
         if getattr(settings, "colored_nodes", True):
             fill_color = _get_node_color(node, colors["node"])
@@ -368,14 +366,6 @@ def _draw_regular_nodes(
             fill_color = colors["node"]
 
         fill_color = (*fill_color[:3], fill_color[3] * master_alpha)
-        # if is_hovered:
-        #     # Brighten hovered nodes for visual feedback
-        #     fill_color = (
-        #         min(fill_color[0] * 1.35, 1.0),
-        #         min(fill_color[1] * 1.35, 1.0),
-        #         min(fill_color[2] * 1.35, 1.0),
-        #         fill_color[3],
-        #     )
 
         if nw_s < min_dim or nh_s < min_dim:
             # Tiny nodes: draw as minimal dots, skip border/label
@@ -621,10 +611,6 @@ def _draw_node_count(
     ty = my + (FONT_SIZE * ui_scale) - 3
     text_color = (*colors["text"][:3], colors["text"][3] * 0.85 * master_alpha)
 
-    # btn_size = FRAME_ALL_BTN_SIZE * ui_scale
-    # panel_r = colors.get("panel_roundness", 4.0)
-    # _draw_filled_rounded_rect(tx, ty, text_w + pad * 2, btn_size, panel_r, colors["node"])
-
     _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
 
 
@@ -634,7 +620,7 @@ def draw_minimap() -> None:
     space = context.space_data
     region = context.region
 
-    #    Early exit checks
+    # Early exit checks
     st = _state()
     if _early_exit(context, space, st):
         return
@@ -676,7 +662,7 @@ def draw_minimap() -> None:
         getattr(settings, "show_frame_labels", True),
     )
 
-    #    Compute dimensions and layout
+    # Compute dimensions and layout
     with _Timer("setup"):
         ui_scale = _get_ui_scale()
         colors = _get_node_editor_theme_colors()
@@ -695,7 +681,7 @@ def draw_minimap() -> None:
 
         _clamp_pan_to_viewport(space, region, st)
 
-    #    Draw minimap panel
+    # Draw minimap panel
     gpu.state.blend_set("ALPHA")
 
     with _Timer("draw_background"):
@@ -711,7 +697,7 @@ def draw_minimap() -> None:
     hovered_node_name = st.get("hovered_node")
     font_id = 0
 
-    #    Draw layers back to front
+    # Draw layers back to front
     with _Timer("classify"):
         frames = [n for n in nodes if n.type == "FRAME"]
         regular_nodes = [n for n in nodes if n.type != "FRAME"]
@@ -809,23 +795,8 @@ def draw_minimap() -> None:
             master_alpha,
         )
 
-    # Frame-all button in the top-left corner (only when scrollbars visible)
-    _draw_frame_all_button(
-        mx,
-        my,
-        mw,
-        mh,
-        padding,
-        cx,
-        cy,
-        scale,
-        tree_cx,
-        tree_cy,
-        bounds,
-        colors,
-        ui_scale,
-        master_alpha,
-    )
+    # Frame-all button in the top corner
+    _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha)
 
     # Resize handle indicators
     with _Timer("draw_resize_handles"):
@@ -870,10 +841,9 @@ def _get_socket_pos(node, socket, is_output):
     except (ValueError, AttributeError):
         idx = 0
 
-    # header_h = 28
     top_y = node.location_absolute.y
-    body_top = top_y  # - header_h
-    body_bot = top_y - h  # + 8
+    body_top = top_y
+    body_bot = top_y - h
 
     num = len(visible)
     body_range = body_top - body_bot
@@ -999,7 +969,7 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
                 wires_by_color.setdefault(wire_color, []).append((mx, my, length, angle))
 
     # Shadow pass: offset all wires slightly for a drop-shadow effect
-    shadow_offset = 1.5
+    shadow_offset = 0
     shadow_alpha = 0.35 * master_alpha
     if wires_by_color and shadow_alpha > 0:
         shadow_group = [
@@ -1007,7 +977,7 @@ def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0
             for group in wires_by_color.values()
             for mx, my, length, angle in group
         ]
-        _batch_draw_pills(shadow_group, thickness * 1.5, (0.0, 0.0, 0.0, shadow_alpha))
+        _batch_draw_pills(shadow_group, thickness * 2.5, (0.0, 0.0, 0.0, shadow_alpha))
 
     # Draw one batch per unique color
     for wire_color, group in wires_by_color.items():
@@ -1070,9 +1040,7 @@ def _draw_minimap_scrollbars(
         _draw_filled_rounded_rect(thumb_x2, thumb_y2, bar_thick, thumb_h, bar_thick * 0.5, scroll_color)
 
 
-def _draw_frame_all_button(
-    mx, my, mw, mh, padding, cx, cy, scale, tree_cx, tree_cy, bounds, colors, ui_scale, master_alpha
-):
+def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):
     """Draw a frame-all button at the top-left of the minimap inner area when scrollbars are visible."""
     addon = bpy.context.preferences.addons.get(__package__)
     settings = getattr(addon.preferences, "settings", None) if addon else None
@@ -1080,8 +1048,6 @@ def _draw_frame_all_button(
         _state()["frame_all_btn"] = None
         return
     inner_l = mx
-    # inner_r = mx + mw - padding
-    # inner_b = my + padding
     inner_t = my + mh - padding
 
     bbox_l, bbox_b, bbox_r, bbox_t = bounds
@@ -1090,32 +1056,13 @@ def _draw_frame_all_button(
     if bbox_w <= 0 or bbox_h <= 0:
         return
 
-    # tree_l = tree_cx + (inner_l - cx) / scale
-    # tree_r = tree_cx + (inner_r - cx) / scale
-    # tree_b = tree_cy + (inner_b - cy) / scale
-    # tree_t = tree_cy + (inner_t - cy) / scale
-
-    # v_left = max(bbox_l, min(bbox_r, tree_l))
-    # v_right = max(bbox_l, min(bbox_r, tree_r))
-    # v_bottom = max(bbox_b, min(bbox_t, tree_b))
-    # v_top = max(bbox_b, min(bbox_t, tree_t))
-
-    # visible_w = v_right - v_left
-    # visible_h = v_top - v_bottom
-
     st = _state()
-    # if visible_w >= bbox_w and visible_h >= bbox_h:
-    #     st["frame_all_btn"] = None
-    #     return
 
     btn_size = FRAME_ALL_BTN_SIZE * ui_scale
     margin = FRAME_ALL_BTN_MARGIN * ui_scale
     x = inner_l + mw - btn_size - margin - padding
     y = inner_t - btn_size - margin
-    # r = colors.get("panel_roundness", 4.0)
-    # btn_color = (*colors["bg"][:3], colors["bg"][3] * master_alpha * 0.3)
     ico_color = (*colors["text"][:3], colors["text"][3] * master_alpha * 0.7)
-    # _draw_filled_rounded_rect(x, y, btn_size, btn_size, 4, btn_color)
 
     # Corner brackets icon (four brackets pointing outward)
     i = 2 * ui_scale
