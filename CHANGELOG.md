@@ -1,12 +1,12 @@
 # Changelog
 
-## [1.1.0] - 2026-07-02
+## [1.1.0] - 2026-07-04
 
 ### Added
-- Added frame all nodes operator
-- Added node sockets indicators, and improved the wires position
-- Added `Follow View` option for automatic panning
-- Added custom background color
+- Add operator to frame all nodes
+- Add node socket indicators and improve wire positioning
+- Add `Follow View` option for automatic panning
+- Add custom background color
 
 ### Fixed
-- Active view mapping with blender ui scale
+- Fix active view mapping with Blender UI scale
