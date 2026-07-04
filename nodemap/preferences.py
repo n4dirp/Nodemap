@@ -180,7 +180,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     )
 
     node_label_mode: EnumProperty(
-        name="",
+        name="Node Labels",
         description="How labels appear in the minimap",
         items=[
             ("FULL", "Full Name", "Display full name split across lines"),

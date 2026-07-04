@@ -290,10 +290,18 @@ def _draw_frame_nodes(
             label_font_size = max(6, min(int(11 * ui_scale), int(nh_s * 0.2)))
             text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
             blf.size(font_id, label_font_size)
-            tw, _ = blf.dimensions(font_id, frame_label)
+            tw, th = blf.dimensions(font_id, frame_label)
             if tw < nw_s - 4 * ui_scale:
                 lx = nx + (nw_s - tw) / 2
                 ly = ny + nh_s + 2 * ui_scale
+                label_pad = 2 * ui_scale
+                _draw_filled_rounded_rect(
+                    lx - label_pad, ly - label_pad,
+                    tw + 2 * label_pad, th + 2 * label_pad,
+                    label_pad * 0.5,
+                    bg_frame,
+                )
+                gpu.state.blend_set("ALPHA")
                 _draw_text_with_shadow(font_id, frame_label, lx, ly, text_color, label_font_size)
                 gpu.state.blend_set("ALPHA")
 
@@ -464,6 +472,17 @@ def _draw_regular_nodes(
                         else:
                             color = default_color
                         pills_by_color.setdefault(color, []).append((sx, sy, pw, 0.0))
+
+                # Shadow pass: offset all socket pills for a drop-shadow effect
+                shadow_offset = 0
+                shadow_alpha = 0.35 * master_alpha
+                if pills_by_color and shadow_alpha > 0:
+                    shadow_group = [
+                        (sx + shadow_offset, sy - shadow_offset, pw * 1.5, 0.0)
+                        for group in pills_by_color.values()
+                        for sx, sy, _, _ in group
+                    ]
+                    _batch_draw_pills(shadow_group, ph * 1.5, (0.0, 0.0, 0.0, shadow_alpha))
 
                 # Flush per-node socket pills to preserve z-order
                 for color, group in pills_by_color.items():

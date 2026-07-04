@@ -38,9 +38,9 @@ class NODEMAP_PT_popup(Panel):
             col.prop(settings, "show_node_count", text="Node Count")
             col.prop(settings, "show_frames", text="Frame Nodes")
 
-            col = body.column(heading="Links", align=True)
-            col.prop(settings, "show_wires", text="Show Wires")
-            col.prop(settings, "show_socket_indicators", text="Node Sockets")
+            row = body.row(heading="Links", align=True)
+            row.prop(settings, "show_wires", text="Wires")
+            row.prop(settings, "show_socket_indicators", text="Sockets")
 
             col = body.column(heading="Labels", align=True)
             row = col.row(align=True, heading="")
@@ -95,7 +95,7 @@ class NODEMAP_PT_popup(Panel):
             body.use_property_split = True
             body.use_property_decorate = False
 
-            col = body.column(heading="Minimap")
+            col = body.column(heading="Minimap", align=True)
             col.prop(settings, "show_by_default", text="Show in New Editors")
             col.prop(settings, "follow_view", text="Follow Editor View")
 
