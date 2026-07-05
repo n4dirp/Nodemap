@@ -43,7 +43,7 @@ class NODEMAP_PT_popup(Panel):
             row.prop(settings, "show_wires", text="Wires")
             row.prop(settings, "show_socket_indicators", text="Sockets")
 
-            col = body.column(heading="Node Labels", align=True)
+            col = body.column(heading="Labels", align=True)
             row = col.row(align=True, heading="")
             row.prop(settings, "show_names", text="")
             sub = row.row(align=True)
@@ -104,7 +104,7 @@ class NODEMAP_PT_popup(Panel):
             sub.active = settings.interactive
             sub.prop(settings, "left_click_action", text="Left Click")
             sub.prop(settings, "right_click_action", text="Right Click")
-            sub.row().prop(settings, "scroll_wheel_mode", text="Scroll Wheel", expand=True)
+            sub.row().prop(settings, "scroll_wheel_mode", text="Scroll Zoom", expand=True)
             sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
 
 

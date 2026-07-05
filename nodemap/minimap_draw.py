@@ -211,8 +211,13 @@ def _draw_background(
     mx: float, my: float, mw: float, mh: float, colors: dict, master_alpha: float
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
+
     bg_color = tuple(colors["bg"][:3]) + (colors["bg"][3] * master_alpha,)
     panel_r = colors.get("panel_roundness", 4.0)
+    shadow_w = 1
+    _draw_rounded_rect_border(
+        mx - shadow_w, my - shadow_w, mw + shadow_w * 2, mh + shadow_w * 2, panel_r, (0, 0, 0, 0.1), 0.5
+    )
     _draw_filled_rounded_rect(mx, my, mw, mh, panel_r, bg_color)
     border_color = (*colors["bg_border"][:3], colors["bg_border"][3] * master_alpha)
     _draw_rounded_rect_border(mx, my, mw, mh, panel_r, border_color, 0.5)
