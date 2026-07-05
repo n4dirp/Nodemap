@@ -489,6 +489,105 @@ def frame_all() -> None:
     redraw_ui("NODE_EDITOR")
 
 
+def _frame_to_bounds(
+    target_bounds: tuple[float, float, float, float],
+    fill: bool = False,
+) -> None:
+    """Adjust minimap zoom/pan to frame the given bounds in tree coordinates.
+
+    When *fill* is True the bounds are zoomed to entirely fill the minimap
+    (one axis may clip); when False the bounds fit within the minimap
+    (empty space may remain).
+    """
+    st = _state()
+    space = bpy.context.space_data
+    region = bpy.context.region
+    if not space or not region:
+        return
+
+    rect = st.get("rect", (0, 0, 100, 100))
+    padding = st.get("padding", 6 * _get_ui_scale())
+    _, _, mw, mh = rect
+    inner_w = max(mw - 2 * padding, 1.0)
+    inner_h = max(mh - 2 * padding, 1.0)
+
+    bounds = st.get("tree_bounds", (0, 0, 100, 100))
+    bbox_w = max(bounds[2] - bounds[0], 1.0)
+    bbox_h = max(bounds[3] - bounds[1], 1.0)
+    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+
+    tw = max(target_bounds[2] - target_bounds[0], 1.0)
+    th = max(target_bounds[3] - target_bounds[1], 1.0)
+    if fill:
+        zoom = min(inner_w / (base_scale * tw), inner_h / (base_scale * th))
+    else:
+        zoom = min(inner_w / (base_scale * tw), inner_h / (base_scale * th), 1.0)
+
+    tree_cx = (bounds[0] + bounds[2]) / 2
+    tree_cy = (bounds[1] + bounds[3]) / 2
+    target_cx = (target_bounds[0] + target_bounds[2]) / 2
+    target_cy = (target_bounds[1] + target_bounds[3]) / 2
+
+    st["base_zoom"] = zoom
+    st["zoom"] = zoom
+    st["pan"] = [
+        -(target_cx - tree_cx) * base_scale * zoom,
+        -(target_cy - tree_cy) * base_scale * zoom,
+    ]
+    redraw_ui("NODE_EDITOR")
+
+
+def frame_selected() -> None:
+    """Adjust minimap zoom/pan to frame the selected node(s)."""
+    st = _state()
+    space = bpy.context.space_data
+    if not space or space.type != "NODE_EDITOR":
+        return
+    node_tree = space.edit_tree
+    if not node_tree:
+        return
+
+    selected = [n for n in node_tree.nodes if n.select]
+    if not selected:
+        frame_all()
+        return
+
+    min_x = min_y = float("inf")
+    max_x = max_y = float("-inf")
+    for node in selected:
+        w, h = _get_node_dims(node)
+        x, y = node.location_absolute.x, node.location_absolute.y
+        min_x = min(min_x, x)
+        max_x = max(max_x, x + w)
+        min_y = min(min_y, y - h)
+        max_y = max(max_y, y)
+
+    st["tree_bounds"] = _get_node_tree_bounds(node_tree.nodes)
+    _frame_to_bounds((min_x, min_y, max_x, max_y))
+
+
+def frame_view() -> None:
+    """Adjust minimap zoom/pan to frame the current editor viewport."""
+    st = _state()
+    space = bpy.context.space_data
+    region = bpy.context.region
+    if not space or not region:
+        return
+    node_tree = space.edit_tree
+    if not node_tree:
+        return
+
+    visible = _get_visible_rect(space, region)
+    if not visible:
+        return
+
+    addon = bpy.context.preferences.addons.get(__package__)
+    fill = addon and getattr(addon.preferences.settings, "frame_view_fill", False)
+
+    st["tree_bounds"] = _get_node_tree_bounds(node_tree.nodes)
+    _frame_to_bounds(visible, fill=fill)
+
+
 def _theme_rgba(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
     """Resolve a dotted theme attribute path to an RGBA tuple, ensuring 4 channels."""
     result = _theme(path, default)

@@ -14,6 +14,8 @@ from .helpers import (
     _get_visible_rect,
     _state,
     frame_all,
+    frame_selected,
+    frame_view,
     redraw_ui,
 )
 
@@ -447,6 +449,12 @@ class NODEMAP_OT_navigate(Operator):
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
+            case "NUMPAD_PERIOD":
+                if event.value == "PRESS" and in_minimap:
+                    frame_selected()
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
             case _:
                 return {"PASS_THROUGH"}
 
@@ -696,8 +704,36 @@ class NODEMAP_OT_navigate(Operator):
         st["resize_active"] = None
 
 
+class NODEMAP_OT_frame_selected(Operator):
+    """Focus the minimap view on selected nodes."""
+
+    bl_idname = "nodemap.frame_selected"
+    bl_label = "Frame Selected"
+    bl_description = "Focus the minimap view on selected nodes"
+    bl_options = {"INTERNAL"}
+
+    def execute(self, context: Context) -> set[str]:
+        frame_selected()
+        return {"FINISHED"}
+
+
+class NODEMAP_OT_frame_view(Operator):
+    """Focus the minimap view on the current editor viewport."""
+
+    bl_idname = "nodemap.frame_view"
+    bl_label = "Frame View"
+    bl_description = "Focus the minimap view on the current editor viewport"
+    bl_options = {"INTERNAL"}
+
+    def execute(self, context: Context) -> set[str]:
+        frame_view()
+        return {"FINISHED"}
+
+
 classes = (
     NODEMAP_OT_toggle,
     NODEMAP_OT_frame_all,
+    NODEMAP_OT_frame_selected,
+    NODEMAP_OT_frame_view,
     NODEMAP_OT_navigate,
 )

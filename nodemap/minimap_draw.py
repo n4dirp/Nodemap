@@ -215,11 +215,14 @@ def _draw_background(
     bg_color = tuple(colors["bg"][:3]) + (colors["bg"][3] * master_alpha,)
     panel_r = colors.get("panel_roundness", 4.0)
     shadow_w = 1
-    _draw_rounded_rect_border(
-        mx - shadow_w, my - shadow_w, mw + shadow_w * 2, mh + shadow_w * 2, panel_r, (0, 0, 0, 0.1), 0.5
-    )
-    _draw_filled_rounded_rect(mx, my, mw, mh, panel_r, bg_color)
+
+    _draw_filled_rounded_rect(mx, my, mw, mh, panel_r * 1.2, bg_color)
     border_color = (*colors["bg_border"][:3], colors["bg_border"][3] * master_alpha)
+
+    _draw_rounded_rect_border(
+        mx - shadow_w, my - shadow_w, mw + shadow_w * 2, mh + shadow_w * 2, panel_r, (0, 0, 0, 0.1 * master_alpha), 0.5
+    )
+
     _draw_rounded_rect_border(mx, my, mw, mh, panel_r, border_color, 0.5)
     return bg_color, panel_r
 
@@ -282,7 +285,6 @@ def _draw_frame_nodes(
     colors: dict,
     settings,
     master_alpha: float,
-    hovered_node_name: str | None,
     ui_scale: float,
     font_id: int,
 ) -> None:
@@ -296,8 +298,8 @@ def _draw_frame_nodes(
         # Transform node tree coords to minimap pixel coords
         nx = round(cx + (node.location_absolute.x - tree_cx) * scale)
         ny = round(cy + (node.location_absolute.y - h - tree_cy) * scale)
-        nw_s = max(w * scale, 1.0)
-        nh_s = max(h * scale, 1.0)
+        nw_s = round(max(w * scale, 1.0))
+        nh_s = round(max(h * scale, 1.0))
 
         frame_alpha = 0.6 * master_alpha
 
@@ -770,7 +772,6 @@ def draw_minimap() -> None:
                 colors,
                 settings,
                 master_alpha,
-                hovered_node_name,
                 ui_scale,
                 font_id,
             )
@@ -1107,7 +1108,7 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     """Draw a frame-all button at the top-left of the minimap inner area when scrollbars are visible."""
     addon = bpy.context.preferences.addons.get(__package__)
     settings = getattr(addon.preferences, "settings", None) if addon else None
-    if not settings or not getattr(settings, "show_frame_all_btn", True):
+    if not settings or not getattr(settings, "show_frame_all_btn", True) or not getattr(settings, "interactive", True):
         _state()["frame_all_btn"] = None
         return
     inner_l = mx

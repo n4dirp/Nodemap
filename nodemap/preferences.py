@@ -142,7 +142,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     bg_color: FloatVectorProperty(
         name="Background Color",
         description="Custom background color for the minimap overlay",
-        default=(0.1, 0.1, 0.1, 0.95),
+        default=(0.45, 0.45, 0.45, 0.95),
         size=4,
         min=0.0,
         max=1.0,
@@ -229,8 +229,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Scroll Wheel",
         description="Choose what the scroll wheel zooms (Hold Alt to switch)",
         items=[
-            ("MINIMAP", "Minimap", "Zoom the minimap view"),
             ("NODE_EDITOR", "Editor", "Zoom the node editor view"),
+            ("MINIMAP", "Minimap", "Zoom the minimap view"),
         ],
         default="NODE_EDITOR",
     )
@@ -239,6 +239,12 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Follow View",
         description="Keep the editor viewport inside the minimap by adjusting the minimap pan automatically",
         default=False,
+    )
+
+    frame_view_fill: BoolProperty(
+        name="Frame View Fill",
+        description="Zoom in to the viewport while keeping it fully visible, instead of capping zoom at 1x",
+        default=True,
     )
 
     left_click_action: EnumProperty(

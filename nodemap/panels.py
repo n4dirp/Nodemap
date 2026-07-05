@@ -9,7 +9,7 @@ class NODEMAP_PT_popup(Panel):
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
-    bl_ui_units_x = 13
+    bl_ui_units_x = 12
 
     @classmethod
     def poll(cls, context):
@@ -25,25 +25,34 @@ class NODEMAP_PT_popup(Panel):
         settings = prefs.settings
 
         layout.label(text="Nodemap")
-        layout.operator("nodemap.frame_all", text="Frame All")
+
+        header, body = layout.panel("NODEMAP_PT_operators", default_closed=False)
+        header.label(text="Frame")
+        if body:
+            row = body.row(align=True)
+            row.operator("nodemap.frame_all", text="All")
+            row.operator("nodemap.frame_view", text="View")
+            row.operator("nodemap.frame_selected", text="Selected")
+
+            col = body.column(heading="View", align=True)
+            col.prop(settings, "frame_view_fill", text="Fill Minimap")
 
         header, body = layout.panel("NODEMAP_PT_appearance", default_closed=False)
         header.label(text="Appearance")
         if body:
-            body.use_property_split = True
-            body.use_property_decorate = False
-
             col = body.column(heading="Show", align=True)
+            col.prop(settings, "show_node_count", text="Count")
             row = col.row(align=True)
+            row.active = settings.interactive
             row.prop(settings, "show_frame_all_btn", text="Frame All")
-            row.prop(settings, "show_node_count", text="Count")
             col.prop(settings, "show_frames", text="Frames")
 
             row = body.row(heading="Links", align=True)
-            row.prop(settings, "show_wires", text="Wires")
             row.prop(settings, "show_socket_indicators", text="Sockets")
+            row.prop(settings, "show_wires", text="Wires")
 
-            col = body.column(heading="Labels", align=True)
+            body.separator()
+            col = body.column(heading="Labels")
             row = col.row(align=True, heading="")
             row.prop(settings, "show_names", text="")
             sub = row.row(align=True)
@@ -56,9 +65,6 @@ class NODEMAP_PT_popup(Panel):
             header, sub_body = body.panel("NODEMAP_PT_layout", default_closed=True)
             header.label(text="Layout")
             if sub_body:
-                sub_body.use_property_split = True
-                sub_body.use_property_decorate = False
-
                 sub_body.prop(settings, "position", text="Position")
 
                 col = sub_body.column(align=True)
@@ -72,12 +78,9 @@ class NODEMAP_PT_popup(Panel):
             header, body = body.panel("NODEMAP_PT_theme", default_closed=True)
             header.label(text="Theme")
             if body:
-                body.use_property_split = True
-                body.use_property_decorate = False
-
-                col = body.row(heading="Colored", align=True)
-                col.prop(settings, "colored_nodes", text="Nodes")
-                sub = col.row(align=True)
+                row = body.row(heading="Colored", align=True)
+                row.prop(settings, "colored_nodes", text="Nodes")
+                sub = row.row(align=True)
                 sub.active = settings.show_wires | settings.show_socket_indicators
                 sub.prop(settings, "show_wire_color", text="Wires")
 
@@ -92,20 +95,30 @@ class NODEMAP_PT_popup(Panel):
         header, body = layout.panel("NODEMAP_PT_behavior", default_closed=False)
         header.label(text="Behavior")
         if body:
-            body.use_property_split = True
-            body.use_property_decorate = False
-
             col = body.column(heading="Minimap", align=True)
             col.prop(settings, "show_by_default", text="Show in New Editors")
-            col.prop(settings, "follow_view", text="Follow Editor View")
 
-            body.prop(settings, "interactive", text="Interactive")
-            sub = body.column()
-            sub.active = settings.interactive
-            sub.prop(settings, "left_click_action", text="Left Click")
-            sub.prop(settings, "right_click_action", text="Right Click")
-            sub.row().prop(settings, "scroll_wheel_mode", text="Scroll Zoom", expand=True)
-            sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+            body.prop(settings, "follow_view", text="Follow View")
+
+            sub_header, sub_body = body.panel("NODEMAP_PT_interactive", default_closed=True)
+            sub_header.use_property_split = False
+            sub_header.use_property_decorate = False
+            sub_header.prop(settings, "interactive", text="Interactive")
+
+            if sub_body:
+                sub_body.active = settings.interactive
+
+                col = sub_body.column()
+                col.prop(settings, "left_click_action", text="Left Click")
+                col.prop(settings, "right_click_action", text="Right Click")
+
+                if {"SELECT", "PAN_SELECT"} & {
+                    settings.left_click_action,
+                    settings.right_click_action,
+                }:
+                    sub_body.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+
+                sub_body.row().prop(settings, "scroll_wheel_mode", text="Scroll Zoom", expand=True)
 
 
 def draw_minimap_header_button(self, context):
