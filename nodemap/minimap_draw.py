@@ -218,20 +218,49 @@ def _draw_background(
     return bg_color, panel_r
 
 
-def _setup_scissor(mx: float, my: float, mw: float, mh: float) -> bool:
-    """Enable scissor test to clip content to minimap interior."""
+def _setup_scissor(mx: float, my: float, mw: float, mh: float) -> tuple[bool, bool, tuple[int, int, int, int]]:
+    """Enable scissor test to clip content to minimap interior.
+
+    Returns ``(success, was_active, old_rect)`` for restoring later.
+    """
+    saved = (False, (0, 0, 0, 0))
     try:
-        gpu.state.scissor_test_set(True)
-        gpu.state.scissor_set(int(mx + 1), int(my + 1), int(mw - 2), int(mh - 2))
-        return True
+        was_active = gpu.state.scissor_test_get()
+        saved = (was_active, gpu.state.scissor_get() if was_active else (0, 0, 0, 0))
     except Exception:
-        return False
+        pass
+
+    try:
+        # Set rect first — scissor_set marks framebuffer dirty on OpenGL,
+        # ensuring the subsequent scissor_test_set flush takes effect.
+        gpu.state.scissor_set(int(mx + 1), int(my + 1), int(mw - 2), int(mh - 2))
+        gpu.state.scissor_test_set(True)
+        was_active, old_rect = saved
+        return True, was_active, old_rect
+    except Exception:
+        return False, False, (0, 0, 0, 0)
 
 
-def _teardown_scissor(active: bool) -> None:
-    """Disable scissor test if it was active."""
-    if active:
+def _teardown_scissor(saved_state: tuple[bool, bool, tuple[int, int, int, int]]) -> None:
+    """Restore scissor test to its original state before _setup_scissor.
+
+    Workaround for Blender bugs #113310 / #139646: scissor_set marks the
+    framebuffer dirty — call it *before* scissor_test_set so the state
+    flush actually reaches the GL driver on OpenGL.
+    """
+    success, was_active, old_rect = saved_state
+    if not success:
+        return
+    try:
+        if was_active:
+            gpu.state.scissor_set(int(old_rect[0]), int(old_rect[1]), int(old_rect[2]), int(old_rect[3]))
+            gpu.state.scissor_test_set(True)
+        else:
+            gpu.state.scissor_set(0, 0, 65535, 65535)
+            gpu.state.scissor_test_set(False)
+    except Exception:
         try:
+            gpu.state.scissor_set(0, 0, 65535, 65535)
             gpu.state.scissor_test_set(False)
         except Exception:
             pass
@@ -701,6 +730,10 @@ def draw_minimap() -> None:
         _clamp_pan_to_viewport(space, region, st)
 
     # Draw minimap panel
+    try:
+        original_blend = gpu.state.blend_get()
+    except Exception:
+        original_blend = None
     gpu.state.blend_set("ALPHA")
 
     with _Timer("draw_background"):
@@ -711,7 +744,8 @@ def draw_minimap() -> None:
 
     # Clip node/wire content to minimap interior
     with _Timer("setup_scissor"):
-        scissor_active = _setup_scissor(mx, my, mw, mh)
+        scissor_state = _setup_scissor(mx, my, mw, mh)
+        scissor_active = scissor_state[0]
 
     hovered_node_name = st.get("hovered_node")
     font_id = 0
@@ -821,13 +855,17 @@ def draw_minimap() -> None:
     with _Timer("draw_resize_handles"):
         _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner)
 
-    _teardown_scissor(scissor_active)
-    gpu.state.blend_set("NONE")
-
     # Overlay: node count text
     with _Timer("draw_node_count"):
         content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
         _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
+
+    # Restore GPU state (must be the last operation — OpenGL state leaks across frames)
+    _teardown_scissor(scissor_state)
+    try:
+        gpu.state.blend_set(original_blend if original_blend else "NONE")
+    except Exception:
+        gpu.state.blend_set("NONE")
 
     # Stop & dump profile stats after N frames
     _maybe_stop_profiler(st)
