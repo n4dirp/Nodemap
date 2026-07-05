@@ -20,6 +20,7 @@ from .gpu_draw import (
     _batch_draw_pills,
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_with_hole,
+    _draw_pill,
     _draw_rounded_rect_border,
     _draw_text_with_shadow,
 )
@@ -310,29 +311,24 @@ def _draw_frame_nodes(
 
         # Label: centered above the frame, only if large enough
         frame_label = node.label
-        if (
-            frame_label
-            and getattr(settings, "show_frame_labels", True)
-            and nw_s > 20 * ui_scale
-            and nh_s > 14 * ui_scale
-        ):
-            label_font_size = max(6, min(int(11 * ui_scale), int(nh_s * 0.2)))
+        zoom = _state().get("zoom", 1.0)
+        if frame_label and getattr(settings, "show_frame_labels", True) and zoom >= 0.8:
+            mw, mh = _state()["rect"][2:4]
+            max_font_by_map = int(min(mw, mh) * 0.06)
+            label_font_size = max(6, min(int(11 * ui_scale * zoom), max_font_by_map))
             text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
             blf.size(font_id, label_font_size)
             tw, th = blf.dimensions(font_id, frame_label)
-            if tw < nw_s - 4 * ui_scale:
-                lx = nx + (nw_s - tw) / 2
-                ly = ny + nh_s + 2 * ui_scale
-                label_pad = 2 * ui_scale
-                _draw_filled_rounded_rect(
-                    lx - label_pad, ly - label_pad,
-                    tw + 2 * label_pad, th + 2 * label_pad,
-                    label_pad * 0.5,
-                    bg_frame,
-                )
-                gpu.state.blend_set("ALPHA")
-                _draw_text_with_shadow(font_id, frame_label, lx, ly, text_color, label_font_size)
-                gpu.state.blend_set("ALPHA")
+            lx = nx + (nw_s - tw) / 2
+            ly = ny + nh_s + 2 * ui_scale
+            label_pad = 2 * ui_scale
+            bg_color = (frame_color[0], frame_color[1], frame_color[2], 0.4 * master_alpha)
+            _draw_filled_rounded_rect(
+                lx - label_pad, ly - label_pad, tw + 2 * label_pad, th + 2 * label_pad, node_r, bg_color
+            )
+            gpu.state.blend_set("ALPHA")
+            _draw_text_with_shadow(font_id, frame_label, lx, ly, text_color, label_font_size)
+            gpu.state.blend_set("ALPHA")
 
 
 def _draw_regular_nodes(
@@ -480,6 +476,8 @@ def _draw_regular_nodes(
                         continue
                     x_base = node.location_absolute.x + (w if is_output else 0)
                     num = len(visible)
+                    if num > 1 and nh_s / (num + 1) < ph * 0.6:
+                        continue
                     for idx, socket in enumerate(visible):
                         if body_range <= 0 or num <= 1:
                             sy_tree = (body_top + body_bot) * 0.5
@@ -537,25 +535,24 @@ def _draw_resize_handles(
     w_clamped = st.get("width_clamped", False)
     h_clamped = st.get("height_clamped", False)
 
-    base = (*colors["node_selected"][:3], colors["node_selected"][3] * 0.5 * master_alpha)
-    warn = (*colors["indicator"][:3], colors["indicator"][3] * master_alpha)
+    col_base = (*colors["node_selected"][:3], colors["node_selected"][3] * 0.5 * master_alpha)
+    col_warn = (*colors["indicator"][:3], colors["indicator"][3] * master_alpha)
     thick = 3.0 * ui_scale
-    r = thick * 0.5
-
     margin = 6 * ui_scale
 
     match handle:
         case "W":
             wx = mx + 2 * ui_scale if corner in ("TOP_RIGHT", "BOTTOM_RIGHT") else mx + mw - 2 * ui_scale - thick
-            _draw_filled_rounded_rect(wx, my + margin, thick, mh - 2 * margin, r, warn if w_clamped else base)
+            _draw_pill(wx, my + margin, thick, mh - 2 * margin, col_warn if w_clamped else col_base)
         case "H":
             hy = my + 2 * ui_scale if corner in ("TOP_RIGHT", "TOP_LEFT") else my + mh - 2 * ui_scale - thick
-            _draw_filled_rounded_rect(mx + margin, hy, mw - 2 * margin, thick, r, warn if h_clamped else base)
+            _draw_pill(mx + margin, hy, mw - 2 * margin, thick, col_warn if h_clamped else col_base)
         case "C":
             wx = mx + 2 * ui_scale if corner in ("TOP_RIGHT", "BOTTOM_RIGHT") else mx + mw - 2 * ui_scale - thick
-            _draw_filled_rounded_rect(wx, my + margin, thick, mh - 2 * margin, r, warn if w_clamped else base)
+            _draw_pill(wx, my + margin, thick, mh - 2 * margin, col_warn if w_clamped else col_base)
+
             hy = my + 2 * ui_scale if corner in ("TOP_RIGHT", "TOP_LEFT") else my + mh - 2 * ui_scale - thick
-            _draw_filled_rounded_rect(mx + margin, hy, mw - 2 * margin, thick, r, warn if h_clamped else base)
+            _draw_pill(mx + margin, hy, mw - 2 * margin, thick, col_warn if h_clamped else col_base)
 
 
 def _draw_viewport_overlay(
@@ -1086,7 +1083,9 @@ def _draw_minimap_scrollbars(
         thumb_w = max(min_thumb, int(track_w * visible_w / bbox_w))
         thumb_x = inner_l + int(track_w * (v_left - bbox_l) / bbox_w)
         thumb_y = my + bar_off
-        _draw_filled_rounded_rect(thumb_x, thumb_y, thumb_w, bar_thick, bar_thick * 0.5, scroll_color)
+        # _draw_filled_rounded_rect(thumb_x, thumb_y, thumb_w, bar_thick, bar_thick * 0.5, scroll_color)
+
+        _draw_pill(thumb_x, thumb_y, thumb_w, bar_thick, scroll_color)
 
     # Vertical scrollbar (right edge)
     if visible_h < bbox_h:
@@ -1094,7 +1093,9 @@ def _draw_minimap_scrollbars(
         thumb_h = max(min_thumb, int(track_h * visible_h / bbox_h))
         thumb_x2 = mx + mw - bar_off - bar_thick
         thumb_y2 = inner_b + int(track_h * (v_bottom - bbox_b) / bbox_h)
-        _draw_filled_rounded_rect(thumb_x2, thumb_y2, bar_thick, thumb_h, bar_thick * 0.5, scroll_color)
+        # _draw_filled_rounded_rect(thumb_x2, thumb_y2, bar_thick, thumb_h, bar_thick * 0.5, scroll_color)
+
+        _draw_pill(thumb_x2, thumb_y2, bar_thick, thumb_h, scroll_color)
 
 
 def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):

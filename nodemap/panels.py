@@ -9,7 +9,7 @@ class NODEMAP_PT_popup(Panel):
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
-    bl_ui_units_x = 12
+    bl_ui_units_x = 13
 
     @classmethod
     def poll(cls, context):
@@ -34,27 +34,27 @@ class NODEMAP_PT_popup(Panel):
             body.use_property_decorate = False
 
             col = body.column(heading="Show", align=True)
-            col.prop(settings, "show_frame_all_btn", text="Frame All")
-            col.prop(settings, "show_node_count", text="Node Count")
-            col.prop(settings, "show_frames", text="Frame Nodes")
+            row = col.row(align=True)
+            row.prop(settings, "show_frame_all_btn", text="Frame All")
+            row.prop(settings, "show_node_count", text="Count")
+            col.prop(settings, "show_frames", text="Frames")
 
             row = body.row(heading="Links", align=True)
             row.prop(settings, "show_wires", text="Wires")
             row.prop(settings, "show_socket_indicators", text="Sockets")
 
-            col = body.column(heading="Labels", align=True)
+            col = body.column(heading="Node Labels", align=True)
             row = col.row(align=True, heading="")
             row.prop(settings, "show_names", text="")
             sub = row.row(align=True)
             sub.active = settings.show_names
-            sub.prop(settings, "node_label_mode", text="", expand=False)
-
+            sub.prop(settings, "node_label_mode", expand=True)
             sub = col.row(align=True)
             sub.active = settings.show_frames
             sub.prop(settings, "show_frame_labels", text="Frame Labels")
 
-            header, sub_body = body.panel("NODEMAP_PT_dimensions", default_closed=True)
-            header.label(text="Dimensions")
+            header, sub_body = body.panel("NODEMAP_PT_layout", default_closed=True)
+            header.label(text="Layout")
             if sub_body:
                 sub_body.use_property_split = True
                 sub_body.use_property_decorate = False
@@ -104,7 +104,7 @@ class NODEMAP_PT_popup(Panel):
             sub.active = settings.interactive
             sub.prop(settings, "left_click_action", text="Left Click")
             sub.prop(settings, "right_click_action", text="Right Click")
-            sub.row().prop(settings, "scroll_wheel_mode", text="Wheel Scroll")
+            sub.row().prop(settings, "scroll_wheel_mode", text="Scroll Wheel", expand=True)
             sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
 
 

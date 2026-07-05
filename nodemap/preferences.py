@@ -183,8 +183,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Node Labels",
         description="How labels appear in the minimap",
         items=[
-            ("FULL", "Full Name", "Display full name split across lines"),
-            ("COMPACT", "Name Initials", "Display abbreviated initials"),
+            ("COMPACT", "Initials", "Display abbreviated initials"),
+            ("FULL", "Name", "Display full name split across lines"),
         ],
         default="COMPACT",
     )
@@ -227,10 +227,10 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     scroll_wheel_mode: EnumProperty(
         name="Scroll Wheel",
-        description="What the scroll wheel controls when hovering the minimap.\nAlt key to switch action",
+        description="Choose what the scroll wheel zooms (Hold Alt to switch)",
         items=[
-            ("NODE_EDITOR", "Node Editor Zoom", "Zoom the actual node editor viewport"),
-            ("MINIMAP", "Minimap Zoom", "Zoom the minimap's internal view"),
+            ("MINIMAP", "Minimap", "Zoom the minimap view"),
+            ("NODE_EDITOR", "Editor", "Zoom the node editor view"),
         ],
         default="NODE_EDITOR",
     )
