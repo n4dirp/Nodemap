@@ -163,6 +163,8 @@ def _get_safe_bounds(
 
 
 _minimap_state: dict[int, dict] = {}
+_minimap_window_operators: dict[int, Any] = {}
+_registration_state: dict[str, bool] = {"done": False}
 
 _DEFAULT_STATE: dict = {
     "rect": (0, 0, 0, 0),
@@ -174,7 +176,6 @@ _DEFAULT_STATE: dict = {
     "zoom": 1.0,
     "base_zoom": 1.0,
     "pan": [0.0, 0.0],
-    "modal_active": False,
     "enabled": True,
     "frame_all_btn": None,
 }
@@ -197,6 +198,26 @@ def _state(area_ptr: int | None = None) -> dict:
             pass
         _minimap_state[area_ptr] = state
     return _minimap_state[area_ptr]
+
+
+def _ensure_area_states() -> None:
+    """Pre-populate state for all existing NODE_EDITOR areas (called at registration)."""
+    wm = bpy.context.window_manager
+    if not wm:
+        logger.debug("_ensure_area_states: no window_manager")
+        return
+    count = 0
+    for window in wm.windows:
+        if not window or not window.screen:
+            continue
+        for area in window.screen.areas:
+            if area.type == "NODE_EDITOR":
+                ptr = area.as_pointer()
+                _state(ptr)
+                count += 1
+                win_name = window.screen.name if window.screen else "?"
+                logger.debug("_ensure_area_states: created state for area %d (window %s)", ptr, win_name)
+    logger.debug("_ensure_area_states: %d NODE_EDITOR areas processed", count)
 
 
 def _get_node_dims(node: bpy.types.Node) -> tuple[float, float]:
@@ -240,9 +261,28 @@ def _get_node_tree_bounds(nodes: bpy.types.Nodes) -> tuple[float, float, float, 
     return min_x, min_y, max_x, max_y
 
 
-def _get_minimap_transform() -> tuple[float, float, float, float, float]:
+def _get_area_and_region_under_mouse(context, event) -> tuple:
+    """Find the area and WINDOW region under the mouse cursor using screen coordinates."""
+    window = getattr(context, "window", None)
+    if not window:
+        return None, None
+    mx, my = event.mouse_x, event.mouse_y
+    for area in window.screen.areas:
+        if area.x <= mx <= area.x + area.width and area.y <= my <= area.y + area.height:
+            for region in area.regions:
+                if (
+                    region.type == "WINDOW"
+                    and region.x <= mx <= region.x + region.width
+                    and region.y <= my <= region.y + region.height
+                ):
+                    return area, region
+    return None, None
+
+
+def _get_minimap_transform(st: dict | None = None) -> tuple[float, float, float, float, float]:
     """Computes internal transformations representing scale, zoom, and panning inside the minimap."""
-    st = _state()
+    if st is None:
+        st = _state()
     rect = st.get("rect", (0, 0, 100, 100))
     bounds = st.get("tree_bounds", (0, 0, 100, 100))
     padding = st.get("padding", 6 * _get_ui_scale())

@@ -3,15 +3,17 @@
 import logging
 
 import bpy
-from bpy.types import Context, Event, Operator
+from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
 from .helpers import (
     _clamp_pan_to_viewport,
     _find_node_at,
+    _get_area_and_region_under_mouse,
     _get_minimap_transform,
     _get_safe_bounds,
     _get_ui_scale,
     _get_visible_rect,
+    _minimap_window_operators,
     _state,
     frame_all,
     frame_selected,
@@ -22,16 +24,19 @@ from .helpers import (
 logger = logging.getLogger(__package__)
 
 
-def _is_in_minimap(region_x: int, region_y: int) -> bool:
-    st = _state()
+def _is_in_minimap(region_x: int, region_y: int, st: dict | None = None) -> bool:
+    if st is None:
+        st = _state()
     mx, my, mw, mh = st.get("rect", (0, 0, 0, 0))
     return mx <= region_x <= mx + mw and my <= region_y <= my + mh
 
 
-def _region_to_tree(region_x: int, region_y: int) -> tuple[float, float] | None:
-    if not _state().get("rect"):
+def _region_to_tree(region_x: int, region_y: int, st: dict | None = None) -> tuple[float, float] | None:
+    if st is None:
+        st = _state()
+    if not st.get("rect"):
         return None
-    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
+    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st)
     if scale <= 0:
         return None
     tx = tree_cx + (region_x - cx) / scale
@@ -133,12 +138,19 @@ class NODEMAP_OT_navigate(Operator):
     bl_options = {"INTERNAL"}
 
     _drag_start: tuple[int, int] | None = None
-    _area_ptr: int = 0
+    _window_ptr: int = 0
     _dragging: bool = False
     _was_in_minimap: bool = False
 
     _mmb_dragging: bool = False
     _mmb_drag_start: tuple[int, int] | None = None
+
+    _mx: int = 0
+    _my: int = 0
+    _st: dict | None = None
+    _area: Area | None = None
+    _region: Region | None = None
+    _space: SpaceNodeEditor | None = None
 
     _resize_handle: str | None = None
     _resize_start_mouse: tuple[int, int] | None = None
@@ -148,29 +160,46 @@ class NODEMAP_OT_navigate(Operator):
     _redirect_acc: list[float]
     _frame_all_armed: bool = False
 
+    def _override_ctx(self, context: Context):
+        return context.temp_override(
+            area=self._area,
+            region=self._region,
+            space_data=self._space,
+        )
+
     def modal(self, context: Context, event: Event) -> set[str]:
-        if not context.area:
-            st = _state(self._area_ptr)
-            st["modal_active"] = False
-            st["modal_area_ptr"] = 0
+        if not context.window:
             return {"CANCELLED"}
-        st = _state()
-        area_ptr_now = context.area.as_pointer()
-        modal_ptr = st.get("modal_area_ptr", 0)
-        if modal_ptr != area_ptr_now:
-            st = _state(self._area_ptr)
-            st["modal_active"] = False
-            st["modal_area_ptr"] = 0
+        win_ptr = context.window.as_pointer()
+        if _minimap_window_operators.get(win_ptr) is not self:
             return {"CANCELLED"}
-        if not st.get("enabled", True):
+
+        # Find the actual area under the mouse (like Filmstrip).
+        area, region = _get_area_and_region_under_mouse(context, event)
+        if not area or area.type != "NODE_EDITOR" or not region:
+            self._st = None
+            self._area = None
+            self._region = None
+            self._space = None
             return {"PASS_THROUGH"}
+
+        self._st = _state(area.as_pointer())
+        self._area = area
+        self._region = region
+        self._space = area.spaces.active
+        if not self._st.get("enabled", True):
+            return {"PASS_THROUGH"}
+        self._mx = event.mouse_x - region.x
+        self._my = event.mouse_y - region.y
+        logger.log(5, "modal: event %s value=%s", event.type, event.value)
 
         addon = context.preferences.addons.get(__package__)
         if addon and not getattr(addon.preferences.settings, "interactive", True):
             return {"PASS_THROUGH"}
         settings = addon.preferences.settings if addon else None
 
-        in_minimap = _is_in_minimap(event.mouse_region_x, event.mouse_region_y)
+        st = self._st
+        in_minimap = _is_in_minimap(self._mx, self._my, st)
 
         match event.type:
             case "LEFTMOUSE":
@@ -181,8 +210,8 @@ class NODEMAP_OT_navigate(Operator):
                         btn = st.get("frame_all_btn")
                         if btn:
                             bx, by, bw, bh = btn
-                            mx = event.mouse_region_x
-                            my = event.mouse_region_y
+                            mx = self._mx
+                            my = self._my
                             if bx <= mx <= bx + bw and by <= my <= by + bh:
                                 frame_all()
                         return {"RUNNING_MODAL"}
@@ -192,7 +221,6 @@ class NODEMAP_OT_navigate(Operator):
                         self._resize_start_values = None
                         context.window.cursor_modal_set("DEFAULT")
                         self._last_cursor = ""
-                        st = _state()
                         st["width_clamped"] = False
                         st["height_clamped"] = False
                         st["hovered_handle"] = None
@@ -206,7 +234,7 @@ class NODEMAP_OT_navigate(Operator):
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
                         if settings and settings.left_click_action in ("SELECT", "PAN_SELECT"):
-                            self._handle_click_selection(context, event)
+                            self._handle_click_selection(context, event, st)
                         self._was_in_minimap = False
                         self._drag_start = None
                         return {"RUNNING_MODAL"}
@@ -219,8 +247,8 @@ class NODEMAP_OT_navigate(Operator):
                     btn = st.get("frame_all_btn")
                     if btn:
                         bx, by, bw, bh = btn
-                        mx = event.mouse_region_x
-                        my = event.mouse_region_y
+                        mx = self._mx
+                        my = self._my
                         if bx <= mx <= bx + bw and by <= my <= by + bh:
                             self._frame_all_armed = True
                             return {"RUNNING_MODAL"}
@@ -230,7 +258,7 @@ class NODEMAP_OT_navigate(Operator):
                             self._resize_handle = handle
                             st["resize_active"] = handle
                             redraw_ui("NODE_EDITOR")
-                            self._resize_start_mouse = (event.mouse_region_x, event.mouse_region_y)
+                            self._resize_start_mouse = (self._mx, self._my)
                             self._resize_start_values = (
                                 settings.minimap_width,
                                 settings.minimap_height,
@@ -239,9 +267,9 @@ class NODEMAP_OT_navigate(Operator):
                             context.window.cursor_modal_set(cursor)
                             self._last_cursor = cursor
                             return {"RUNNING_MODAL"}
-                    self._drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    self._drag_start = (self._mx, self._my)
                     if settings and settings.left_click_action in ("PAN", "PAN_SELECT"):
-                        self._center_view_on_mouse(context, event.mouse_region_x, event.mouse_region_y)
+                        self._center_view_on_mouse(context, self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 else:
                     self._drag_start = None
@@ -256,7 +284,6 @@ class NODEMAP_OT_navigate(Operator):
                         self._resize_start_values = None
                         context.window.cursor_modal_set("DEFAULT")
                         self._last_cursor = ""
-                        st = _state()
                         st["width_clamped"] = False
                         st["height_clamped"] = False
                         st["hovered_handle"] = None
@@ -270,7 +297,7 @@ class NODEMAP_OT_navigate(Operator):
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
                         if settings and settings.right_click_action in ("SELECT", "PAN_SELECT"):
-                            self._handle_click_selection(context, event)
+                            self._handle_click_selection(context, event, st)
                         self._was_in_minimap = False
                         self._drag_start = None
                         return {"RUNNING_MODAL"}
@@ -286,7 +313,7 @@ class NODEMAP_OT_navigate(Operator):
                             self._resize_handle = handle
                             st["resize_active"] = handle
                             redraw_ui("NODE_EDITOR")
-                            self._resize_start_mouse = (event.mouse_region_x, event.mouse_region_y)
+                            self._resize_start_mouse = (self._mx, self._my)
                             self._resize_start_values = (
                                 settings.minimap_width,
                                 settings.minimap_height,
@@ -295,9 +322,9 @@ class NODEMAP_OT_navigate(Operator):
                             context.window.cursor_modal_set(cursor)
                             self._last_cursor = cursor
                             return {"RUNNING_MODAL"}
-                    self._drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    self._drag_start = (self._mx, self._my)
                     if settings and settings.right_click_action in ("PAN", "PAN_SELECT"):
-                        self._center_view_on_mouse(context, event.mouse_region_x, event.mouse_region_y)
+                        self._center_view_on_mouse(context, self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 else:
                     self._drag_start = None
@@ -306,7 +333,7 @@ class NODEMAP_OT_navigate(Operator):
             case "MIDDLEMOUSE":
                 if event.value == "PRESS" and in_minimap:
                     self._mmb_dragging = True
-                    self._mmb_drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    self._mmb_drag_start = (self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 if event.value == "RELEASE" and self._mmb_dragging:
                     self._mmb_dragging = False
@@ -326,21 +353,21 @@ class NODEMAP_OT_navigate(Operator):
                     old_hovered = st.get("hovered_node")
                     new_hovered = None
                     if in_minimap:
-                        tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
-                        if tree_coord and context.space_data.edit_tree:
-                            hovered = _find_node_at(context.space_data.edit_tree.nodes, tree_coord[0], tree_coord[1])
+                        tree_coord = _region_to_tree(self._mx, self._my, st)
+                        if tree_coord and self._space and self._space.edit_tree:
+                            hovered = _find_node_at(self._space.edit_tree.nodes, tree_coord[0], tree_coord[1])
                             if hovered:
                                 new_hovered = hovered.name
                     if old_hovered != new_hovered:
                         st["hovered_node"] = new_hovered
                         redraw_ui("NODE_EDITOR")
                 if self._mmb_dragging and self._mmb_drag_start:
-                    dx = event.mouse_region_x - self._mmb_drag_start[0]
-                    dy = event.mouse_region_y - self._mmb_drag_start[1]
+                    dx = self._mx - self._mmb_drag_start[0]
+                    dy = self._my - self._mmb_drag_start[1]
                     pan_before = st["pan"][0], st["pan"][1]
                     st["pan"][0] += dx
                     st["pan"][1] += dy
-                    _clamp_pan_to_viewport(context.space_data, context.region, st)
+                    _clamp_pan_to_viewport(self._space, self._region, st)
                     rejected_x = dx - (st["pan"][0] - pan_before[0])
                     rejected_y = dy - (st["pan"][1] - pan_before[1])
                     if (rejected_x != 0 or rejected_y != 0) and getattr(settings, "follow_view", False):
@@ -349,17 +376,17 @@ class NODEMAP_OT_navigate(Operator):
                         self._redirect_to_view2d(context, -dx, -dy)
                     elif rejected_x != 0 or rejected_y != 0:
                         self._redirect_to_view2d(context, -int(rejected_x), -int(rejected_y))
-                    self._mmb_drag_start = (event.mouse_region_x, event.mouse_region_y)
+                    self._mmb_drag_start = (self._mx, self._my)
                     redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
                 if self._drag_start is not None:
-                    dx = event.mouse_region_x - self._drag_start[0]
-                    dy = event.mouse_region_y - self._drag_start[1]
+                    dx = self._mx - self._drag_start[0]
+                    dy = self._my - self._drag_start[1]
                     if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
                         self._dragging = True
                         if self._was_in_minimap:
                             self._pan_view(context, dx, dy)
-                            self._drag_start = (event.mouse_region_x, event.mouse_region_y)
+                            self._drag_start = (self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 if in_minimap:
                     return {"RUNNING_MODAL"}
@@ -368,9 +395,7 @@ class NODEMAP_OT_navigate(Operator):
             case "WHEELUPMOUSE" | "WHEELDOWNMOUSE":
                 if in_minimap:
                     if event.ctrl or event.shift:
-                        space = context.space_data
-                        region = context.region
-                        visible = _get_visible_rect(space, region)
+                        visible = _get_visible_rect(self._space, self._region)
                         if visible:
                             ui_scale = _get_ui_scale()
                             vw = (visible[2] - visible[0]) * ui_scale
@@ -380,7 +405,8 @@ class NODEMAP_OT_navigate(Operator):
                             pan_x = int(vw * scroll_factor * -direction) if event.ctrl else 0
                             pan_y = int(vh * scroll_factor * direction) if event.shift else 0
                             try:
-                                bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                                with self._override_ctx(context):
+                                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
                             except RuntimeError:
                                 pass
                         redraw_ui("NODE_EDITOR")
@@ -394,10 +420,11 @@ class NODEMAP_OT_navigate(Operator):
                     if scroll_mode == "NODE_EDITOR":
                         try:
                             zoom_factor = 0.05
-                            if event.type == "WHEELUPMOUSE":
-                                bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
-                            else:
-                                bpy.ops.view2d.zoom_out(zoomfacx=-zoom_factor, zoomfacy=-zoom_factor)
+                            with self._override_ctx(context):
+                                if event.type == "WHEELUPMOUSE":
+                                    bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
+                                else:
+                                    bpy.ops.view2d.zoom_out(zoomfacx=-zoom_factor, zoomfacy=-zoom_factor)
                         except RuntimeError:
                             pass
                     else:
@@ -412,14 +439,15 @@ class NODEMAP_OT_navigate(Operator):
                         if is_constrained and event.type == "WHEELUPMOUSE":
                             try:
                                 zoom_factor = 0.05
-                                bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
+                                with self._override_ctx(context):
+                                    bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
                             except RuntimeError:
                                 pass
                         else:
                             new_zoom = max(0.1, min(effective_zoom * zoom_delta, 20.0))
 
-                            cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
-                            tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
+                            cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st)
+                            tree_coord = _region_to_tree(self._mx, self._my, st)
 
                             if scale > 0 and tree_coord is not None:
                                 tx, ty = tree_coord
@@ -432,7 +460,7 @@ class NODEMAP_OT_navigate(Operator):
                                 st["base_zoom"] = new_zoom
                                 st["zoom"] = new_zoom
                                 st["pan"] = [pan_x_new, pan_y_new]
-                                _clamp_pan_to_viewport(context.space_data, context.region, st)
+                                _clamp_pan_to_viewport(self._space, self._region, st)
 
                     redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
@@ -453,36 +481,40 @@ class NODEMAP_OT_navigate(Operator):
             case _:
                 return {"PASS_THROUGH"}
 
-    def _handle_click_selection(self, context: Context, event: Event) -> None:
-        space = context.space_data
+    def _handle_click_selection(self, context: Context, event: Event, st: dict) -> None:
+        space = self._space
         if not space or space.type != "NODE_EDITOR":
             return
         node_tree = space.edit_tree
         if not node_tree or not node_tree.nodes:
             return
 
-        tree_coord = _region_to_tree(event.mouse_region_x, event.mouse_region_y)
+        tree_coord = _region_to_tree(self._mx, self._my, st)
         if tree_coord is None:
             return
 
         node = _find_node_at(node_tree.nodes, tree_coord[0], tree_coord[1])
         if node:
-            bpy.ops.node.select_all(action="DESELECT")
+            with self._override_ctx(context):
+                bpy.ops.node.select_all(action="DESELECT")
             node.select = True
             node_tree.nodes.active = node
 
             addon = context.preferences.addons.get(__package__)
             if addon and getattr(addon.preferences.settings, "auto_frame_selected", True):
                 try:
-                    bpy.ops.node.view_selected()
+                    with self._override_ctx(context):
+                        bpy.ops.node.view_selected()
                 except RuntimeError:
                     pass
 
-        _state()["hovered_node"] = None
+        st["hovered_node"] = None
         redraw_ui("NODE_EDITOR")
 
     def _pan_view(self, context: Context, dx: int, dy: int) -> None:
-        st = _state()
+        st = self._st
+        if not st:
+            return
         rect = st.get("rect", (0, 0, 100, 100))
         bounds = st.get("tree_bounds", (0, 0, 100, 100))
         padding = st.get("padding", 6 * _get_ui_scale())
@@ -495,15 +527,13 @@ class NODEMAP_OT_navigate(Operator):
         scale = base_scale * st.get("zoom", 1.0)
         if scale <= 0:
             return
-        space = context.space_data
-        region = context.region
-        visible = _get_visible_rect(space, region)
+        visible = _get_visible_rect(self._space, self._region)
 
         if visible:
             vw_rect = visible[2] - visible[0]
             vh_rect = visible[3] - visible[1]
-            view_zoom_x = region.width / vw_rect if vw_rect > 0 else 1.0
-            view_zoom_y = region.height / vh_rect if vh_rect > 0 else 1.0
+            view_zoom_x = self._region.width / vw_rect if vw_rect > 0 else 1.0
+            view_zoom_y = self._region.height / vh_rect if vh_rect > 0 else 1.0
 
             self._pan_acc[0] += (dx / scale) * view_zoom_x
             self._pan_acc[1] += (dy / scale) * view_zoom_y
@@ -514,11 +544,11 @@ class NODEMAP_OT_navigate(Operator):
 
             if pan_x != 0 or pan_y != 0:
                 try:
-                    st = _state()
                     pan_before = st["pan"][0], st["pan"][1]
 
-                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                    _clamp_pan_to_viewport(space, region, st)
+                    with self._override_ctx(context):
+                        bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                    _clamp_pan_to_viewport(self._space, self._region, st)
 
                     clamp_dx = st["pan"][0] - pan_before[0]
                     clamp_dy = st["pan"][1] - pan_before[1]
@@ -533,13 +563,16 @@ class NODEMAP_OT_navigate(Operator):
                         self._pan_acc[1] -= extra_pan_y
 
                         if extra_pan_x != 0 or extra_pan_y != 0:
-                            bpy.ops.view2d.pan(deltax=extra_pan_x, deltay=extra_pan_y)
-                            _clamp_pan_to_viewport(space, region, st)
+                            with self._override_ctx(context):
+                                bpy.ops.view2d.pan(deltax=extra_pan_x, deltay=extra_pan_y)
+                            _clamp_pan_to_viewport(self._space, self._region, st)
                 except RuntimeError:
                     pass
 
     def _redirect_to_view2d(self, context: Context, dx: float, dy: float) -> None:
-        st = _state()
+        st = self._st
+        if not st:
+            return
         rect = st.get("rect", (0, 0, 100, 100))
         bounds = st.get("tree_bounds", (0, 0, 100, 100))
         padding = st.get("padding", 6 * _get_ui_scale())
@@ -552,15 +585,13 @@ class NODEMAP_OT_navigate(Operator):
         scale = base_scale * st.get("zoom", 1.0)
         if scale <= 0:
             return
-        space = context.space_data
-        region = context.region
-        visible = _get_visible_rect(space, region)
+        visible = _get_visible_rect(self._space, self._region)
         if not visible:
             return
         vw = visible[2] - visible[0]
         vh = visible[3] - visible[1]
-        view_zoom_x = region.width / vw if vw > 0 else 1.0
-        view_zoom_y = region.height / vh if vh > 0 else 1.0
+        view_zoom_x = self._region.width / vw if vw > 0 else 1.0
+        view_zoom_y = self._region.height / vh if vh > 0 else 1.0
         self._redirect_acc[0] += (dx / scale) * view_zoom_x
         self._redirect_acc[1] += (dy / scale) * view_zoom_y
         pan_x = int(self._redirect_acc[0])
@@ -569,18 +600,20 @@ class NODEMAP_OT_navigate(Operator):
         self._redirect_acc[1] -= pan_y
         if pan_x != 0 or pan_y != 0:
             try:
-                bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                with self._override_ctx(context):
+                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
             except RuntimeError:
                 pass
 
     def _center_view_on_mouse(self, context: Context, mx: int, my: int) -> None:
-        tree_coord = _region_to_tree(mx, my)
+        st = self._st
+        if not st:
+            return
+        tree_coord = _region_to_tree(mx, my, st)
         if not tree_coord:
             return
 
-        space = context.space_data
-        region = context.region
-        visible = _get_visible_rect(space, region)
+        visible = _get_visible_rect(self._space, self._region)
 
         if visible:
             view_cx = (visible[0] + visible[2]) / 2.0
@@ -590,23 +623,24 @@ class NODEMAP_OT_navigate(Operator):
 
             vw = visible[2] - visible[0]
             vh = visible[3] - visible[1]
-            view_zoom_x = region.width / vw if vw > 0 else 1.0
-            view_zoom_y = region.height / vh if vh > 0 else 1.0
+            view_zoom_x = self._region.width / vw if vw > 0 else 1.0
+            view_zoom_y = self._region.height / vh if vh > 0 else 1.0
 
             pan_x = int(delta_tree_x * view_zoom_x)
             pan_y = int(delta_tree_y * view_zoom_y)
             if pan_x != 0 or pan_y != 0:
                 try:
-                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                    _clamp_pan_to_viewport(space, region, _state())
+                    with self._override_ctx(context):
+                        bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                    _clamp_pan_to_viewport(self._space, self._region, st)
                 except RuntimeError:
                     pass
 
     def _update_cursor(self, context: Context, event: Event) -> None:
-        st = _state()
-        if not st.get("rect"):
+        st = self._st
+        if not st or not st.get("rect"):
             return
-        in_minimap = _is_in_minimap(event.mouse_region_x, event.mouse_region_y)
+        in_minimap = _is_in_minimap(self._mx, self._my, st)
         if not in_minimap:
             if self._last_cursor:
                 context.window.cursor_modal_set("DEFAULT")
@@ -628,13 +662,15 @@ class NODEMAP_OT_navigate(Operator):
             self._last_cursor = cursor
 
     def _get_handle_at(self, context: Context, event: Event) -> str | None:
-        st = _state()
+        st = self._st
+        if not st:
+            return None
         addon = context.preferences.addons.get(__package__)
         if not addon:
             return None
         corner = getattr(addon.preferences.settings, "position", "TOP_RIGHT")
         ui_scale = _get_ui_scale()
-        return _get_resize_handle(st, corner, event.mouse_region_x, event.mouse_region_y, ui_scale)
+        return _get_resize_handle(st, corner, self._mx, self._my, ui_scale)
 
     def _resize_apply_delta(self, context: Context, event: Event) -> None:
         addon = context.preferences.addons.get(__package__)
@@ -644,12 +680,12 @@ class NODEMAP_OT_navigate(Operator):
         if not self._resize_start_values:
             return
         w0, h0 = self._resize_start_values
-        dx = event.mouse_region_x - self._resize_start_mouse[0]
-        dy = event.mouse_region_y - self._resize_start_mouse[1]
+        dx = self._mx - self._resize_start_mouse[0]
+        dy = self._my - self._resize_start_mouse[1]
         corner = getattr(settings, "position", "TOP_RIGHT")
 
         ui_scale = _get_ui_scale()
-        sx, sy, ex, ey = _get_safe_bounds(context.area, context.region, context.space_data, corner)
+        sx, sy, ex, ey = _get_safe_bounds(self._area, self._region, self._space, corner)
         max_w = max(64, int(ex - sx - 10 * ui_scale))
         max_h = max(64, int(ey - sy - 35 * ui_scale))
 
@@ -672,32 +708,37 @@ class NODEMAP_OT_navigate(Operator):
         safe_h = ey - sy
         max_mw_pct = getattr(settings, "max_width_pct", 30) / 100.0
         max_mh_pct = getattr(settings, "max_height_pct", 40) / 100.0
-        st = _state()
+        st = self._st
+        if not st:
+            return
         st["hovered_handle"] = self._resize_handle
         st["width_clamped"] = settings.minimap_width * ui_scale > safe_w * max_mw_pct
         st["height_clamped"] = settings.minimap_height * ui_scale > safe_h * max_mh_pct
 
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":
+            logger.debug("invoke: cancelled — area type is %s", context.area.type)
             return {"CANCELLED"}
-        self._area_ptr = context.area.as_pointer()
+        self._window_ptr = context.window.as_pointer()
         self._pan_acc = [0.0, 0.0]
         self._redirect_acc = [0.0, 0.0]
         self._frame_all_armed = False
-        st = _state(self._area_ptr)
-        st["modal_active"] = True
-        st["modal_area_ptr"] = self._area_ptr
+        _minimap_window_operators[self._window_ptr] = self
         context.window_manager.modal_handler_add(self)
+        ops_keys = list(_minimap_window_operators.keys())
+        logger.debug("invoke: RUNNING_MODAL for window %d, ops=%s", self._window_ptr, ops_keys)
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context: Context) -> None:
-        st = _state(self._area_ptr)
-        st["modal_active"] = False
-        st["modal_area_ptr"] = 0
-        st["width_clamped"] = False
-        st["height_clamped"] = False
-        st["hovered_handle"] = None
-        st["resize_active"] = None
+        logger.debug("cancel: window %d ops_before=%s", self._window_ptr, list(_minimap_window_operators.keys()))
+        if self._window_ptr in _minimap_window_operators:
+            del _minimap_window_operators[self._window_ptr]
+        logger.debug("cancel: ops_after=%s", list(_minimap_window_operators.keys()))
+        if self._st is not None:
+            self._st["width_clamped"] = False
+            self._st["height_clamped"] = False
+            self._st["hovered_handle"] = None
+            self._st["resize_active"] = None
 
 
 class NODEMAP_OT_frame_selected(Operator):

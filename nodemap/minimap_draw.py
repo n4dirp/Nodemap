@@ -40,6 +40,8 @@ from .helpers import (
     _get_safe_bounds,
     _get_ui_scale,
     _get_visible_rect,
+    _minimap_window_operators,
+    _registration_state,
     _srgb_to_linear,
     _state,
     _theme_rgba,
@@ -1093,18 +1095,22 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
                 sy = cy + (sy_tree - tree_cy) * scale
                 socket_shadow.append((sx, sy, pw))
                 _pad = 1.5
-                socket_all_pos.extend([
-                    (sx - half_w - _pad, sy - half_h - _pad, 0.0),
-                    (sx + half_w + _pad, sy - half_h - _pad, 0.0),
-                    (sx + half_w + _pad, sy + half_h + _pad, 0.0),
-                    (sx - half_w - _pad, sy + half_h + _pad, 0.0),
-                ])
-                socket_all_uv.extend([
-                    (-half_w - _pad, -half_h - _pad),
-                    (half_w + _pad, -half_h - _pad),
-                    (half_w + _pad, half_h + _pad),
-                    (-half_w - _pad, half_h + _pad),
-                ])
+                socket_all_pos.extend(
+                    [
+                        (sx - half_w - _pad, sy - half_h - _pad, 0.0),
+                        (sx + half_w + _pad, sy - half_h - _pad, 0.0),
+                        (sx + half_w + _pad, sy + half_h + _pad, 0.0),
+                        (sx - half_w - _pad, sy + half_h + _pad, 0.0),
+                    ]
+                )
+                socket_all_uv.extend(
+                    [
+                        (-half_w - _pad, -half_h - _pad),
+                        (half_w + _pad, -half_h - _pad),
+                        (half_w + _pad, half_h + _pad),
+                        (-half_w - _pad, half_h + _pad),
+                    ]
+                )
                 socket_all_hs.extend([(half_w, half_h)] * 4)
                 socket_all_r.extend([r] * 4)
                 socket_all_c.extend([_srgb_to_linear(color)] * 4)
@@ -1164,18 +1170,41 @@ def draw_minimap() -> None:
     # Early exit checks
     st = _state()
     if _early_exit(context, space, st):
+        show_overlays = space.overlay.show_overlays if space else "?"
+        enabled = st.get("enabled", "?")
+        logger.debug("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
         return
 
     addon = context.preferences.addons.get(__package__)
     settings = addon.preferences.settings
 
-    # Auto-start modal operator for pan/zoom interaction
-    if getattr(settings, "interactive", True):
-        if not st.get("modal_active", False):
-            try:
-                bpy.ops.nodemap.navigate("INVOKE_DEFAULT")
-            except RuntimeError:
-                pass
+    # Defer auto-launch until registration is fully complete
+    # to avoid invoking the modal with a stale context.
+    if not _registration_state["done"]:
+        logger.debug("draw_minimap: registration not done, skipping auto-launch")
+    else:
+        # Auto-start modal operator for pan/zoom interaction (one per window)
+        win = context.window
+        win_ptr = win.as_pointer() if win else 0
+        has_modal = win_ptr in _minimap_window_operators if win else False
+        logger.debug(
+            "draw_minimap: area=%d win=%d modal_ops=%s has_modal=%s interactive=%s",
+            context.area.as_pointer() if context.area else 0,
+            win_ptr,
+            list(_minimap_window_operators.keys()),
+            has_modal,
+            getattr(settings, "interactive", True),
+        )
+        if getattr(settings, "interactive", True):
+            if win and not has_modal:
+                logger.debug("draw_minimap: invoking nodemap.navigate for window %d", win_ptr)
+                try:
+                    bpy.ops.nodemap.navigate("INVOKE_DEFAULT")
+                    logger.debug("draw_minimap: nodemap.navigate invoked successfully")
+                except RuntimeError as e:
+                    logger.debug("draw_minimap: nodemap.navigate failed: %s", e)
+            elif not win:
+                logger.debug("draw_minimap: cannot invoke — context.window is None")
 
     # Guard: must have a valid node tree with nodes
     node_tree = space.edit_tree

@@ -26,26 +26,23 @@ class NODEMAP_PT_popup(Panel):
 
         layout.label(text="Nodemap")
 
-        header, body = layout.panel("NODEMAP_PT_operators", default_closed=False)
-        header.label(text="Frame")
-        if body:
-            row = body.row(align=True)
-            row.operator("nodemap.frame_all", text="All")
-            row.operator("nodemap.frame_view", text="View")
-            row.operator("nodemap.frame_selected", text="Selected")
-
-            col = body.column(heading="Frame View", align=True)
-            col.prop(settings, "frame_view_fill", text="Fill View")
+        # header, body = layout.panel("NODEMAP_PT_operators", default_closed=False)
+        # header.label(text="Frame")
+        # if body:
+        row = layout.row(align=True)
+        row.operator("nodemap.frame_all", text="Frame All")
+        row.operator("nodemap.frame_view", text="Frame View")
+        # row.operator("nodemap.frame_selected", text="Selected")
 
         header, body = layout.panel("NODEMAP_PT_appearance", default_closed=False)
         header.label(text="Appearance")
         if body:
             col = body.column(heading="Show", align=True)
-            col.prop(settings, "show_node_count", text="Count")
             row = col.row(align=True)
             row.active = settings.interactive
             row.prop(settings, "show_frame_all_btn", text="Frame All")
-            col.prop(settings, "show_frames", text="Frames")
+            col.prop(settings, "show_frames", text="Frame Nodes")
+            col.prop(settings, "show_node_count", text="Node Count")
 
             # body.separator()
 
@@ -68,7 +65,7 @@ class NODEMAP_PT_popup(Panel):
             header, sub_body = body.panel("NODEMAP_PT_layout", default_closed=True)
             header.label(text="Layout")
             if sub_body:
-                sub_body.prop(settings, "position", text="Position", expand=True)
+                sub_body.prop(settings, "position", text="Position")
 
                 col = sub_body.column(align=True)
                 col.prop(settings, "minimap_width", text="Size X")
@@ -111,10 +108,13 @@ class NODEMAP_PT_popup(Panel):
 
             body.prop(settings, "follow_view", text="Follow View")
 
+            col = body.column(heading="Frame View", align=True)
+            col.prop(settings, "frame_view_fill", text="Fill View")
+
             sub_header, sub_body = body.panel("NODEMAP_PT_interactive", default_closed=False)
             sub_header.use_property_split = False
             sub_header.use_property_decorate = False
-            sub_header.prop(settings, "interactive", text="Interactive")
+            sub_header.prop(settings, "interactive", text="Map Navigation")
 
             if sub_body:
                 sub_body.active = settings.interactive

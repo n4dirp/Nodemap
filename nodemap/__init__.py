@@ -7,6 +7,7 @@ import logging
 import bpy
 from bpy.types import SpaceNodeEditor
 
+from .helpers import _ensure_area_states, _minimap_window_operators, _registration_state
 from .minimap_draw import draw_minimap
 from .minimap_ops import classes as operator_classes
 from .panels import classes as panel_classes
@@ -32,6 +33,8 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
+    _update_logger_from_prefs()
+
     global _draw_handler, _modal_operator
     _draw_handler = SpaceNodeEditor.draw_handler_add(
         draw_minimap,
@@ -41,7 +44,12 @@ def register():
     )
 
     bpy.types.NODE_HT_header.append(draw_minimap_header_button)
-    _update_logger_from_prefs()
+    logger.debug("Register complete, calling _ensure_area_states()")
+    _ensure_area_states()
+    logger.debug("_ensure_area_states() done")
+
+    _registration_state["done"] = True
+    logger.debug("Registration fully complete (_registration_done=True)")
 
 
 def unregister():
@@ -63,3 +71,6 @@ def unregister():
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
+
+    _minimap_window_operators.clear()
+    _registration_state["done"] = False
