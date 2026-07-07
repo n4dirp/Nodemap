@@ -190,6 +190,7 @@ def _state(area_ptr: int | None = None) -> dict:
             return {}
     if area_ptr not in _minimap_state:
         state = dict(_DEFAULT_STATE)
+        state["pan"] = list(state["pan"])
         try:
             prefs = bpy.context.preferences.addons.get(__package__)
             if prefs:
