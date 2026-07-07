@@ -225,7 +225,7 @@ class NODEMAP_OT_navigate(Operator):
                             mx = self._mx
                             my = self._my
                             if bx <= mx <= bx + bw and by <= my <= by + bh:
-                                frame_all()
+                                frame_all(self._space, self._region, self._area.as_pointer())
                         return {"RUNNING_MODAL"}
                     if self._resize_handle:
                         self._resize_handle = None
@@ -480,13 +480,13 @@ class NODEMAP_OT_navigate(Operator):
 
             case "HOME":
                 if event.value == "PRESS" and in_minimap:
-                    frame_all()
+                    frame_all(self._space, self._region, self._area.as_pointer())
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
             case "NUMPAD_PERIOD":
                 if event.value == "PRESS" and in_minimap:
-                    frame_selected()
+                    frame_selected(self._space, self._region, self._area.as_pointer())
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 

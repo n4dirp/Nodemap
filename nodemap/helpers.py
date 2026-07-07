@@ -465,15 +465,21 @@ def _get_visible_rect(
         return None
 
 
-def frame_all() -> None:
+def frame_all(
+    space: bpy.types.SpaceNodeEditor | None = None,
+    region: bpy.types.Region | None = None,
+    area_ptr: int | None = None,
+) -> None:
     """Adjust minimap zoom/pan to frame the entire node tree.
 
     When ``follow_view`` is enabled the editor viewport is included in the
     fit so that clamping cannot clip nodes afterward.
     """
-    st = _state()
-    space = bpy.context.space_data
-    region = bpy.context.region
+    st = _state(area_ptr)
+    if space is None:
+        space = bpy.context.space_data
+    if region is None:
+        region = bpy.context.region
     if not space or not region:
         return
     node_tree = space.edit_tree
@@ -533,6 +539,7 @@ def frame_all() -> None:
 def _frame_to_bounds(
     target_bounds: tuple[float, float, float, float],
     fill: bool = False,
+    area_ptr: int | None = None,
 ) -> None:
     """Adjust minimap zoom/pan to frame the given bounds in tree coordinates.
 
@@ -540,11 +547,7 @@ def _frame_to_bounds(
     (one axis may clip); when False the bounds fit within the minimap
     (empty space may remain).
     """
-    st = _state()
-    space = bpy.context.space_data
-    region = bpy.context.region
-    if not space or not region:
-        return
+    st = _state(area_ptr)
 
     rect = st.get("rect", (0, 0, 100, 100))
     padding = st.get("padding", 6 * _get_ui_scale())
@@ -578,10 +581,15 @@ def _frame_to_bounds(
     redraw_ui("NODE_EDITOR")
 
 
-def frame_selected() -> None:
+def frame_selected(
+    space: bpy.types.SpaceNodeEditor | None = None,
+    region: bpy.types.Region | None = None,
+    area_ptr: int | None = None,
+) -> None:
     """Adjust minimap zoom/pan to frame the selected node(s)."""
-    st = _state()
-    space = bpy.context.space_data
+    st = _state(area_ptr)
+    if space is None:
+        space = bpy.context.space_data
     if not space or space.type != "NODE_EDITOR":
         return
     node_tree = space.edit_tree
@@ -590,7 +598,7 @@ def frame_selected() -> None:
 
     selected = [n for n in node_tree.nodes if n.select]
     if not selected:
-        frame_all()
+        frame_all(space, region, area_ptr)
         return
 
     min_x = min_y = float("inf")
@@ -604,14 +612,20 @@ def frame_selected() -> None:
         max_y = max(max_y, y)
 
     st["tree_bounds"] = _get_node_tree_bounds(node_tree.nodes)
-    _frame_to_bounds((min_x, min_y, max_x, max_y))
+    _frame_to_bounds((min_x, min_y, max_x, max_y), area_ptr=area_ptr)
 
 
-def frame_view() -> None:
+def frame_view(
+    space: bpy.types.SpaceNodeEditor | None = None,
+    region: bpy.types.Region | None = None,
+    area_ptr: int | None = None,
+) -> None:
     """Adjust minimap zoom/pan to frame the current editor viewport."""
-    st = _state()
-    space = bpy.context.space_data
-    region = bpy.context.region
+    st = _state(area_ptr)
+    if space is None:
+        space = bpy.context.space_data
+    if region is None:
+        region = bpy.context.region
     if not space or not region:
         return
     node_tree = space.edit_tree
@@ -626,7 +640,7 @@ def frame_view() -> None:
     fill = addon and getattr(addon.preferences.settings, "frame_view_fill", False)
 
     st["tree_bounds"] = _get_node_tree_bounds(node_tree.nodes)
-    _frame_to_bounds(visible, fill=fill)
+    _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
 
 
 def _theme_rgba(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
