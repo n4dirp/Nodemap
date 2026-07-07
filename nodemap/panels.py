@@ -34,8 +34,8 @@ class NODEMAP_PT_popup(Panel):
             row.operator("nodemap.frame_view", text="View")
             row.operator("nodemap.frame_selected", text="Selected")
 
-            col = body.column(heading="View", align=True)
-            col.prop(settings, "frame_view_fill", text="Fill Minimap")
+            col = body.column(heading="Frame View", align=True)
+            col.prop(settings, "frame_view_fill", text="Fill View")
 
         header, body = layout.panel("NODEMAP_PT_appearance", default_closed=False)
         header.label(text="Appearance")
@@ -47,11 +47,14 @@ class NODEMAP_PT_popup(Panel):
             row.prop(settings, "show_frame_all_btn", text="Frame All")
             col.prop(settings, "show_frames", text="Frames")
 
+            # body.separator()
+
             row = body.row(heading="Links", align=True)
             row.prop(settings, "show_socket_indicators", text="Sockets")
             row.prop(settings, "show_wires", text="Wires")
 
-            body.separator()
+            # body.separator()
+
             col = body.column(heading="Labels")
             row = col.row(align=True, heading="")
             row.prop(settings, "show_names", text="")
@@ -65,7 +68,7 @@ class NODEMAP_PT_popup(Panel):
             header, sub_body = body.panel("NODEMAP_PT_layout", default_closed=True)
             header.label(text="Layout")
             if sub_body:
-                sub_body.prop(settings, "position", text="Position")
+                sub_body.prop(settings, "position", text="Position", expand=True)
 
                 col = sub_body.column(align=True)
                 col.prop(settings, "minimap_width", text="Size X")
@@ -78,21 +81,29 @@ class NODEMAP_PT_popup(Panel):
             header, body = body.panel("NODEMAP_PT_theme", default_closed=True)
             header.label(text="Theme")
             if body:
+                body.prop(settings, "opacity", text="Opacity", slider=True)
+
+                col = body.column()
+
+                row = col.row(heading="Overlay", align=True)
+                row.prop(settings, "show_viewport_overlay", text="")
+                sub = row.row(align=True)
+                sub.active = settings.show_viewport_overlay
+                sub.prop(settings, "viewport_overlay_color", text="")
+
+                row = col.row(heading="Background", align=True)
+                row.prop(settings, "custom_bg_color", text="")
+                sub = row.row(align=True)
+                sub.active = settings.custom_bg_color
+                sub.prop(settings, "bg_color", text="")
+
                 row = body.row(heading="Colored", align=True)
                 row.prop(settings, "colored_nodes", text="Nodes")
                 sub = row.row(align=True)
                 sub.active = settings.show_wires | settings.show_socket_indicators
                 sub.prop(settings, "show_wire_color", text="Wires")
 
-                row = body.row(heading="Background", align=True)
-                row.prop(settings, "custom_bg_color", text="")
-                sub = row.row(align=True)
-                sub.active = settings.custom_bg_color
-                sub.prop(settings, "bg_color", text="")
-
-                body.prop(settings, "opacity", text="Opacity", slider=True)
-
-        header, body = layout.panel("NODEMAP_PT_behavior", default_closed=False)
+        header, body = layout.panel("NODEMAP_PT_behavior", default_closed=True)
         header.label(text="Behavior")
         if body:
             col = body.column(heading="Minimap", align=True)
@@ -100,7 +111,7 @@ class NODEMAP_PT_popup(Panel):
 
             body.prop(settings, "follow_view", text="Follow View")
 
-            sub_header, sub_body = body.panel("NODEMAP_PT_interactive", default_closed=True)
+            sub_header, sub_body = body.panel("NODEMAP_PT_interactive", default_closed=False)
             sub_header.use_property_split = False
             sub_header.use_property_decorate = False
             sub_header.prop(settings, "interactive", text="Interactive")

@@ -47,6 +47,21 @@ def _update_logger_from_prefs():
     logger.setLevel(level_map[level])
 
 
+def _update_minimap_cache(self, context):
+    """Invalidate compiled batches in all active states and trigger UI redraw."""
+    try:
+        # Avoid module-level circular imports
+        from .helpers import _minimap_state, redraw_ui
+
+        for state in _minimap_state.values():
+            if "cached_key" in state:
+                state["cached_key"] = None
+            state.pop("cached_fingerprint", None)
+        redraw_ui("NODE_EDITOR")
+    except (ImportError, AttributeError):
+        pass
+
+
 class AddonLogFormatter(logging.Formatter):
     """Custom formatter to provide timestamped and addon-prefixed logs."""
 
@@ -87,6 +102,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("BOTTOM_RIGHT", "Bottom Right", "Display in the bottom-right corner"),
         ],
         default="TOP_LEFT",
+        update=_update_minimap_cache,
     )
 
     minimap_width: IntProperty(
@@ -95,6 +111,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=256,
         min=64,
         subtype="PIXEL",
+        update=_update_minimap_cache,
     )
 
     minimap_height: IntProperty(
@@ -103,6 +120,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=128,
         min=64,
         subtype="PIXEL",
+        update=_update_minimap_cache,
     )
 
     max_width_pct: IntProperty(
@@ -112,6 +130,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         min=10,
         max=100,
         subtype="PERCENTAGE",
+        update=_update_minimap_cache,
     )
 
     max_height_pct: IntProperty(
@@ -121,6 +140,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         min=10,
         max=100,
         subtype="PERCENTAGE",
+        update=_update_minimap_cache,
     )
 
     opacity: FloatProperty(
@@ -131,12 +151,14 @@ class NODEMAP_PG_settings(PropertyGroup):
         max=1.0,
         precision=3,
         subtype="FACTOR",
+        update=_update_minimap_cache,
     )
 
     custom_bg_color: BoolProperty(
         name="Custom Background",
         description="Use a custom background color instead of the Blender theme color",
         default=False,
+        update=_update_minimap_cache,
     )
 
     bg_color: FloatVectorProperty(
@@ -147,36 +169,58 @@ class NODEMAP_PG_settings(PropertyGroup):
         min=0.0,
         max=1.0,
         subtype="COLOR_GAMMA",
+        update=_update_minimap_cache,
+    )
+
+    show_viewport_overlay: BoolProperty(
+        name="Viewport Overlay",
+        description="Show darkened overlay with viewport cutout in the minimap",
+        default=True,
+    )
+
+    viewport_overlay_color: FloatVectorProperty(
+        name="Viewport Overlay Color",
+        description="Color of the viewport overlay",
+        default=(0.0, 0.0, 0.0, 0.5),
+        size=4,
+        min=0.0,
+        max=1.0,
+        subtype="COLOR_GAMMA",
     )
 
     show_node_count: BoolProperty(
         name="Show Node Count",
         description="Display node count at the bottom of the minimap",
         default=True,
+        update=_update_minimap_cache,
     )
 
     show_frame_all_btn: BoolProperty(
         name="Frame All Button",
         description="Show a frame-all button inside the minimap",
         default=False,
+        update=_update_minimap_cache,
     )
 
     show_names: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
         default=True,
+        update=_update_minimap_cache,
     )
 
     show_frames: BoolProperty(
         name="Show Frames",
         description="Display frame node backgrounds in the minimap",
         default=True,
+        update=_update_minimap_cache,
     )
 
     show_frame_labels: BoolProperty(
         name="Show Frame Labels",
         description="Display labels above frame nodes in the minimap",
         default=True,
+        update=_update_minimap_cache,
     )
 
     node_label_mode: EnumProperty(
@@ -187,30 +231,45 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("FULL", "Name", "Display full name split across lines"),
         ],
         default="COMPACT",
+        update=_update_minimap_cache,
     )
 
     colored_nodes: BoolProperty(
         name="Colored Nodes",
         description="Use custom node colors and color tags",
         default=True,
+        update=_update_minimap_cache,
     )
 
     show_wires: BoolProperty(
         name="Show Wires",
         description="Display node connections in the minimap",
         default=True,
+        update=_update_minimap_cache,
     )
 
     show_wire_color: BoolProperty(
         name="Socket Wire Colors",
         description="Color wires by the output socket type",
         default=True,
+        update=_update_minimap_cache,
     )
 
     show_socket_indicators: BoolProperty(
         name="Socket Indicators",
         description="Display colored indicator pills on node sockets",
-        default=True,
+        default=False,
+        update=_update_minimap_cache,
+    )
+
+    debounce_interval: FloatProperty(
+        name="Update Delay",
+        description="Delay in seconds before the minimap updates after a change (0 = instant)",
+        default=0.08,
+        min=0.0,
+        max=0.5,
+        step=0.01,
+        unit="TIME_ABSOLUTE",
     )
 
     auto_frame_selected: BoolProperty(
@@ -223,6 +282,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Interactive",
         description="Enable mouse and keyboard interaction with the minimap",
         default=True,
+        update=_update_minimap_cache,
     )
 
     scroll_wheel_mode: EnumProperty(
@@ -239,6 +299,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Follow View",
         description="Keep the editor viewport inside the minimap by adjusting the minimap pan automatically",
         default=False,
+        update=_update_minimap_cache,
     )
 
     frame_view_fill: BoolProperty(
@@ -299,6 +360,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+
+        layout.label(text="Performance")
+        layout.prop(self.settings, "debounce_interval", text="Update Delay")
 
         layout.label(text="Development")
         row = layout.row(align=True, heading="Console Logging")

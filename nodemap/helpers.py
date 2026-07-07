@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+import blf
 import bpy
 
 logger = logging.getLogger(__package__)
@@ -609,7 +610,8 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "bg": bg,
         "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
         "node": _theme_rgba("user_interface.wcol_regular.inner", (0.25, 0.25, 0.25, 1.0)),
-        "node_selected": _theme_rgba("node_editor.node_active", (0.28, 0.45, 0.7, 1.0)),
+        "node_selected": _theme_rgba("node_editor.node_selected", (0.28, 0.45, 0.7, 1.0)),
+        "node_active": _theme_rgba("node_editor.node_active", (1.0, 1.0, 1.0, 1.0)),
         "node_border": _theme_rgba("user_interface.wcol_regular.outline", (1.0, 1.0, 1.0, 0.12)),
         "wire": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
         "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
@@ -620,3 +622,55 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
     }
+
+
+def get_tree_fingerprint(node_tree) -> tuple:
+    """Generate a lightweight fingerprint of the node tree structure and selection states."""
+    if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
+        return (0, 0.0, 0, 0, 0)
+    nodes = node_tree.nodes
+    loc_sum = sum(n.location_absolute.x + n.location_absolute.y for n in nodes)
+    select_sum = sum(1 for n in nodes if n.select)
+    mute_sum = sum(1 for n in nodes if n.mute)
+    links_count = len(node_tree.links) if hasattr(node_tree, "links") else 0
+    active_name = nodes.active.name if nodes.active else ""
+    return (len(nodes), loc_sum, active_name, select_sum, mute_sum, links_count)
+
+
+def _get_node_initials(name: str) -> str:
+    """Extract 1-2 uppercase initials from a node label."""
+    name = name.strip()
+    if not name:
+        return "?"
+    words = name.split()
+    if len(words) >= 2:
+        return "".join(w[0] for w in words).upper()[:2]
+    word = words[0]
+    for i, ch in enumerate(word):
+        if ch.isalpha():
+            return word[:i] + ch.upper()
+    return word[0].upper()
+
+
+def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: float, max_lines: int = 3) -> list[str]:
+    """Word-wrap a label into up to max_lines, each fitting within max_width pixels."""
+    blf.size(font_id, font_size)
+    words = label.split()
+    if not words:
+        return []
+    if blf.dimensions(font_id, label)[0] <= max_width:
+        return [label]
+    lines = []
+    i = 0
+    while i < len(words) and len(lines) < max_lines:
+        line_words = [words[i]]
+        i += 1
+        while i < len(words):
+            candidate = " ".join(line_words + [words[i]])
+            w, _ = blf.dimensions(font_id, candidate)
+            if w > max_width:
+                break
+            line_words.append(words[i])
+            i += 1
+        lines.append(" ".join(line_words))
+    return lines

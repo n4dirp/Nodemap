@@ -18,6 +18,8 @@ _BORDER_SDF_SHADER: gpu.types.GPUShader | None = None
 _PILL_SHADER: gpu.types.GPUShader | None = None
 _PILL_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
+_BATCH_RECT_SHADER: gpu.types.GPUShader | None = None
+_BATCH_RECT_BORDER_SHADER: gpu.types.GPUShader | None = None
 
 _FILL_VERT_SRC = """
 void main() {
@@ -142,6 +144,55 @@ void main() {
     float dist = sdRoundRect(vUv, vHalfSize, r);
     float alpha = 1.0 - smoothstep(-0.5, 0.5, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_BATCH_RECT_VERT_SRC = """
+void main() {
+    vUv = uv;
+    vHalfSize = halfSize;
+    vRadius = radius;
+    vColor = color;
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_BATCH_RECT_FRAG_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float dist = sdRoundRect(vUv, vHalfSize, vRadius);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(vColor.rgb, vColor.a * alpha);
+}
+"""
+
+_BATCH_RECT_BORDER_VERT_SRC = """
+void main() {
+    vUv = uv;
+    vHalfSize = halfSize;
+    vRadius = radius;
+    vColor = color;
+    vLineWidth = lineWidth;
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_BATCH_RECT_BORDER_FRAG_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float bw = min(vLineWidth, min(vHalfSize.x, vHalfSize.y));
+    float r2 = max(0.0, vRadius - bw);
+    float outer = sdRoundRect(vUv, vHalfSize, vRadius);
+    float inner = sdRoundRect(vUv, vHalfSize - bw, r2);
+    float dist = max(outer, -inner);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(vColor.rgb, vColor.a * alpha);
 }
 """
 
@@ -295,16 +346,64 @@ def _get_batch_pill_shader() -> gpu.types.GPUShader:
     return _BATCH_PILL_SHADER
 
 
+def _get_batch_rect_shader() -> gpu.types.GPUShader:
+    """Custom batched rounded rectangle background fill shader."""
+    global _BATCH_RECT_SHADER
+    if _BATCH_RECT_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("batch_rect_iface")
+        vert_out.smooth("VEC2", "vUv")
+        vert_out.smooth("VEC2", "vHalfSize")
+        vert_out.smooth("FLOAT", "vRadius")
+        vert_out.smooth("VEC4", "vColor")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_in(2, "VEC2", "halfSize")
+        info.vertex_in(3, "FLOAT", "radius")
+        info.vertex_in(4, "VEC4", "color")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_BATCH_RECT_VERT_SRC)
+        info.fragment_source(_BATCH_RECT_FRAG_SRC)
+        _BATCH_RECT_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _BATCH_RECT_SHADER
+
+
+def _get_batch_rect_border_shader() -> gpu.types.GPUShader:
+    """Custom batched rounded rectangle border shader."""
+    global _BATCH_RECT_BORDER_SHADER
+    if _BATCH_RECT_BORDER_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("batch_rect_border_iface")
+        vert_out.smooth("VEC2", "vUv")
+        vert_out.smooth("VEC2", "vHalfSize")
+        vert_out.smooth("FLOAT", "vRadius")
+        vert_out.smooth("VEC4", "vColor")
+        vert_out.smooth("FLOAT", "vLineWidth")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_in(2, "VEC2", "halfSize")
+        info.vertex_in(3, "FLOAT", "radius")
+        info.vertex_in(4, "VEC4", "color")
+        info.vertex_in(5, "FLOAT", "lineWidth")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_BATCH_RECT_BORDER_VERT_SRC)
+        info.fragment_source(_BATCH_RECT_BORDER_FRAG_SRC)
+        _BATCH_RECT_BORDER_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _BATCH_RECT_BORDER_SHADER
+
+
 def _batch_draw_pills(
     wires: list[tuple[float, float, float, float]],
     thickness: float,
     color: tuple[float, float, float, float],
 ) -> None:
-    """Draw multiple pill-shaped wires in a single GPU batch.
-
-    Each wire is ``(center_x, center_y, length, angle)`` in pixel-space
-    coordinates.  All wires share the same *thickness* and *color*.
-    """
+    """Draw multiple pill-shaped wires in a single GPU batch."""
     if not wires:
         return
 

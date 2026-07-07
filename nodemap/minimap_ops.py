@@ -402,18 +402,13 @@ class NODEMAP_OT_navigate(Operator):
                             pass
                     else:
                         zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
-                        # Base the manual scroll jump off the effective visual zoom rather than
-                        # the invisible stored preference to ensure a smooth transition out of the auto-clamp
                         effective_zoom = st.get("zoom", 1.0)
 
                         is_constrained = False
                         if addon and getattr(addon.preferences.settings, "follow_view", False):
-                            # If effective zoom is strictly less than base_zoom, it means the viewport
-                            # indicator hit the minimap boundary and forced an auto-zoom out.
                             if effective_zoom < st.get("base_zoom", 1.0) - 0.001:
                                 is_constrained = True
 
-                        # Intercept scroll UP if constrained and zoom the Node Editor instead
                         if is_constrained and event.type == "WHEELUPMOUSE":
                             try:
                                 zoom_factor = 0.05
@@ -474,6 +469,7 @@ class NODEMAP_OT_navigate(Operator):
         if node:
             bpy.ops.node.select_all(action="DESELECT")
             node.select = True
+            node_tree.nodes.active = node
 
             addon = context.preferences.addons.get(__package__)
             if addon and getattr(addon.preferences.settings, "auto_frame_selected", True):
