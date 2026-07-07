@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0] - 2026-07-07
+
+### Added
+- Frame View operator
+- Viewport overlay with customizable color and toggle
+- Update Delay setting to control minimap refresh responsiveness
+
+### Fixed
+- Performance: Implemented batch GPU shaders and tree fingerprint caching
+- Interactive minimap failing to start in existing node editors
+- Frame label sizing more uniform over zoom level
+
 ## [1.1.1] - 2026-07-04
 
 ### Fixed
