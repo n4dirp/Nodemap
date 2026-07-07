@@ -174,23 +174,35 @@ class NODEMAP_OT_navigate(Operator):
         if _minimap_window_operators.get(win_ptr) is not self:
             return {"CANCELLED"}
 
-        # Find the actual area under the mouse (like Filmstrip).
-        area, region = _get_area_and_region_under_mouse(context, event)
-        if not area or area.type != "NODE_EDITOR" or not region:
-            self._st = None
-            self._area = None
-            self._region = None
-            self._space = None
+        _is_interacting = (
+            self._dragging
+            or self._mmb_dragging
+            or self._resize_handle is not None
+            or self._drag_start is not None
+        )
+
+        if not _is_interacting:
+            area, region = _get_area_and_region_under_mouse(context, event)
+            if not area or area.type != "NODE_EDITOR" or not region:
+                self._st = None
+                self._area = None
+                self._region = None
+                self._space = None
+                return {"PASS_THROUGH"}
+            self._st = _state(area.as_pointer())
+            self._area = area
+            self._region = region
+            self._space = area.spaces.active
+
+        if not self._st or not self._st.get("enabled", True):
             return {"PASS_THROUGH"}
 
-        self._st = _state(area.as_pointer())
-        self._area = area
-        self._region = region
-        self._space = area.spaces.active
-        if not self._st.get("enabled", True):
-            return {"PASS_THROUGH"}
-        self._mx = event.mouse_x - region.x
-        self._my = event.mouse_y - region.y
+        if self._region is not None:
+            self._mx = event.mouse_x - self._region.x
+            self._my = event.mouse_y - self._region.y
+        else:
+            self._mx = event.mouse_x
+            self._my = event.mouse_y
         logger.log(5, "modal: event %s value=%s", event.type, event.value)
 
         addon = context.preferences.addons.get(__package__)
