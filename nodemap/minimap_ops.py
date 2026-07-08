@@ -169,6 +169,8 @@ class NODEMAP_OT_navigate(Operator):
     _anim_applied: list[float]
     _anim_progress: float
     _anim_acc: list[float]
+    _drag_target: list[float]
+    _drag_active: bool = False
 
     def _override_ctx(self, context: Context):
         return context.temp_override(
@@ -249,16 +251,30 @@ class NODEMAP_OT_navigate(Operator):
                     if self._dragging:
                         self._dragging = False
                         self._drag_start = None
+                        if self._drag_active:
+                            self._pan_acc[0] += self._drag_target[0]
+                            self._pan_acc[1] += self._drag_target[1]
+                            self._drag_target = [0.0, 0.0]
+                            self._drag_active = False
                         if settings and getattr(settings, "smooth_pan", True):
                             speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
                             if speed > 2.0:
                                 self._inertia_active = True
                                 self._inertia_mode = "VIEW"
-                                self._create_timer(context)
-                                self._pan_acc = [0.0, 0.0]
+                                if not self._smooth_timer:
+                                    self._create_timer(context)
                                 return {"RUNNING_MODAL"}
                         self._smooth_velocity = [0.0, 0.0]
+                        pan_x = int(self._pan_acc[0])
+                        pan_y = int(self._pan_acc[1])
                         self._pan_acc = [0.0, 0.0]
+                        if pan_x != 0 or pan_y != 0:
+                            try:
+                                with self._override_ctx(context):
+                                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                            except RuntimeError:
+                                pass
+                        self._destroy_timer(context)
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
                         if settings and settings.left_click_action in ("SELECT", "PAN_SELECT"):
@@ -322,16 +338,30 @@ class NODEMAP_OT_navigate(Operator):
                     if self._dragging:
                         self._dragging = False
                         self._drag_start = None
+                        if self._drag_active:
+                            self._pan_acc[0] += self._drag_target[0]
+                            self._pan_acc[1] += self._drag_target[1]
+                            self._drag_target = [0.0, 0.0]
+                            self._drag_active = False
                         if settings and getattr(settings, "smooth_pan", True):
                             speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
                             if speed > 2.0:
                                 self._inertia_active = True
                                 self._inertia_mode = "VIEW"
-                                self._create_timer(context)
-                                self._pan_acc = [0.0, 0.0]
+                                if not self._smooth_timer:
+                                    self._create_timer(context)
                                 return {"RUNNING_MODAL"}
                         self._smooth_velocity = [0.0, 0.0]
+                        pan_x = int(self._pan_acc[0])
+                        pan_y = int(self._pan_acc[1])
                         self._pan_acc = [0.0, 0.0]
+                        if pan_x != 0 or pan_y != 0:
+                            try:
+                                with self._override_ctx(context):
+                                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                            except RuntimeError:
+                                pass
+                        self._destroy_timer(context)
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
                         if settings and settings.right_click_action in ("SELECT", "PAN_SELECT"):
@@ -442,7 +472,8 @@ class NODEMAP_OT_navigate(Operator):
                             self._cancel_smooth(context)
                         self._dragging = True
                         if self._was_in_minimap:
-                            self._pan_view(context, dx, dy)
+                            smooth = settings and getattr(settings, "smooth_pan", False)
+                            self._pan_view(context, dx, dy, smooth)
                             self._drag_start = (self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 if in_minimap:
@@ -536,6 +567,9 @@ class NODEMAP_OT_navigate(Operator):
                 return {"PASS_THROUGH"}
 
             case "TIMER":
+                if self._drag_active:
+                    self._apply_smooth_drag(context)
+                    return {"RUNNING_MODAL"}
                 if self._inertia_active:
                     self._apply_inertia(context)
                     return {"RUNNING_MODAL"}
@@ -577,7 +611,7 @@ class NODEMAP_OT_navigate(Operator):
         st["hovered_node"] = None
         redraw_ui("NODE_EDITOR")
 
-    def _pan_view(self, context: Context, dx: int, dy: int) -> None:
+    def _pan_view(self, context: Context, dx: int, dy: int, smooth: bool = False) -> None:
         st = self._st
         if not st:
             return
@@ -609,6 +643,15 @@ class NODEMAP_OT_navigate(Operator):
             else:
                 self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + vx * 0.4
                 self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + vy * 0.4
+
+            if smooth:
+                self._drag_target[0] += vx
+                self._drag_target[1] += vy
+                if not self._drag_active:
+                    self._drag_active = True
+                    self._create_timer(context)
+                return
+
             self._pan_acc[0] += vx
             self._pan_acc[1] += vy
             pan_x = int(self._pan_acc[0])
@@ -794,6 +837,38 @@ class NODEMAP_OT_navigate(Operator):
                 _clamp_pan_to_viewport(self._space, self._region, self._st)
         redraw_ui("NODE_EDITOR")
 
+    def _apply_smooth_drag(self, context: Context) -> None:
+        if not self._drag_active:
+            return
+        magnitude = (self._drag_target[0] ** 2 + self._drag_target[1] ** 2) ** 0.5
+        raw = magnitude / 200.0
+        follow = 0.25 + raw * 0.55
+        follow = min(follow, 0.8)
+        _MAX_MOVE = 120.0 + magnitude * 0.15
+        _MAX_MOVE = min(_MAX_MOVE, 800.0)
+        dx = self._drag_target[0] * follow
+        dy = self._drag_target[1] * follow
+        dx = max(min(dx, _MAX_MOVE), -_MAX_MOVE)
+        dy = max(min(dy, _MAX_MOVE), -_MAX_MOVE)
+        self._pan_acc[0] += dx
+        self._pan_acc[1] += dy
+        self._drag_target[0] -= dx
+        self._drag_target[1] -= dy
+        pan_x = int(self._pan_acc[0])
+        pan_y = int(self._pan_acc[1])
+        self._pan_acc[0] -= pan_x
+        self._pan_acc[1] -= pan_y
+        if pan_x != 0 or pan_y != 0:
+            try:
+                with self._override_ctx(context):
+                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+            except RuntimeError:
+                pass
+            _clamp_pan_to_viewport(self._space, self._region, self._st)
+        if not self._dragging:
+            self._drag_active = False
+        redraw_ui("NODE_EDITOR")
+
     def _apply_center_animation(self, context: Context) -> None:
         if not self._anim_active:
             return
@@ -927,6 +1002,8 @@ class NODEMAP_OT_navigate(Operator):
         self._anim_applied = [0.0, 0.0]
         self._anim_progress = 0.0
         self._anim_acc = [0.0, 0.0]
+        self._drag_target = [0.0, 0.0]
+        self._drag_active = False
         _minimap_window_operators[self._window_ptr] = self
         context.window_manager.modal_handler_add(self)
         ops_keys = list(_minimap_window_operators.keys())

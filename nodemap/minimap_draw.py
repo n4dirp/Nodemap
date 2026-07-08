@@ -398,7 +398,7 @@ def _draw_viewport_overlay(
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
         outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
-        _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, (0, 0, 0, 0.2), 0.5 * ui_scale)
+        _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, (0, 0, 0, 0.15), 0.5 * ui_scale)
         _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
 
 
