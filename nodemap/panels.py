@@ -115,11 +115,14 @@ class NODEMAP_PT_popup(Panel):
                 col.prop(settings, "left_click_action", text="Left Click")
                 col.prop(settings, "right_click_action", text="Right Click")
 
+                sub = sub_body.column(align=True)
+                sub.prop(settings, "smooth_pan", text="Smooth Pan")
+
                 if {"SELECT", "PAN_SELECT"} & {
                     settings.left_click_action,
                     settings.right_click_action,
                 }:
-                    sub_body.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+                    sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
 
                 sub_body.row().prop(settings, "scroll_wheel_mode", text="Scroll Wheel", expand=True)
 

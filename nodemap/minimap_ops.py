@@ -160,6 +160,16 @@ class NODEMAP_OT_navigate(Operator):
     _redirect_acc: list[float]
     _frame_all_armed: bool = False
 
+    _smooth_timer: str | None = None
+    _inertia_active: bool = False
+    _inertia_mode: str | None = None
+    _smooth_velocity: list[float]
+    _anim_active: bool = False
+    _anim_target: list[float]
+    _anim_applied: list[float]
+    _anim_progress: float
+    _anim_acc: list[float]
+
     def _override_ctx(self, context: Context):
         return context.temp_override(
             area=self._area,
@@ -175,10 +185,7 @@ class NODEMAP_OT_navigate(Operator):
             return {"CANCELLED"}
 
         _is_interacting = (
-            self._dragging
-            or self._mmb_dragging
-            or self._resize_handle is not None
-            or self._drag_start is not None
+            self._dragging or self._mmb_dragging or self._resize_handle is not None or self._drag_start is not None
         )
 
         if not _is_interacting:
@@ -242,6 +249,15 @@ class NODEMAP_OT_navigate(Operator):
                     if self._dragging:
                         self._dragging = False
                         self._drag_start = None
+                        if settings and getattr(settings, "smooth_pan", True):
+                            speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                            if speed > 2.0:
+                                self._inertia_active = True
+                                self._inertia_mode = "VIEW"
+                                self._create_timer(context)
+                                self._pan_acc = [0.0, 0.0]
+                                return {"RUNNING_MODAL"}
+                        self._smooth_velocity = [0.0, 0.0]
                         self._pan_acc = [0.0, 0.0]
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
@@ -256,6 +272,7 @@ class NODEMAP_OT_navigate(Operator):
                 # --- Press ---
                 self._was_in_minimap = in_minimap
                 if self._was_in_minimap:
+                    self._cancel_smooth(context)
                     btn = st.get("frame_all_btn")
                     if btn:
                         bx, by, bw, bh = btn
@@ -305,6 +322,15 @@ class NODEMAP_OT_navigate(Operator):
                     if self._dragging:
                         self._dragging = False
                         self._drag_start = None
+                        if settings and getattr(settings, "smooth_pan", True):
+                            speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                            if speed > 2.0:
+                                self._inertia_active = True
+                                self._inertia_mode = "VIEW"
+                                self._create_timer(context)
+                                self._pan_acc = [0.0, 0.0]
+                                return {"RUNNING_MODAL"}
+                        self._smooth_velocity = [0.0, 0.0]
                         self._pan_acc = [0.0, 0.0]
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
@@ -319,6 +345,7 @@ class NODEMAP_OT_navigate(Operator):
                 # --- Press ---
                 self._was_in_minimap = in_minimap
                 if self._was_in_minimap:
+                    self._cancel_smooth(context)
                     if addon:
                         handle = self._get_handle_at(context, event)
                         if handle:
@@ -344,12 +371,22 @@ class NODEMAP_OT_navigate(Operator):
 
             case "MIDDLEMOUSE":
                 if event.value == "PRESS" and in_minimap:
+                    self._cancel_smooth(context)
                     self._mmb_dragging = True
                     self._mmb_drag_start = (self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 if event.value == "RELEASE" and self._mmb_dragging:
                     self._mmb_dragging = False
                     self._mmb_drag_start = None
+                    if settings and getattr(settings, "smooth_pan", True):
+                        speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                        if speed > 2.0:
+                            self._inertia_active = True
+                            self._inertia_mode = "PAN"
+                            self._create_timer(context)
+                            self._redirect_acc = [0.0, 0.0]
+                            return {"RUNNING_MODAL"}
+                    self._smooth_velocity = [0.0, 0.0]
                     self._redirect_acc = [0.0, 0.0]
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
@@ -376,6 +413,12 @@ class NODEMAP_OT_navigate(Operator):
                 if self._mmb_dragging and self._mmb_drag_start:
                     dx = self._mx - self._mmb_drag_start[0]
                     dy = self._my - self._mmb_drag_start[1]
+                    if abs(dx) <= 1 and abs(dy) <= 1:
+                        self._smooth_velocity[0] *= 0.15
+                        self._smooth_velocity[1] *= 0.15
+                    else:
+                        self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + dx * 0.4
+                        self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + dy * 0.4
                     pan_before = st["pan"][0], st["pan"][1]
                     st["pan"][0] += dx
                     st["pan"][1] += dy
@@ -395,6 +438,8 @@ class NODEMAP_OT_navigate(Operator):
                     dx = self._mx - self._drag_start[0]
                     dy = self._my - self._drag_start[1]
                     if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
+                        if not self._dragging and self._anim_active:
+                            self._cancel_smooth(context)
                         self._dragging = True
                         if self._was_in_minimap:
                             self._pan_view(context, dx, dy)
@@ -490,6 +535,15 @@ class NODEMAP_OT_navigate(Operator):
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
+            case "TIMER":
+                if self._inertia_active:
+                    self._apply_inertia(context)
+                    return {"RUNNING_MODAL"}
+                if self._anim_active:
+                    self._apply_center_animation(context)
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
             case _:
                 return {"PASS_THROUGH"}
 
@@ -547,8 +601,16 @@ class NODEMAP_OT_navigate(Operator):
             view_zoom_x = self._region.width / vw_rect if vw_rect > 0 else 1.0
             view_zoom_y = self._region.height / vh_rect if vh_rect > 0 else 1.0
 
-            self._pan_acc[0] += (dx / scale) * view_zoom_x
-            self._pan_acc[1] += (dy / scale) * view_zoom_y
+            vx = (dx / scale) * view_zoom_x
+            vy = (dy / scale) * view_zoom_y
+            if abs(dx) <= 1 and abs(dy) <= 1:
+                self._smooth_velocity[0] *= 0.15
+                self._smooth_velocity[1] *= 0.15
+            else:
+                self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + vx * 0.4
+                self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + vy * 0.4
+            self._pan_acc[0] += vx
+            self._pan_acc[1] += vy
             pan_x = int(self._pan_acc[0])
             pan_y = int(self._pan_acc[1])
             self._pan_acc[0] -= pan_x
@@ -626,27 +688,148 @@ class NODEMAP_OT_navigate(Operator):
             return
 
         visible = _get_visible_rect(self._space, self._region)
+        if not visible:
+            return
 
-        if visible:
-            view_cx = (visible[0] + visible[2]) / 2.0
-            view_cy = (visible[1] + visible[3]) / 2.0
-            delta_tree_x = tree_coord[0] - view_cx
-            delta_tree_y = tree_coord[1] - view_cy
+        view_cx = (visible[0] + visible[2]) / 2.0
+        view_cy = (visible[1] + visible[3]) / 2.0
+        delta_tree_x = tree_coord[0] - view_cx
+        delta_tree_y = tree_coord[1] - view_cy
 
-            vw = visible[2] - visible[0]
-            vh = visible[3] - visible[1]
-            view_zoom_x = self._region.width / vw if vw > 0 else 1.0
-            view_zoom_y = self._region.height / vh if vh > 0 else 1.0
+        vw = visible[2] - visible[0]
+        vh = visible[3] - visible[1]
+        view_zoom_x = self._region.width / vw if vw > 0 else 1.0
+        view_zoom_y = self._region.height / vh if vh > 0 else 1.0
 
-            pan_x = int(delta_tree_x * view_zoom_x)
-            pan_y = int(delta_tree_y * view_zoom_y)
-            if pan_x != 0 or pan_y != 0:
+        pan_x = int(delta_tree_x * view_zoom_x)
+        pan_y = int(delta_tree_y * view_zoom_y)
+        if pan_x == 0 and pan_y == 0:
+            return
+
+        addon = context.preferences.addons.get(__package__)
+        settings = addon.preferences.settings if addon else None
+        if settings and getattr(settings, "smooth_pan", True):
+            self._anim_target = [float(pan_x), float(pan_y)]
+            self._anim_applied = [0.0, 0.0]
+            self._anim_progress = 0.0
+            self._anim_acc = [0.0, 0.0]
+            self._anim_active = True
+            self._create_timer(context)
+        else:
+            try:
+                with self._override_ctx(context):
+                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                _clamp_pan_to_viewport(self._space, self._region, st)
+            except RuntimeError:
+                pass
+
+    def _create_timer(self, context: Context) -> None:
+        if self._smooth_timer:
+            return
+        self._smooth_timer = context.window_manager.event_timer_add(1 / 60, window=context.window)
+
+    def _destroy_timer(self, context: Context) -> None:
+        if self._smooth_timer:
+            try:
+                context.window_manager.event_timer_remove(self._smooth_timer)
+            except (RuntimeError, ValueError):
+                pass
+            self._smooth_timer = None
+
+    def _cancel_smooth(self, context: Context) -> None:
+        if self._inertia_active:
+            self._inertia_active = False
+            self._inertia_mode = None
+            self._smooth_velocity = [0.0, 0.0]
+            self._destroy_timer(context)
+        if self._anim_active:
+            if self._anim_applied[0] != self._anim_target[0] or self._anim_applied[1] != self._anim_target[1]:
+                remaining_x = self._anim_target[0] - self._anim_applied[0]
+                remaining_y = self._anim_target[1] - self._anim_applied[1]
+                if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
+                    try:
+                        with self._override_ctx(context):
+                            bpy.ops.view2d.pan(deltax=int(remaining_x), deltay=int(remaining_y))
+                    except RuntimeError:
+                        pass
+            self._anim_active = False
+            self._destroy_timer(context)
+
+    def _apply_inertia(self, context: Context) -> None:
+        decay = 0.92
+        self._smooth_velocity[0] *= decay
+        self._smooth_velocity[1] *= decay
+        speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+        if speed < 0.5:
+            self._inertia_active = False
+            self._inertia_mode = None
+            self._destroy_timer(context)
+            return
+        if self._inertia_mode == "PAN":
+            st = self._st
+            if st:
+                self._pan_acc[0] += self._smooth_velocity[0]
+                self._pan_acc[1] += self._smooth_velocity[1]
+                dx = int(self._pan_acc[0])
+                dy = int(self._pan_acc[1])
+                self._pan_acc[0] -= dx
+                self._pan_acc[1] -= dy
+                if dx != 0 or dy != 0:
+                    st["pan"][0] += dx
+                    st["pan"][1] += dy
+                    _clamp_pan_to_viewport(self._space, self._region, st)
+        elif self._inertia_mode == "VIEW":
+            self._pan_acc[0] += self._smooth_velocity[0]
+            self._pan_acc[1] += self._smooth_velocity[1]
+            dx = int(self._pan_acc[0])
+            dy = int(self._pan_acc[1])
+            self._pan_acc[0] -= dx
+            self._pan_acc[1] -= dy
+            if dx != 0 or dy != 0:
                 try:
                     with self._override_ctx(context):
-                        bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                    _clamp_pan_to_viewport(self._space, self._region, st)
+                        bpy.ops.view2d.pan(deltax=dx, deltay=dy)
                 except RuntimeError:
                     pass
+                _clamp_pan_to_viewport(self._space, self._region, self._st)
+        redraw_ui("NODE_EDITOR")
+
+    def _apply_center_animation(self, context: Context) -> None:
+        if not self._anim_active:
+            return
+        self._anim_progress += 1 / 24
+        if self._anim_progress >= 1.0:
+            remaining_x = self._anim_target[0] - self._anim_applied[0]
+            remaining_y = self._anim_target[1] - self._anim_applied[1]
+            if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
+                try:
+                    with self._override_ctx(context):
+                        bpy.ops.view2d.pan(deltax=int(remaining_x), deltay=int(remaining_y))
+                except RuntimeError:
+                    pass
+            self._anim_active = False
+            self._destroy_timer(context)
+            return
+        eased = 1.0 - (1.0 - self._anim_progress) ** 3
+        desired_x = self._anim_target[0] * eased
+        desired_y = self._anim_target[1] * eased
+        delta_x = desired_x - self._anim_applied[0]
+        delta_y = desired_y - self._anim_applied[1]
+        self._anim_applied[0] += delta_x
+        self._anim_applied[1] += delta_y
+        self._anim_acc[0] += delta_x
+        self._anim_acc[1] += delta_y
+        dx = int(self._anim_acc[0])
+        dy = int(self._anim_acc[1])
+        self._anim_acc[0] -= dx
+        self._anim_acc[1] -= dy
+        if dx != 0 or dy != 0:
+            try:
+                with self._override_ctx(context):
+                    bpy.ops.view2d.pan(deltax=dx, deltay=dy)
+            except RuntimeError:
+                pass
+        redraw_ui("NODE_EDITOR")
 
     def _update_cursor(self, context: Context, event: Event) -> None:
         st = self._st
@@ -735,17 +918,27 @@ class NODEMAP_OT_navigate(Operator):
         self._pan_acc = [0.0, 0.0]
         self._redirect_acc = [0.0, 0.0]
         self._frame_all_armed = False
+        self._smooth_timer = None
+        self._inertia_active = False
+        self._inertia_mode = None
+        self._smooth_velocity = [0.0, 0.0]
+        self._anim_active = False
+        self._anim_target = [0.0, 0.0]
+        self._anim_applied = [0.0, 0.0]
+        self._anim_progress = 0.0
+        self._anim_acc = [0.0, 0.0]
         _minimap_window_operators[self._window_ptr] = self
         context.window_manager.modal_handler_add(self)
         ops_keys = list(_minimap_window_operators.keys())
         logger.debug("invoke: RUNNING_MODAL for window %d, ops=%s", self._window_ptr, ops_keys)
         return {"RUNNING_MODAL"}
 
-    def cancel(self, _context: Context) -> None:
+    def cancel(self, context: Context) -> None:
         logger.debug("cancel: window %d ops_before=%s", self._window_ptr, list(_minimap_window_operators.keys()))
         if self._window_ptr in _minimap_window_operators:
             del _minimap_window_operators[self._window_ptr]
         logger.debug("cancel: ops_after=%s", list(_minimap_window_operators.keys()))
+        self._destroy_timer(context)
         if self._st is not None:
             self._st["width_clamped"] = False
             self._st["height_clamped"] = False

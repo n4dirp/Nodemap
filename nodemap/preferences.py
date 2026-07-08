@@ -330,6 +330,12 @@ class NODEMAP_PG_settings(PropertyGroup):
         default="SELECT",
     )
 
+    smooth_pan: BoolProperty(
+        name="Smooth Pan",
+        description="Apply inertia and smooth animations when panning the view with the minimap",
+        default=True,
+    )
+
 
 class NODEMAP_AddonPreferences(AddonPreferences):
     """Add-on preferences for Nodes Minimap."""
