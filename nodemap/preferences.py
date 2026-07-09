@@ -289,8 +289,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Scroll Wheel",
         description="Choose what the scroll wheel zooms (Hold Alt to switch)",
         items=[
-            ("NODE_EDITOR", "Editor", "Zoom the node editor view"),
-            ("MINIMAP", "Minimap", "Zoom the minimap view"),
+            ("NODE_EDITOR", "Editor Zoom", "Zoom the node editor view"),
+            ("MINIMAP", "Minimap Zoom", "Zoom the minimap view"),
         ],
         default="NODE_EDITOR",
     )
@@ -334,6 +334,17 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Smooth Pan",
         description="Apply inertia and smooth animations when panning the view with the minimap",
         default=True,
+    )
+
+    pan_speed: EnumProperty(
+        name="Pan Speed",
+        description="Animation speed for click-to-pan",
+        items=[
+            ("FAST", "Fast", "Quick snap (0.2s)"),
+            ("MEDIUM", "Medium", "Balanced (0.4s)"),
+            ("SLOW", "Slow", "Leisurely (0.67s)"),
+        ],
+        default="MEDIUM",
     )
 
 

@@ -187,7 +187,13 @@ class NODEMAP_OT_navigate(Operator):
             return {"CANCELLED"}
 
         _is_interacting = (
-            self._dragging or self._mmb_dragging or self._resize_handle is not None or self._drag_start is not None
+            self._dragging
+            or self._mmb_dragging
+            or self._resize_handle is not None
+            or self._drag_start is not None
+            or self._anim_active
+            or self._inertia_active
+            or self._drag_active
         )
 
         if not _is_interacting:
@@ -872,7 +878,11 @@ class NODEMAP_OT_navigate(Operator):
     def _apply_center_animation(self, context: Context) -> None:
         if not self._anim_active:
             return
-        self._anim_progress += 1 / 24
+        addon = context.preferences.addons.get(__package__)
+        settings = addon.preferences.settings if addon else None
+        speed = getattr(settings, "pan_speed", "MEDIUM")
+        frames = {"FAST": 12, "MEDIUM": 24, "SLOW": 40}.get(speed, 24)
+        self._anim_progress += 1 / frames
         if self._anim_progress >= 1.0:
             remaining_x = self._anim_target[0] - self._anim_applied[0]
             remaining_y = self._anim_target[1] - self._anim_applied[1]

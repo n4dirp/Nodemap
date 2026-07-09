@@ -70,15 +70,13 @@ class NODEMAP_PT_popup(Panel):
             header, body = body.panel("NODEMAP_PT_theme", default_closed=True)
             header.label(text="Theme")
             if body:
-                body.prop(settings, "opacity", text="Opacity", slider=True)
+                col = body.column()
 
-                row = body.row(heading="Color", align=True)
+                row = col.row(heading="Color", align=True)
                 row.prop(settings, "colored_nodes", text="Nodes")
                 sub = row.row(align=True)
                 sub.active = settings.show_wires | settings.show_socket_indicators
                 sub.prop(settings, "show_wire_color", text="Wires")
-
-                col = body.column()
 
                 row = col.row(heading="Overlay", align=True)
                 row.prop(settings, "show_viewport_overlay", text="")
@@ -91,6 +89,8 @@ class NODEMAP_PT_popup(Panel):
                 sub = row.row(align=True)
                 sub.active = settings.custom_bg_color
                 sub.prop(settings, "bg_color", text="")
+
+                col.prop(settings, "opacity", text="Opacity", slider=True)
 
         header, body = layout.panel("NODEMAP_PT_behavior", default_closed=True)
         header.label(text="Behavior")
@@ -114,17 +114,17 @@ class NODEMAP_PT_popup(Panel):
                 col = sub_body.column()
                 col.prop(settings, "left_click_action", text="Left Click")
                 col.prop(settings, "right_click_action", text="Right Click")
-
-                sub = sub_body.column(align=True)
-                sub.prop(settings, "smooth_pan", text="Smooth Pan")
+                col.prop(settings, "scroll_wheel_mode", text="Scroll Wheel")
 
                 if {"SELECT", "PAN_SELECT"} & {
                     settings.left_click_action,
                     settings.right_click_action,
                 }:
-                    sub.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+                    col.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
 
-                sub_body.row().prop(settings, "scroll_wheel_mode", text="Scroll Wheel", expand=True)
+                col.prop(settings, "smooth_pan", text="Smooth Pan")
+                if settings.smooth_pan:
+                    col.prop(settings, "pan_speed", text="Pan Speed")
 
 
 def draw_minimap_header_button(self, context):

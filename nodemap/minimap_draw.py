@@ -836,7 +836,6 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
     st["padding"] = padding
     st["scale"] = scale
 
-    zoom = st.get("zoom", 1.0)
     font_id = 0
     min_dim = 3.0 * ui_scale
     node_infos = tree_data["node_infos"]
@@ -948,8 +947,7 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
                 frame_lbl = info.get("frame_label")
                 if frame_lbl:
                     text, text_color, bg_color_lbl = frame_lbl
-                    max_font_by_map = int(min(mw, mh) * 0.06)
-                    label_font_size = max(6, min(11, int(11 * ui_scale * zoom), max_font_by_map))
+                    label_font_size = max(6, min(11, int(11 * ui_scale * scale * 8)))
                     blf.size(font_id, label_font_size)
                     tw, th = blf.dimensions(font_id, text)
                     lx = nx + (nw_s - tw) / 2
