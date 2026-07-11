@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.0] - 2026-07-11
+
+### Added
+- Smooth pan animation when paning the view
+- Added Frame View button to the minimap
+
+### Fixed
+- Node collapse, expand, and resize not updating in the minimap
+- Resize handles when it hit the max region width
+- Fixed panel margins under different editor layouts
+
 ## [1.2.0] - 2026-07-07
 
 ### Added
