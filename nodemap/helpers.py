@@ -14,6 +14,8 @@ LUMINANCE_G: float = 0.587
 LUMINANCE_B: float = 0.114
 OUTLINE_ALPHA: float = 0.8
 MAP_PADDING: float = 12.0
+MIN_MAP_WIDTH: int = 64
+MIN_MAP_HEIGHT: int = 64
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:

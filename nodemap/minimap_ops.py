@@ -6,6 +6,8 @@ import bpy
 from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
 from .helpers import (
+    MIN_MAP_HEIGHT,
+    MIN_MAP_WIDTH,
     MinimapState,
     _clamp_pan_to_viewport,
     _find_node_at,
@@ -351,9 +353,11 @@ class NODEMAP_OT_navigate(Operator):
                             st.resize_active = handle
                             redraw_ui("NODE_EDITOR")
                             self._resize_start_mouse = (self._mx, self._my)
+                            _ui_scale = _get_ui_scale()
+                            rmx, rmy, rmw, rmh = st.rect
                             self._resize_start_values = (
-                                settings.minimap_width,
-                                settings.minimap_height,
+                                int(rmw / _ui_scale),
+                                int(rmh / _ui_scale),
                             )
                             cursor = _CURSOR_MAP[handle]
                             context.window.cursor_modal_set(cursor)
@@ -433,9 +437,11 @@ class NODEMAP_OT_navigate(Operator):
                             st.resize_active = handle
                             redraw_ui("NODE_EDITOR")
                             self._resize_start_mouse = (self._mx, self._my)
+                            _ui_scale = _get_ui_scale()
+                            rmx, rmy, rmw, rmh = st.rect
                             self._resize_start_values = (
-                                settings.minimap_width,
-                                settings.minimap_height,
+                                int(rmw / _ui_scale),
+                                int(rmh / _ui_scale),
                             )
                             cursor = _CURSOR_MAP[handle]
                             context.window.cursor_modal_set(cursor)
@@ -1016,36 +1022,35 @@ class NODEMAP_OT_navigate(Operator):
 
         ui_scale = _get_ui_scale()
         sx, sy, ex, ey = _get_safe_bounds(self._area, self._region)
-        x_margin, y_margin, _ = _get_minimap_margins(self._space, corner, ui_scale)
+        x_margin, y_margin, margin = _get_minimap_margins(self._space, corner, ui_scale)
 
         safe_w = ex - sx
         safe_h = ey - sy
-        max_w = max(64, int(safe_w - x_margin))
-        max_h = max(64, int(safe_h - y_margin))
+        max_mw_pct = getattr(settings, "max_width_pct", 50) / 100.0
+        max_mh_pct = getattr(settings, "max_height_pct", 50) / 100.0
+        max_w = max(MIN_MAP_WIDTH, int((safe_w - x_margin) * max_mw_pct))
+        max_h = max(MIN_MAP_HEIGHT, int((safe_h - y_margin - margin) * max_mh_pct))
 
         if self._resize_handle in ("W", "C"):
             if corner in ("TOP_RIGHT", "BOTTOM_RIGHT"):
-                new_w = max(64, min(max_w, int(w0 - dx / ui_scale)))
+                new_w = max(MIN_MAP_WIDTH, min(max_w, int(w0 - dx / ui_scale)))
             else:
-                new_w = max(64, min(max_w, int(w0 + dx / ui_scale)))
+                new_w = max(MIN_MAP_WIDTH, min(max_w, int(w0 + dx / ui_scale)))
             settings.minimap_width = new_w
 
         if self._resize_handle in ("H", "C"):
             if corner in ("TOP_RIGHT", "TOP_LEFT"):
-                new_h = max(64, min(max_h, int(h0 - dy / ui_scale)))
+                new_h = max(MIN_MAP_HEIGHT, min(max_h, int(h0 - dy / ui_scale)))
             else:
-                new_h = max(64, min(max_h, int(h0 + dy / ui_scale)))
+                new_h = max(MIN_MAP_HEIGHT, min(max_h, int(h0 + dy / ui_scale)))
             settings.minimap_height = new_h
 
-        # Detect percentage clamp for visual feedback
-        max_mw_pct = getattr(settings, "max_width_pct", 30) / 100.0
-        max_mh_pct = getattr(settings, "max_height_pct", 40) / 100.0
         st = self._st
         if not st:
             return
         st.hovered_handle = self._resize_handle
-        st.width_clamped = settings.minimap_width * ui_scale >= (safe_w - x_margin) * max_mw_pct
-        st.height_clamped = settings.minimap_height * ui_scale >= (safe_h - y_margin) * max_mh_pct
+        st.width_clamped = settings.minimap_width >= max_w or settings.minimap_width <= MIN_MAP_WIDTH
+        st.height_clamped = settings.minimap_height >= max_h or settings.minimap_height <= MIN_MAP_HEIGHT
 
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":

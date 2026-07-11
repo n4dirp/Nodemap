@@ -1624,8 +1624,8 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
 
     # Viewport rectangle icon
     inset = 5 * ui_scale
-    rx = x + inset
-    ry = fy + inset
+    rx = round(x + inset)
+    ry = round(fy + inset)
     rw = btn_size - 2 * inset
     rh = btn_size - 2 * inset
     t = max(1, int(1.5 * ui_scale))

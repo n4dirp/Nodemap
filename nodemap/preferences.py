@@ -7,6 +7,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.types import AddonPreferences, PropertyGroup
 
+from .helpers import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
+
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, "TRACE")
 
@@ -107,7 +109,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Size X",
         description="Minimap width in pixels",
         default=256,
-        min=64,
+        min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_minimap_cache,
     )
@@ -116,7 +118,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Size Y",
         description="Minimap height in pixels",
         default=128,
-        min=64,
+        min=MIN_MAP_HEIGHT,
         subtype="PIXEL",
         update=_update_minimap_cache,
     )
