@@ -1028,7 +1028,7 @@ class NODEMAP_OT_navigate(Operator):
         safe_h = ey - sy
         max_mw_pct = getattr(settings, "max_width_pct", 50) / 100.0
         max_mh_pct = getattr(settings, "max_height_pct", 50) / 100.0
-        max_w = max(MIN_MAP_WIDTH, int((safe_w - x_margin) * max_mw_pct))
+        max_w = max(MIN_MAP_WIDTH, int((safe_w - 2 * x_margin) * max_mw_pct))
         max_h = max(MIN_MAP_HEIGHT, int((safe_h - y_margin - margin) * max_mh_pct))
 
         if self._resize_handle in ("W", "C"):

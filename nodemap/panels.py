@@ -93,7 +93,7 @@ class NODEMAP_PT_popup(Panel):
                 sub.active = settings.custom_bg_color
                 sub.prop(settings, "bg_color", text="")
 
-        header, body = layout.panel("NODEMAP_PT_behavior", default_closed=True)
+        header, body = layout.panel("NODEMAP_PT_behavior", default_closed=False)
         header.label(text="Behavior")
         if body:
             col = body.column(heading="Minimap", align=True)
