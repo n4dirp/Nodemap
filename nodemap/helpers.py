@@ -1,6 +1,7 @@
 """Shared helper utilities for node minimap."""
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 import blf
@@ -12,6 +13,7 @@ LUMINANCE_R: float = 0.299
 LUMINANCE_G: float = 0.587
 LUMINANCE_B: float = 0.114
 OUTLINE_ALPHA: float = 0.8
+MAP_PADDING: float = 12.0
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
@@ -132,8 +134,6 @@ def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> 
 def _get_safe_bounds(
     area: bpy.types.Area,
     region: bpy.types.Region,
-    space: bpy.types.SpaceNodeEditor | None = None,
-    corner: str = "TOP_RIGHT",
 ) -> tuple[int, int, int, int]:
     """Compute drawable region bounds excluding toolbars, shelves, headers, and UI panels."""
     left = 0
@@ -146,55 +146,100 @@ def _get_safe_bounds(
             left = max(left, r.width)
         elif "ASSET_SHELF" in r.type:
             bottom = max(bottom, r.height)
-        elif r.type == "HEADER" and getattr(r, "alignment", "") == "BOTTOM":
-            bottom = max(bottom, r.height)
         elif r.type == "UI":
             right = min(right, region.width - r.width)
-
-    scale = _get_ui_scale()
-
-    if space and corner in ("TOP_LEFT", "TOP_RIGHT") and getattr(space.overlay, "show_overlays", False):
-        top = min(top, region.height - int(8 * scale))
-
-    if space and getattr(space, "show_region_asset_shelf", False):
-        bottom = max(bottom, int(10 * scale))
 
     return int(left), int(bottom), int(right), int(top)
 
 
-_minimap_state: dict[int, dict] = {}
+def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, float, float]:
+    """Return ``(x_margin, y_margin, margin_bottom)`` based on corner and visible UI elements.
+
+    Adjusts margins when the breadcrumb context path or compositing asset shelf
+    occupies space near the minimap's corner.
+    ``margin_bottom`` is the additional margin on the edge opposite the header.
+    """
+    is_compositor = space.node_tree is not None and space.node_tree.type == "COMPOSITING"
+    show_asset_shelf = getattr(space, "show_region_asset_shelf", False)
+    show_context_path = getattr(space.overlay, "show_context_path", False)
+
+    x_margin = MAP_PADDING * ui_scale
+    y_margin = x_margin
+    margin_bottom = x_margin
+
+    adjusted = (MAP_PADDING + 25) * ui_scale
+
+    match corner:
+        case "TOP_RIGHT" | "TOP_LEFT":
+            if show_context_path:
+                y_margin = adjusted
+            if is_compositor and show_asset_shelf:
+                margin_bottom = adjusted
+
+        case "BOTTOM_RIGHT" | "BOTTOM_LEFT":
+            if is_compositor and show_asset_shelf:
+                y_margin = adjusted
+            if show_context_path:
+                margin_bottom = adjusted
+
+    return x_margin, y_margin, margin_bottom
+
+
+@dataclass
+class MinimapState:
+    rect: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    tree_bounds: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    margin: float = 10.0
+    padding: float = 6.0
+    scale: float = 1.0
+    hovered_node: str | None = None
+    zoom: float = 1.0
+    base_zoom: float = 1.0
+    pan: list[float] = field(default_factory=lambda: [0.0, 0.0])
+    enabled: bool = True
+    frame_all_btn: tuple[float, float, float, float] | None = None
+    frame_view_btn: tuple[float, float, float, float] | None = None
+    width_clamped: bool = False
+    height_clamped: bool = False
+    hovered_handle: str | None = None
+    resize_active: str | None = None
+    pressed: bool = False
+    cached_fingerprint: Any = None
+    pending_timer: Any = None
+    tree_data: dict | None = None
+    cached_backdrops_batch: Any = None
+    cached_borders_batch: Any = None
+    cached_frames_fill_batch: Any = None
+    cached_frames_border_batch: Any = None
+    cached_text: list | None = None
+    cached_wires: dict | None = None
+    cached_wire_thickness: float = 1.0
+    cached_socket_batch: Any = None
+    cached_socket_ph: float = 2.0
+    cached_socket_shadow: list | None = None
+    _profiler: Any = field(default=None, repr=False)
+    _profiling_active: bool = field(default=False, repr=False)
+    _profiling_frame_count: int = field(default=0, repr=False)
+
+
+_minimap_state: dict[int, MinimapState] = {}
 _minimap_window_operators: dict[int, Any] = {}
 _registration_state: dict[str, bool] = {"done": False}
 
-_DEFAULT_STATE: dict = {
-    "rect": (0, 0, 0, 0),
-    "tree_bounds": (0.0, 0.0, 0.0, 0.0),
-    "margin": 10,
-    "padding": 6,
-    "scale": 1.0,
-    "hovered_node": None,
-    "zoom": 1.0,
-    "base_zoom": 1.0,
-    "pan": [0.0, 0.0],
-    "enabled": True,
-    "frame_all_btn": None,
-}
 
-
-def _state(area_ptr: int | None = None) -> dict:
-    """Return the minimap state dict for the given area, initializing defaults if needed."""
+def _state(area_ptr: int | None = None) -> MinimapState:
+    """Return the minimap state for the given area, initializing defaults if needed."""
     if area_ptr is None:
         try:
             area_ptr = bpy.context.area.as_pointer()
         except (AttributeError, ReferenceError):
-            return {}
+            return MinimapState()
     if area_ptr not in _minimap_state:
-        state = dict(_DEFAULT_STATE)
-        state["pan"] = list(state["pan"])
+        state = MinimapState()
         try:
             prefs = bpy.context.preferences.addons.get(__package__)
             if prefs:
-                state["enabled"] = getattr(prefs.preferences.settings, "show_by_default", True)
+                state.enabled = getattr(prefs.preferences.settings, "show_by_default", True)
         except (AttributeError, ReferenceError):
             pass
         _minimap_state[area_ptr] = state
@@ -280,20 +325,21 @@ def _get_area_and_region_under_mouse(context, event) -> tuple:
     return None, None
 
 
-def _get_minimap_transform(st: dict | None = None) -> tuple[float, float, float, float, float]:
+def _get_minimap_transform(
+    st: MinimapState | None = None,
+    space: Any = None,
+    region: Any = None,
+) -> tuple[float, float, float, float, float]:
     """Computes internal transformations representing scale, zoom, and panning inside the minimap."""
     if st is None:
         st = _state()
-    rect = st.get("rect", (0, 0, 100, 100))
-    bounds = st.get("tree_bounds", (0, 0, 100, 100))
-    padding = st.get("padding", 6 * _get_ui_scale())
+    rect = st.rect
+    bounds = st.tree_bounds
+    padding = st.padding
 
-    if "base_zoom" not in st:
-        st["base_zoom"] = st.get("zoom", 1.0)
-
-    base_zoom = st["base_zoom"]
+    base_zoom = st.base_zoom
     zoom = base_zoom
-    pan = st.get("pan", [0.0, 0.0])
+    pan = st.pan
 
     mx, my, mw, mh = rect
     inner_w = max(mw - 2 * padding, 1.0)
@@ -307,8 +353,11 @@ def _get_minimap_transform(st: dict | None = None) -> tuple[float, float, float,
     # Dynamic Auto-Zoom if follow_view is active
     addon = bpy.context.preferences.addons.get(__package__)
     if addon and getattr(addon.preferences.settings, "follow_view", False):
-        space = bpy.context.space_data
-        region = bpy.context.region
+        if space is None:
+            space = bpy.context.space_data
+        if region is None:
+            region = bpy.context.region
+
         if space and space.type == "NODE_EDITOR" and region:
             visible = _get_visible_rect(space, region)
             if visible:
@@ -323,12 +372,12 @@ def _get_minimap_transform(st: dict | None = None) -> tuple[float, float, float,
                 if min_req_zoom < zoom:
                     zoom = min_req_zoom
 
-                st["zoom"] = zoom
+                st.zoom = zoom
                 # Execute clamping passively during draw so panning outside the minimap updates bounds
                 _clamp_pan_to_viewport(space, region, st)
-                pan = st["pan"]
+                pan = st.pan
 
-    st["zoom"] = zoom
+    st.zoom = zoom
     scale = base_scale * zoom
 
     cx = mx + padding + inner_w / 2 + pan[0]
@@ -340,8 +389,8 @@ def _get_minimap_transform(st: dict | None = None) -> tuple[float, float, float,
     return cx, cy, scale, tree_cx, tree_cy
 
 
-def _clamp_pan_to_viewport(space, region, st) -> None:
-    """Clamp *st['pan']* so the editor viewport stays inside the minimap (follow mode).
+def _clamp_pan_to_viewport(space, region, st: MinimapState) -> None:
+    """Clamp *st.pan* so the editor viewport stays inside the minimap (follow mode).
 
     No-op when the ``follow_view`` preference is off.
     """
@@ -353,11 +402,11 @@ def _clamp_pan_to_viewport(space, region, st) -> None:
     if not visible:
         return
 
-    rect = st.get("rect", (0, 0, 100, 100))
-    bounds = st.get("tree_bounds", (0, 0, 100, 100))
-    padding = st.get("padding", 6 * _get_ui_scale())
-    zoom = st.get("zoom", 1.0)
-    pan = st.get("pan", [0.0, 0.0])
+    rect = st.rect
+    bounds = st.tree_bounds
+    padding = st.padding
+    zoom = st.zoom
+    pan = st.pan
 
     mx, my, mw, mh = rect
     inner_l = mx + padding
@@ -410,9 +459,9 @@ def _clamp_pan_to_viewport(space, region, st) -> None:
             dy = inner_b - vy
 
     if abs(dx) > 0.5:
-        st["pan"][0] += dx
+        st.pan[0] += dx
     if abs(dy) > 0.5:
-        st["pan"][1] += dy
+        st.pan[1] += dy
 
 
 def _find_node_at(nodes: bpy.types.Nodes, tree_x: float, tree_y: float) -> bpy.types.Node | None:
@@ -488,15 +537,15 @@ def frame_all(
         return
 
     bounds = _get_node_tree_bounds(node_tree.nodes)
-    st["tree_bounds"] = bounds
+    st.tree_bounds = bounds
 
     addon = bpy.context.preferences.addons.get(__package__)
     follow = addon and getattr(addon.preferences.settings, "follow_view", False)
 
     if not follow:
-        st["base_zoom"] = 1.0
-        st["zoom"] = 1.0
-        st["pan"] = [0.0, 0.0]
+        st.base_zoom = 1.0
+        st.zoom = 1.0
+        st.pan = [0.0, 0.0]
         redraw_ui("NODE_EDITOR")
         return
 
@@ -509,8 +558,8 @@ def frame_all(
     else:
         c_min_x, c_min_y, c_max_x, c_max_y = bounds
 
-    rect = st.get("rect", (0, 0, 100, 100))
-    padding = st.get("padding", 6 * _get_ui_scale())
+    rect = st.rect
+    padding = st.padding
     _, _, mw, mh = rect
     inner_w = max(mw - 2 * padding, 1.0)
     inner_h = max(mh - 2 * padding, 1.0)
@@ -528,9 +577,9 @@ def frame_all(
     combined_cx = (c_min_x + c_max_x) / 2
     combined_cy = (c_min_y + c_max_y) / 2
 
-    st["base_zoom"] = zoom
-    st["zoom"] = zoom
-    st["pan"] = [
+    st.base_zoom = zoom
+    st.zoom = zoom
+    st.pan = [
         -(combined_cx - tree_cx) * base_scale * zoom,
         -(combined_cy - tree_cy) * base_scale * zoom,
     ]
@@ -550,13 +599,13 @@ def _frame_to_bounds(
     """
     st = _state(area_ptr)
 
-    rect = st.get("rect", (0, 0, 100, 100))
-    padding = st.get("padding", 6 * _get_ui_scale())
+    rect = st.rect
+    padding = st.padding
     _, _, mw, mh = rect
     inner_w = max(mw - 2 * padding, 1.0)
     inner_h = max(mh - 2 * padding, 1.0)
 
-    bounds = st.get("tree_bounds", (0, 0, 100, 100))
+    bounds = st.tree_bounds
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
     base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
@@ -573,9 +622,9 @@ def _frame_to_bounds(
     target_cx = (target_bounds[0] + target_bounds[2]) / 2
     target_cy = (target_bounds[1] + target_bounds[3]) / 2
 
-    st["base_zoom"] = zoom
-    st["zoom"] = zoom
-    st["pan"] = [
+    st.base_zoom = zoom
+    st.zoom = zoom
+    st.pan = [
         -(target_cx - tree_cx) * base_scale * zoom,
         -(target_cy - tree_cy) * base_scale * zoom,
     ]
@@ -612,7 +661,7 @@ def frame_selected(
         min_y = min(min_y, y - h)
         max_y = max(max_y, y)
 
-    st["tree_bounds"] = _get_node_tree_bounds(node_tree.nodes)
+    st.tree_bounds = _get_node_tree_bounds(node_tree.nodes)
     _frame_to_bounds((min_x, min_y, max_x, max_y), area_ptr=area_ptr)
 
 
@@ -640,7 +689,7 @@ def frame_view(
     addon = bpy.context.preferences.addons.get(__package__)
     fill = addon and getattr(addon.preferences.settings, "frame_view_fill", False)
 
-    st["tree_bounds"] = _get_node_tree_bounds(node_tree.nodes)
+    st.tree_bounds = _get_node_tree_bounds(node_tree.nodes)
     _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
 
 

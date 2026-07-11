@@ -22,6 +22,7 @@ from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_with_hole,
     _draw_pill,
+    _draw_pill_border,
     _draw_rounded_rect_border,
     _draw_text_with_shadow,
     _get_batch_rect_border_shader,
@@ -29,8 +30,10 @@ from .gpu_draw import (
 )
 from .helpers import (
     _COLOR_TAG_TO_THEME_ATTR,
+    MinimapState,
     _clamp_pan_to_viewport,
     _compute_outline_color,
+    _get_minimap_margins,
     _get_minimap_transform,
     _get_node_dims,
     _get_node_editor_theme_colors,
@@ -52,8 +55,7 @@ from .preferences import TRACE_LEVEL
 logger = logging.getLogger(__package__)
 
 FONT_SIZE = 11
-MAP_PADDING = 10
-FRAME_ALL_BTN_SIZE = 16
+FRAME_ALL_BTN_SIZE = 20
 FRAME_ALL_BTN_MARGIN = 1
 _MIN_SOCKET_SCALE = 0.15
 
@@ -85,7 +87,7 @@ class _Timer:
 _PROFILE_FRAMES = 300
 
 
-def _maybe_start_profiler(st: dict) -> None:
+def _maybe_start_profiler(st: MinimapState) -> None:
     """Start cProfile if TRACE is enabled and profiling is not already active.
 
     Stores the profiler in *st* so each area gets its own session.
@@ -94,7 +96,7 @@ def _maybe_start_profiler(st: dict) -> None:
         return
     if not logger.isEnabledFor(TRACE_LEVEL):
         return
-    if st.get("_profiling_active"):
+    if st._profiling_active:
         return
     prefs = bpy.context.preferences.addons[__package__].preferences
     if not getattr(prefs, "logging_enabled", False) or getattr(prefs, "logging_level", "INFO") != "TRACE":
@@ -103,27 +105,30 @@ def _maybe_start_profiler(st: dict) -> None:
         profiler = cProfile.Profile()
         profiler.enable()
     except ValueError:
-        st["_profiler"] = None
-        st["_profiling_active"] = False
+        st._profiler = None
+        st._profiling_active = False
         return
-    st["_profiler"] = profiler
-    st["_profiling_active"] = True
-    st["_profiling_frame_count"] = 0
+    st._profiler = profiler
+    st._profiling_active = True
+    st._profiling_frame_count = 0
     logger.trace("PROFILER: started (will dump after %d frames)", _PROFILE_FRAMES)
 
 
-def _maybe_stop_profiler(st: dict) -> None:
+def _maybe_stop_profiler(st: MinimapState) -> None:
     """Increment frame count; dump profile stats after *_PROFILE_FRAMES* frames."""
     if not _HAS_C_PROFILE:
         return
-    if not st.get("_profiling_active"):
+    if not st._profiling_active:
         return
-    st["_profiling_frame_count"] = st.get("_profiling_frame_count", 0) + 1
-    if st["_profiling_frame_count"] < _PROFILE_FRAMES:
+    if not logger.isEnabledFor(TRACE_LEVEL):
+        st._profiling_active = False
         return
-    profiler = st.get("_profiler")
+    st._profiling_frame_count += 1
+    if st._profiling_frame_count < _PROFILE_FRAMES:
+        return
+    profiler = st._profiler
     if profiler is None:
-        st["_profiling_active"] = False
+        st._profiling_active = False
         return
     try:
         profiler.disable()
@@ -140,16 +145,18 @@ def _maybe_stop_profiler(st: dict) -> None:
             s.write(f"{label:<50s} {tt:8.3f}s {ct:8.3f}s {nc:6d}\n")
         logger.trace("PROFILER: stats after %d frames\n%s", _PROFILE_FRAMES, s.getvalue())
     finally:
-        st["_profiling_active"] = False
+        st._profiling_active = False
 
 
-def _early_exit(context, space, st) -> bool:
+def _early_exit(context, space, st: MinimapState) -> bool:
     """Return True if the minimap should not be drawn."""
+    if space is None:
+        return True
     if space.type != "NODE_EDITOR":
         return True
     if not space.overlay.show_overlays:
         return True
-    if not st.get("enabled", True):
+    if not st.enabled:
         return True
     addon = context.preferences.addons.get(__package__)
     if not addon:
@@ -158,33 +165,22 @@ def _early_exit(context, space, st) -> bool:
 
 
 def _compute_minimap_rect(
-    settings, ui_scale, space, region, corner, st
+    settings, ui_scale, space, region, corner, st: MinimapState
 ) -> tuple[float, float, float, float, float, float] | None:
     """Compute the minimap rectangle position and dimensions."""
-    sx, sy, ex, ey = _get_safe_bounds(bpy.context.area, region, space, corner)
+    sx, sy, ex, ey = _get_safe_bounds(bpy.context.area, region)
     safe_w = ex - sx
     safe_h = ey - sy
 
-    # Compute desired size, capped to % of safe region
-    mw = getattr(settings, "minimap_width", 200) * ui_scale
-    mh = getattr(settings, "minimap_height", 200) * ui_scale
-    max_mw_pct = getattr(settings, "max_width_pct", 30) / 100.0
-    max_mh_pct = getattr(settings, "max_height_pct", 40) / 100.0
-    mw = min(mw, safe_w * max_mw_pct)
-    mh = min(mh, safe_h * max_mh_pct)
+    x_margin, y_margin, margin = _get_minimap_margins(space, corner, ui_scale)
 
-    x_margin = MAP_PADDING * ui_scale
-    y_margin = x_margin
-
-    # Adjust top margin when breadcrumb path or compositing asset shelf is visible
-    match corner:
-        case "TOP_RIGHT" | "TOP_LEFT":
-            if getattr(space.overlay, "show_context_path", False):
-                y_margin = (MAP_PADDING + 20) * ui_scale
-        case "BOTTOM_RIGHT" | "BOTTOM_LEFT":
-            if space.node_tree and space.node_tree.type == "COMPOSITING":
-                if getattr(space, "show_region_asset_shelf", False):
-                    y_margin = (MAP_PADDING + 25) * ui_scale
+    # Compute desired size, capped to % of safe region (accounting for margins)
+    mw = getattr(settings, "minimap_width", 256) * ui_scale
+    mh = getattr(settings, "minimap_height", 128) * ui_scale
+    max_mw_pct = getattr(settings, "max_width_pct", 50) / 100.0
+    max_mh_pct = getattr(settings, "max_height_pct", 50) / 100.0
+    mw = min(mw, (safe_w - x_margin) * max_mw_pct)
+    mh = min(mh, (safe_h - y_margin - margin) * max_mh_pct)
 
     padding = 6 * ui_scale
 
@@ -212,7 +208,7 @@ def _compute_minimap_rect(
     # Only bail if the minimap would be too small to be useful
     MIN_DIM = 50 * ui_scale
     if mw < MIN_DIM or mh < MIN_DIM:
-        st["rect"] = (0, 0, 0, 0)
+        st.rect = (0.0, 0.0, 0.0, 0.0)
         return None
 
     return mx, my, mw, mh, padding, y_margin
@@ -295,15 +291,15 @@ def _draw_resize_handles(
     master_alpha: float,
     ui_scale: float,
     corner: str,
+    st: MinimapState,
 ) -> None:
     """Draw full-edge resize indicators, colored orange when the percentage cap is active."""
-    st = _state()
-    handle = st.get("resize_active")
+    handle = st.resize_active
     if not handle:
         return
 
-    w_clamped = st.get("width_clamped", False)
-    h_clamped = st.get("height_clamped", False)
+    w_clamped = st.width_clamped
+    h_clamped = st.height_clamped
 
     col_base = (*colors["text"][:3], colors["text"][3] * 0.5 * master_alpha)
     col_warn = (*colors["indicator"][:3], colors["indicator"][3] * master_alpha)
@@ -343,6 +339,7 @@ def _draw_viewport_overlay(
     panel_r: float,
     ui_scale: float,
     scissor_active: bool,
+    st: MinimapState | None = None,
 ) -> None:
     """Draw the viewport rect outline and optional darkened overlay."""
     visible = _get_visible_rect(space, region)
@@ -365,6 +362,8 @@ def _draw_viewport_overlay(
     hole_w = v_right - v_left
     hole_h = v_top - v_bottom
 
+    # border_alpha_mul = 0.5 if st and st.pressed else 1.0
+
     # Darkened overlay (optional)
     if getattr(settings, "show_viewport_overlay", True):
         overlay_color = getattr(settings, "viewport_overlay_color", (0.0, 0.0, 0.0, 0.5))
@@ -374,31 +373,37 @@ def _draw_viewport_overlay(
         if scissor_overlay:
             gpu.state.scissor_test_set(False)
 
-        if hole_w > 0 and hole_h > 0:
-            _draw_filled_rounded_rect_with_hole(
-                mx,
-                my,
-                mw,
-                mh,
-                panel_r,
-                v_left,
-                v_bottom,
-                hole_w,
-                hole_h,
-                0,
-                overlay,
-            )
-        else:
-            _draw_filled_rounded_rect(mx, my, mw, mh, panel_r, overlay)
-
-        if scissor_overlay:
-            gpu.state.scissor_test_set(True)
-            gpu.state.scissor_set(int(mx + 1), int(my + 1), int(mw - 2), int(mh - 2))
+        try:
+            if hole_w > 0 and hole_h > 0:
+                _draw_filled_rounded_rect_with_hole(
+                    mx,
+                    my,
+                    mw,
+                    mh,
+                    panel_r,
+                    v_left,
+                    v_bottom,
+                    hole_w,
+                    hole_h,
+                    0,
+                    overlay,
+                )
+            else:
+                _draw_filled_rounded_rect(mx, my, mw, mh, panel_r, overlay)
+        finally:
+            if scissor_overlay:
+                gpu.state.scissor_test_set(True)
+                gpu.state.scissor_set(int(mx + 1), int(my + 1), int(mw - 2), int(mh - 2))
 
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
-        outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
-        _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, (0, 0, 0, 0.15), 0.5 * ui_scale)
+        if st and st.pressed:
+            outline_col = (*colors["node_active"][:3], colors["node_active"][3] * master_alpha)
+        else:
+            outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
+
+        shadow = (0, 0, 0, 0.15 * master_alpha)
+        _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, shadow, 0.5 * ui_scale)
         _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
 
 
@@ -425,6 +430,16 @@ def _draw_node_count(
     pad = 1
     tx = mx + (mw - text_w) - 10 * ui_scale
     ty = my + (FONT_SIZE * ui_scale) - 3
+
+    st = _state()
+    btn_bottom = None
+    if st.frame_view_btn:
+        btn_bottom = st.frame_view_btn[1]
+    elif st.frame_all_btn:
+        btn_bottom = st.frame_all_btn[1]
+    if btn_bottom is not None and btn_bottom <= ty + font_size:
+        return
+
     text_color = (*colors["text"][:3], colors["text"][3] * 0.85 * master_alpha)
 
     _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
@@ -443,16 +458,16 @@ def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
 _NODE_ROUNDNESS_DEFAULT = 2.0
 
 
-def _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale):
+def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
     """Timer callback: compile tree data after fingerprint settles, then force redraw."""
     current_fingerprint = get_tree_fingerprint(node_tree)
-    if st.get("cached_fingerprint") == current_fingerprint:
-        st.pop("pending_timer", None)
+    if st.cached_fingerprint == current_fingerprint:
+        st.pending_timer = None
         return None
     with _Timer("compile_tree"):
         _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale)
-        st["cached_fingerprint"] = current_fingerprint
-    st.pop("pending_timer", None)
+        st.cached_fingerprint = current_fingerprint
+    st.pending_timer = None
     screen = bpy.context.screen
     if screen:
         for area in screen.areas:
@@ -461,7 +476,7 @@ def _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale):
     return None
 
 
-def _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale):
+def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
     """Compute tree-space data for nodes, wires, sockets, and labels.
 
     Called only when the node tree fingerprint changes (tree topology,
@@ -469,11 +484,11 @@ def _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale):
     are NOT applied here — they are handled each frame by
     ``_build_minimap_batches()``.
 
-    Stores result in ``st["tree_data"]``.
+    Stores result in ``st.tree_data``.
     """
     nodes = node_tree.nodes
     active_node = nodes.active
-    zoom = st.get("zoom", 1.0)
+    zoom = st.zoom
 
     tree_data: dict = {}
 
@@ -817,24 +832,24 @@ def _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale):
                 wire_items.setdefault(wire_color, []).append((out_x, out_y, in_x, in_y))
 
     tree_data["wire_items"] = wire_items
-    st["tree_data"] = tree_data
+    st.tree_data = tree_data
 
 
-def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha):
+def _build_minimap_batches(st: MinimapState, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha):
     """Transform tree-space data to screen-space and compile GPU draw batches.
 
     Must be called every frame after ``_compile_tree_data()`` has stored
-    ``st["tree_data"]``.
+    ``st.tree_data``.
     """
-    tree_data = st.get("tree_data")
+    tree_data = st.tree_data
     if tree_data is None:
         return
 
     mx, my, mw, mh, padding, y_margin = rect
-    st["rect"] = (mx, my, mw, mh)
-    st["margin"] = y_margin
-    st["padding"] = padding
-    st["scale"] = scale
+    st.rect = (mx, my, mw, mh)
+    st.margin = y_margin
+    st.padding = padding
+    st.scale = scale
 
     font_id = 0
     min_dim = 3.0 * ui_scale
@@ -876,9 +891,9 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
         is_frame = info["is_frame"]
 
         if is_frame:
-            node_r = info["node_r_base"] * ui_scale
+            node_r = info["node_r_base"] * ui_scale * 1.6
         else:
-            node_r = info["node_r_base"] * ui_scale * scale
+            node_r = info["node_r_base"] * ui_scale * (scale * 4)
 
         is_tiny = (nw_s < min_dim or nh_s < min_dim) and not is_frame
 
@@ -951,7 +966,7 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
                     blf.size(font_id, label_font_size)
                     tw, th = blf.dimensions(font_id, text)
                     lx = nx + (nw_s - tw) / 2
-                    ly = ny + nh_s + 2 * ui_scale
+                    ly = ny + nh_s + 3 * ui_scale
                     label_pad = 2 * ui_scale
 
                     frame_pos_fill.extend(
@@ -1000,7 +1015,7 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
     num_fills = len(all_pos_fill) // 4
     if num_fills > 0:
         shader = _get_batch_rect_shader()
-        st["cached_backdrops_batch"] = batch_for_shader(
+        st.cached_backdrops_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -1013,12 +1028,12 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
             indices=_create_quad_indices(num_fills),
         )
     else:
-        st["cached_backdrops_batch"] = None
+        st.cached_backdrops_batch = None
 
     num_borders = len(all_pos_border) // 4
     if num_borders > 0:
         shader = _get_batch_rect_border_shader()
-        st["cached_borders_batch"] = batch_for_shader(
+        st.cached_borders_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -1032,12 +1047,12 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
             indices=_create_quad_indices(num_borders),
         )
     else:
-        st["cached_borders_batch"] = None
+        st.cached_borders_batch = None
 
     num_frame_fills = len(frame_pos_fill) // 4
     if num_frame_fills > 0:
         shader = _get_batch_rect_shader()
-        st["cached_frames_fill_batch"] = batch_for_shader(
+        st.cached_frames_fill_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -1050,12 +1065,12 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
             indices=_create_quad_indices(num_frame_fills),
         )
     else:
-        st["cached_frames_fill_batch"] = None
+        st.cached_frames_fill_batch = None
 
     num_frame_borders = len(frame_pos_border) // 4
     if num_frame_borders > 0:
         shader = _get_batch_rect_border_shader()
-        st["cached_frames_border_batch"] = batch_for_shader(
+        st.cached_frames_border_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -1069,14 +1084,14 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
             indices=_create_quad_indices(num_frame_borders),
         )
     else:
-        st["cached_frames_border_batch"] = None
+        st.cached_frames_border_batch = None
 
-    st["cached_text"] = cached_text
+    st.cached_text = cached_text
 
     # Sockets — unified batch with per-vertex color + auto-hide by zoom
-    ph = max(2.0, tree_data["socket_ph_base"] * scale * ui_scale)
+    ph = max(1, tree_data["socket_ph_base"] * scale * ui_scale)
     pw = ph
-    st["cached_socket_ph"] = ph
+    st.cached_socket_ph = ph
     if tree_data["socket_items"] and scale >= _MIN_SOCKET_SCALE:
         half_w = pw / 2
         half_h = ph / 2
@@ -1086,12 +1101,10 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
         socket_all_hs = []
         socket_all_r = []
         socket_all_c = []
-        socket_shadow = []
         for color, positions in tree_data["socket_items"].items():
             for sx_tree, sy_tree in positions:
                 sx = cx + (sx_tree - tree_cx) * scale
                 sy = cy + (sy_tree - tree_cy) * scale
-                socket_shadow.append((sx, sy, pw))
                 _pad = 1.5
                 socket_all_pos.extend(
                     [
@@ -1115,7 +1128,7 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
         num_s = len(socket_all_pos) // 4
         if num_s > 0:
             shader = _get_batch_rect_shader()
-            st["cached_socket_batch"] = batch_for_shader(
+            st.cached_socket_batch = batch_for_shader(
                 shader,
                 "TRIS",
                 {
@@ -1128,11 +1141,9 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
                 indices=_create_quad_indices(num_s),
             )
         else:
-            st["cached_socket_batch"] = None
-        st["cached_socket_shadow"] = socket_shadow
+            st.cached_socket_batch = None
     else:
-        st["cached_socket_batch"] = None
-        st["cached_socket_shadow"] = []
+        st.cached_socket_batch = None
 
     # Wires
     wires_by_color = {}
@@ -1155,8 +1166,8 @@ def _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, 
             group.append((mx_w, my_w, length, angle))
         if group:
             wires_by_color[color] = group
-    st["cached_wires"] = wires_by_color
-    st["cached_wire_thickness"] = thickness
+    st.cached_wires = wires_by_color
+    st.cached_wire_thickness = thickness
 
 
 def draw_minimap() -> None:
@@ -1169,7 +1180,7 @@ def draw_minimap() -> None:
     st = _state()
     if _early_exit(context, space, st):
         show_overlays = space.overlay.show_overlays if space else "?"
-        enabled = st.get("enabled", "?")
+        enabled = st.enabled
         logger.debug("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
         return
 
@@ -1242,25 +1253,30 @@ def draw_minimap() -> None:
             return
         mx, my, mw, mh, padding, y_margin = rect
 
-        st["rect"] = (mx, my, mw, mh)
-        st["tree_bounds"] = bounds
-        st["margin"] = y_margin
-        st["padding"] = padding
+        st.rect = (mx, my, mw, mh)
+        st.tree_bounds = bounds
+        st.margin = y_margin
+        st.padding = padding
 
         _clamp_pan_to_viewport(space, region, st)
 
     # Debounce: schedule compile after fingerprint settles (via bpy.app.timers)
     current_fingerprint = get_tree_fingerprint(node_tree)
-    if st.get("cached_fingerprint") != current_fingerprint and not st.get("pending_timer"):
+    if st.cached_fingerprint != current_fingerprint:
+        if st.pending_timer is not None:
+            try:
+                bpy.app.timers.unregister(st.pending_timer)
+            except ValueError:
+                pass
         delay = getattr(settings, "debounce_interval", 0.15)
         timer = bpy.app.timers.register(
             lambda: _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale),
             first_interval=delay,
         )
-        st["pending_timer"] = timer
+        st.pending_timer = timer
 
     # Build screen-space batches every frame (applies current zoom/pan)
-    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform()
+    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
     with _Timer("build_batches"):
         _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha)
 
@@ -1280,8 +1296,8 @@ def draw_minimap() -> None:
         scissor_active = scissor_state[0]
 
     # Layer 1: Frame nodes (behind wires)
-    frames_fill_batch = st.get("cached_frames_fill_batch")
-    frames_border_batch = st.get("cached_frames_border_batch")
+    frames_fill_batch = st.cached_frames_fill_batch
+    frames_border_batch = st.cached_frames_border_batch
     if frames_fill_batch or frames_border_batch:
         with _Timer("draw_frames"):
             fill_shader = _get_batch_rect_shader()
@@ -1297,8 +1313,8 @@ def draw_minimap() -> None:
                 frames_border_batch.draw(border_shader)
 
     # Layer 2: Connection wires
-    wires_by_color = st.get("cached_wires", {})
-    thickness = st.get("cached_wire_thickness", 1.0)
+    wires_by_color = st.cached_wires or {}
+    thickness = st.cached_wire_thickness
     if getattr(settings, "show_wires", True) and wires_by_color:
         with _Timer("draw_wires"):
             shadow_alpha = 0.35 * master_alpha
@@ -1311,7 +1327,7 @@ def draw_minimap() -> None:
                 _batch_draw_pills(group, thickness, wire_color)
 
     # Layer 3: Node backgrounds
-    backdrops_batch = st.get("cached_backdrops_batch")
+    backdrops_batch = st.cached_backdrops_batch
     if backdrops_batch:
         with _Timer("draw_backdrops"):
             fill_shader = _get_batch_rect_shader()
@@ -1322,7 +1338,7 @@ def draw_minimap() -> None:
             backdrops_batch.draw(fill_shader)
 
     # Layer 4: Node borders
-    borders_batch = st.get("cached_borders_batch")
+    borders_batch = st.cached_borders_batch
     if borders_batch:
         with _Timer("draw_borders"):
             border_shader = _get_batch_rect_border_shader()
@@ -1333,15 +1349,9 @@ def draw_minimap() -> None:
             borders_batch.draw(border_shader)
 
     # Layer 5: Socket indicator pills (single batch with per-vertex color)
-    socket_batch = st.get("cached_socket_batch")
-    ph = st.get("cached_socket_ph", 2.0)
+    socket_batch = st.cached_socket_batch
     if getattr(settings, "show_socket_indicators", False) and socket_batch:
         with _Timer("draw_sockets"):
-            shadow_alpha = 0.35 * master_alpha
-            if shadow_alpha > 0:
-                shadow_data = st.get("cached_socket_shadow", [])
-                shadow_group = [(sx, sy, w, 0.0) for sx, sy, w in shadow_data]
-                _batch_draw_pills(shadow_group, ph * 1.5, (0.0, 0.0, 0.0, shadow_alpha))
             shader = _get_batch_rect_shader()
             shader.bind()
             shader.uniform_float(
@@ -1351,7 +1361,7 @@ def draw_minimap() -> None:
             socket_batch.draw(shader)
 
     # Layer 6: Text labels
-    cached_text = st.get("cached_text", [])
+    cached_text = st.cached_text or []
     if cached_text:
         with _Timer("draw_text"):
             gpu.state.blend_set("ALPHA")
@@ -1379,6 +1389,7 @@ def draw_minimap() -> None:
             panel_r,
             ui_scale,
             scissor_active,
+            st,
         )
 
     # Layer 8: Scrollbars
@@ -1401,11 +1412,16 @@ def draw_minimap() -> None:
         )
 
     # Top corner frame-all brackets
-    _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha)
+    with _Timer("_draw_frame_all_button"):
+        _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha)
+
+    # Frame-view button (below frame-all)
+    with _Timer("_draw_frame_view_button"):
+        _draw_frame_view_button(mx, my - 1, mw, mh, padding, colors, ui_scale, master_alpha)
 
     # Edge resize handle pills
     with _Timer("draw_resize_handles"):
-        _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner)
+        _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
 
     # Node count overlay text
     with _Timer("draw_node_count"):
@@ -1522,12 +1538,15 @@ def _draw_minimap_scrollbars(
         _draw_pill(thumb_x2, thumb_y2, bar_thick, thumb_h, scroll_color)
 
 
+BTN_BG_COLOR = (0, 0, 0, 0.3)
+
+
 def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):
-    """Draw a frame-all button at the top-left of the minimap inner area when scrollbars are visible."""
+    """Draw a frame-all button at the top-right of the minimap inner area."""
     addon = bpy.context.preferences.addons.get(__package__)
     settings = getattr(addon.preferences, "settings", None) if addon else None
     if not settings or not getattr(settings, "show_frame_all_btn", True) or not getattr(settings, "interactive", True):
-        _state()["frame_all_btn"] = None
+        _state().frame_all_btn = None
         return
     inner_l = mx
     inner_t = my + mh - padding
@@ -1545,11 +1564,24 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     x = inner_l + mw - btn_size - margin - padding
     y = inner_t - btn_size - margin
     ico_color = (*colors["text"][:3], colors["text"][3] * master_alpha * 0.7)
+    border_color = (*BTN_BG_COLOR[:3], BTN_BG_COLOR[3] * master_alpha * 0.2)
+
+    show_frame_view = getattr(settings, "show_frame_view_btn", True) and getattr(settings, "interactive", True)
+
+    if show_frame_view:
+        gap = 3 * ui_scale
+        fy = y - gap - btn_size
+        _draw_pill(x, fy, btn_size, btn_size * 2 + gap, (*BTN_BG_COLOR[:3], BTN_BG_COLOR[3] * master_alpha))
+        _draw_pill_border(x, fy, btn_size, btn_size * 2 + gap, border_color, 0.5)
+
+    else:
+        _draw_pill(x, y, btn_size, btn_size, (*BTN_BG_COLOR[:3], BTN_BG_COLOR[3] * master_alpha))
+        _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)
 
     # Corner brackets icon (four brackets pointing outward)
-    i = 2 * ui_scale
+    i = 5 * ui_scale
     t = max(1, int(1.5 * ui_scale))
-    arm = btn_size * 0.3
+    arm = btn_size * 0.15
 
     # Top-left bracket
     _draw_filled_rounded_rect(x + i, y + i, arm, t, t * 0.5, ico_color)
@@ -1564,4 +1596,42 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     _draw_filled_rounded_rect(x + btn_size - i - arm, y + btn_size - i - t, arm, t, t * 0.5, ico_color)
     _draw_filled_rounded_rect(x + btn_size - i - t, y + btn_size - i - arm, t, arm, t * 0.5, ico_color)
 
-    st["frame_all_btn"] = (x, y, btn_size, btn_size)
+    st.frame_all_btn = (x, y, btn_size, btn_size)
+
+
+def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
+    """Draw a frame-view button below the frame-all button."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    settings = getattr(addon.preferences, "settings", None) if addon else None
+    if not settings or not getattr(settings, "show_frame_view_btn", True) or not getattr(settings, "interactive", True):
+        _state().frame_view_btn = None
+        return
+
+    inner_l = mx
+    inner_t = my + mh - padding
+
+    st = _state()
+
+    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
+    margin = FRAME_ALL_BTN_MARGIN * ui_scale
+    gap = 2 * ui_scale
+    x = inner_l + mw - btn_size - margin - padding
+    y = inner_t - btn_size - margin  # frame-all y
+    has_frame_all = getattr(settings, "show_frame_all_btn", True) and getattr(settings, "interactive", True)
+    fy = y - gap - btn_size if has_frame_all else y
+    ico_color = (*colors["text"][:3], colors["text"][3] * master_alpha * 0.8)
+
+    # Viewport rectangle icon
+    inset = 5 * ui_scale
+    rx = x + inset
+    ry = fy + inset
+    rw = btn_size - 2 * inset
+    rh = btn_size - 2 * inset
+    t = max(1, int(1.5 * ui_scale))
+
+    if not _state().frame_all_btn:
+        _draw_pill(x, fy, btn_size, btn_size, BTN_BG_COLOR)
+
+    _draw_rounded_rect_border(rx, ry, rw, rh, t, ico_color, 0.1)
+
+    st.frame_view_btn = (x, fy, btn_size, btn_size)

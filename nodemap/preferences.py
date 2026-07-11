@@ -54,9 +54,7 @@ def _update_minimap_cache(self, context):
         from .helpers import _minimap_state, redraw_ui
 
         for state in _minimap_state.values():
-            if "cached_key" in state:
-                state["cached_key"] = None
-            state.pop("cached_fingerprint", None)
+            state.cached_fingerprint = None
         redraw_ui("NODE_EDITOR")
     except (ImportError, AttributeError):
         pass
@@ -125,8 +123,8 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     max_width_pct: IntProperty(
         name="Max X %",
-        description="Maximum minimap width as percentage of the safe region width",
-        default=75,
+        description="Largest the minimap can be across, as a share of the available space",
+        default=50,
         min=10,
         max=100,
         subtype="PERCENTAGE",
@@ -135,8 +133,8 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     max_height_pct: IntProperty(
         name="Max Y %",
-        description="Maximum minimap height as percentage of the safe region height",
-        default=75,
+        description="Largest the minimap can be up and down, as a share of the available space",
+        default=100,
         min=10,
         max=100,
         subtype="PERCENTAGE",
@@ -198,6 +196,13 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_all_btn: BoolProperty(
         name="Frame All Button",
         description="Show a frame-all button inside the minimap",
+        default=False,
+        update=_update_minimap_cache,
+    )
+
+    show_frame_view_btn: BoolProperty(
+        name="Frame View Button",
+        description="Show a frame-view button inside the minimap",
         default=False,
         update=_update_minimap_cache,
     )
@@ -344,7 +349,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("MEDIUM", "Medium", "Balanced (0.4s)"),
             ("SLOW", "Slow", "Leisurely (0.67s)"),
         ],
-        default="MEDIUM",
+        default="FAST",
     )
 
 
