@@ -81,6 +81,11 @@ def _rgba(value: tuple[float, ...], alpha: float) -> tuple[float, float, float, 
     return (float(value[0]), float(value[1]), float(value[2]), float(alpha))
 
 
+def _alpha_mul(color: tuple[float, ...], alpha: float) -> tuple[float, float, float, float]:
+    """Return RGBA with the original alpha multiplied by alpha."""
+    return (float(color[0]), float(color[1]), float(color[2]), float(color[3] * alpha))
+
+
 def _get_ui_scale() -> float:
     """Return the Blender UI scale factor from preferences."""
     return float(bpy.context.preferences.system.ui_scale)

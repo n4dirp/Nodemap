@@ -31,6 +31,7 @@ from .gpu_draw import (
 from .helpers import (
     _COLOR_TAG_TO_THEME_ATTR,
     MinimapState,
+    _alpha_mul,
     _clamp_pan_to_viewport,
     _compute_outline_color,
     _get_minimap_margins,
@@ -219,12 +220,12 @@ def _draw_background(
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
 
-    bg_color = tuple(colors["bg"][:3]) + (colors["bg"][3] * master_alpha,)
+    bg_color = _alpha_mul(colors["bg"], master_alpha)
     panel_r = colors.get("panel_roundness", 4.0)
     shadow_w = 1
 
     _draw_filled_rounded_rect(mx, my, mw, mh, panel_r * 1.2, bg_color)
-    border_color = (*colors["bg_border"][:3], colors["bg_border"][3] * master_alpha)
+    border_color = _alpha_mul(colors["bg_border"], master_alpha)
 
     _draw_rounded_rect_border(
         mx - shadow_w, my - shadow_w, mw + shadow_w * 2, mh + shadow_w * 2, panel_r, (0, 0, 0, 0.15 * master_alpha), 0.5
@@ -301,8 +302,8 @@ def _draw_resize_handles(
     w_clamped = st.width_clamped
     h_clamped = st.height_clamped
 
-    col_base = (*colors["text"][:3], colors["text"][3] * 0.5 * master_alpha)
-    col_warn = (*colors["indicator"][:3], colors["indicator"][3] * master_alpha)
+    col_base = _alpha_mul(colors["text"], 0.5 * master_alpha)
+    col_warn = _alpha_mul(colors["indicator"], master_alpha)
     thick = 3.0 * ui_scale
     margin = 6 * ui_scale
 
@@ -367,7 +368,7 @@ def _draw_viewport_overlay(
     # Darkened overlay (optional)
     if getattr(settings, "show_viewport_overlay", True):
         overlay_color = getattr(settings, "viewport_overlay_color", (0.0, 0.0, 0.0, 0.5))
-        overlay = (*overlay_color[:3], overlay_color[3] * master_alpha)
+        overlay = _alpha_mul(overlay_color, master_alpha)
 
         scissor_overlay = scissor_active
         if scissor_overlay:
@@ -398,13 +399,13 @@ def _draw_viewport_overlay(
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
         if st and st.pressed:
-            outline_col = (*colors["node_active"][:3], colors["node_active"][3] * master_alpha)
+            outline_col = _alpha_mul(colors["node_active"], master_alpha)
         else:
-            outline_col = (*colors["node_outline"][:3], colors["node_outline"][3] * master_alpha)
-
+            outline_col = _alpha_mul(colors["node_outline"], master_alpha)
+        border = 0.5 * ui_scale
         shadow = (0, 0, 0, 0.15 * master_alpha)
-        _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, shadow, 0.5 * ui_scale)
-        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, 0.5 * ui_scale)
+        _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, shadow, border)
+        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, border)
 
 
 def _draw_node_count(
@@ -440,7 +441,7 @@ def _draw_node_count(
     if btn_bottom is not None and btn_bottom <= ty + font_size:
         return
 
-    text_color = (*colors["text"][:3], colors["text"][3] * 0.85 * master_alpha)
+    text_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
 
     _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
 
@@ -578,7 +579,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
         node_infos: list[dict] = []
         socket_items: dict[tuple, list[tuple[float, float]]] = {}
         default_socket_color = (*colors["wire"][:3], master_alpha)
-        default_wire_color = (*colors["wire"][:3], colors["wire"][3] * master_alpha)
+        default_wire_color = _alpha_mul(colors["wire"], master_alpha)
         out_pos: dict[str, dict] = {}
         in_pos: dict[str, dict] = {}
 
@@ -613,7 +614,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 border_col = frame_color
                 if node.select:
                     border_col = colors["node_active"] if node == active_node else colors["node_selected"]
-                info["border_color"] = _srgb_to_linear((*border_col[:3], border_col[3] * master_alpha))
+                info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, master_alpha))
                 info["frame_color"] = frame_color
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT
             else:
@@ -638,15 +639,15 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                         )
                     )
                 else:
-                    info["fill_color"] = _srgb_to_linear((*node_color[:3], node_color[3] * master_alpha))
+                    info["fill_color"] = _srgb_to_linear(_alpha_mul(node_color, master_alpha))
 
                 border_col = colors["node_border"]
                 if node.select:
                     border_col = colors["node_active"] if node == active_node else colors["node_selected"]
                 if node.mute:
-                    info["border_color"] = _srgb_to_linear((*border_col[:3], border_col[3] * 0.35 * master_alpha))
+                    info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, 0.35 * master_alpha))
                 else:
-                    info["border_color"] = _srgb_to_linear((*border_col[:3], border_col[3] * master_alpha))
+                    info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, master_alpha))
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT * 2
 
             # Labels (tree-space positions computed in build)
@@ -654,7 +655,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
             if is_frame:
                 frame_label = node.label
                 if frame_label and show_frame_labels and zoom >= 0.8:
-                    text_color = (*colors["text"][:3], colors["text"][3] * master_alpha)
+                    text_color = _alpha_mul(colors["text"], master_alpha)
                     fc = info["frame_color"]
                     bg_color_lbl = _srgb_to_linear((fc[0], fc[1], fc[2], 0.4 * master_alpha))
                     info["frame_label"] = (frame_label, text_color, bg_color_lbl)
@@ -1519,7 +1520,7 @@ def _draw_minimap_scrollbars(
     bar_thick = max(2, int(3 * ui_scale))
     bar_off = int(2 * ui_scale)
     min_thumb = int(6 * ui_scale)
-    scroll_color = (*colors["scroll_item"][:3], colors["scroll_item"][3] * master_alpha * 0.65)
+    scroll_color = _alpha_mul(colors["scroll_item"], master_alpha * 0.65)
 
     # Horizontal scrollbar (bottom edge)
     if visible_w < bbox_w:
@@ -1563,19 +1564,19 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     margin = FRAME_ALL_BTN_MARGIN * ui_scale
     x = inner_l + mw - btn_size - margin - padding
     y = inner_t - btn_size - margin
-    ico_color = (*colors["text"][:3], colors["text"][3] * master_alpha * 0.7)
-    border_color = (*BTN_BG_COLOR[:3], BTN_BG_COLOR[3] * master_alpha * 0.2)
+    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
+    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.2)
 
     show_frame_view = getattr(settings, "show_frame_view_btn", True) and getattr(settings, "interactive", True)
 
     if show_frame_view:
         gap = 3 * ui_scale
         fy = y - gap - btn_size
-        _draw_pill(x, fy, btn_size, btn_size * 2 + gap, (*BTN_BG_COLOR[:3], BTN_BG_COLOR[3] * master_alpha))
+        _draw_pill(x, fy, btn_size, btn_size * 2 + gap, _alpha_mul(BTN_BG_COLOR, master_alpha))
         _draw_pill_border(x, fy, btn_size, btn_size * 2 + gap, border_color, 0.5)
 
     else:
-        _draw_pill(x, y, btn_size, btn_size, (*BTN_BG_COLOR[:3], BTN_BG_COLOR[3] * master_alpha))
+        _draw_pill(x, y, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
         _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)
 
     # Corner brackets icon (four brackets pointing outward)
@@ -1619,7 +1620,7 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
     y = inner_t - btn_size - margin  # frame-all y
     has_frame_all = getattr(settings, "show_frame_all_btn", True) and getattr(settings, "interactive", True)
     fy = y - gap - btn_size if has_frame_all else y
-    ico_color = (*colors["text"][:3], colors["text"][3] * master_alpha * 0.8)
+    ico_color = _alpha_mul(colors["text"], master_alpha * 0.8)
 
     # Viewport rectangle icon
     inset = 5 * ui_scale
