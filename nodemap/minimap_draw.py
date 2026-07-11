@@ -894,7 +894,7 @@ def _build_minimap_batches(st: MinimapState, rect, cx, cy, scale, tree_cx, tree_
         if is_frame:
             node_r = info["node_r_base"] * ui_scale * 1.6
         else:
-            node_r = info["node_r_base"] * ui_scale * (scale * 4)
+            node_r = info["node_r_base"] * ui_scale * (scale * 2)
 
         is_tiny = (nw_s < min_dim or nh_s < min_dim) and not is_frame
 
@@ -1254,6 +1254,13 @@ def draw_minimap() -> None:
             return
         mx, my, mw, mh, padding, y_margin = rect
 
+        # Expand bounds by a small margin so frame labels stay inside the minimap
+        LABEL_MARGIN_PX = 3 * ui_scale
+        bbox_h = max(bounds[3] - bounds[1], 1.0)
+        inner_h = max(mh - 2 * padding, 1.0)
+        margin = LABEL_MARGIN_PX * bbox_h / inner_h
+        bounds = (bounds[0] - margin, bounds[1] - margin, bounds[2] + margin, bounds[3] + margin)
+
         st.rect = (mx, my, mw, mh)
         st.tree_bounds = bounds
         st.margin = y_margin
@@ -1418,7 +1425,7 @@ def draw_minimap() -> None:
 
     # Frame-view button (below frame-all)
     with _Timer("_draw_frame_view_button"):
-        _draw_frame_view_button(mx, my - 1, mw, mh, padding, colors, ui_scale, master_alpha)
+        _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
 
     # Edge resize handle pills
     with _Timer("draw_resize_handles"):
@@ -1568,13 +1575,11 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.2)
 
     show_frame_view = getattr(settings, "show_frame_view_btn", True) and getattr(settings, "interactive", True)
-
     if show_frame_view:
         gap = 3 * ui_scale
         fy = y - gap - btn_size
         _draw_pill(x, fy, btn_size, btn_size * 2 + gap, _alpha_mul(BTN_BG_COLOR, master_alpha))
         _draw_pill_border(x, fy, btn_size, btn_size * 2 + gap, border_color, 0.5)
-
     else:
         _draw_pill(x, y, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
         _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)

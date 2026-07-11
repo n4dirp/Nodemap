@@ -126,7 +126,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     max_width_pct: IntProperty(
         name="Max X %",
         description="Largest the minimap can be across, as a share of the available space",
-        default=50,
+        default=100,
         min=10,
         max=100,
         subtype="PERCENTAGE",
@@ -198,14 +198,14 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_all_btn: BoolProperty(
         name="Frame All Button",
         description="Show a frame-all button inside the minimap",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
     show_frame_view_btn: BoolProperty(
         name="Frame View Button",
         description="Show a frame-view button inside the minimap",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
