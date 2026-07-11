@@ -314,6 +314,17 @@ def _get_node_tree_bounds(nodes: bpy.types.Nodes) -> tuple[float, float, float, 
     return min_x, min_y, max_x, max_y
 
 
+def _expand_bounds_margin(
+    bounds: tuple[float, float, float, float], ui_scale: float, mh: float, padding: float
+) -> tuple[float, float, float, float]:
+    """Expand tree bounds by a small margin so frame labels stay inside the minimap."""
+    LABEL_MARGIN_PX = 3 * ui_scale
+    bbox_h = max(bounds[3] - bounds[1], 1.0)
+    inner_h = max(mh - 2 * padding, 1.0)
+    margin = LABEL_MARGIN_PX * bbox_h / inner_h
+    return (bounds[0] - margin, bounds[1] - margin, bounds[2] + margin, bounds[3] + margin)
+
+
 def _get_area_and_region_under_mouse(context, event) -> tuple:
     """Find the area and WINDOW region under the mouse cursor using screen coordinates."""
     window = getattr(context, "window", None)
@@ -544,6 +555,11 @@ def frame_all(
         return
 
     bounds = _get_node_tree_bounds(node_tree.nodes)
+
+    rect = st.rect
+    padding = st.padding
+    _, _, mw, mh = rect
+    bounds = _expand_bounds_margin(bounds, _get_ui_scale(), mh, padding)
     st.tree_bounds = bounds
 
     addon = bpy.context.preferences.addons.get(__package__)
@@ -565,9 +581,6 @@ def frame_all(
     else:
         c_min_x, c_min_y, c_max_x, c_max_y = bounds
 
-    rect = st.rect
-    padding = st.padding
-    _, _, mw, mh = rect
     inner_w = max(mw - 2 * padding, 1.0)
     inner_h = max(mh - 2 * padding, 1.0)
 
@@ -668,7 +681,11 @@ def frame_selected(
         min_y = min(min_y, y - h)
         max_y = max(max_y, y)
 
-    st.tree_bounds = _get_node_tree_bounds(node_tree.nodes)
+    rect = st.rect
+    _, _, mw, mh = rect
+    st.tree_bounds = _expand_bounds_margin(
+        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding
+    )
     _frame_to_bounds((min_x, min_y, max_x, max_y), area_ptr=area_ptr)
 
 
@@ -696,7 +713,11 @@ def frame_view(
     addon = bpy.context.preferences.addons.get(__package__)
     fill = addon and getattr(addon.preferences.settings, "frame_view_fill", False)
 
-    st.tree_bounds = _get_node_tree_bounds(node_tree.nodes)
+    rect = st.rect
+    _, _, mw, mh = rect
+    st.tree_bounds = _expand_bounds_margin(
+        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding
+    )
     _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
 
 

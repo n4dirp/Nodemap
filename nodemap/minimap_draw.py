@@ -34,6 +34,7 @@ from .helpers import (
     _alpha_mul,
     _clamp_pan_to_viewport,
     _compute_outline_color,
+    _expand_bounds_margin,
     _get_minimap_margins,
     _get_minimap_transform,
     _get_node_dims,
@@ -1254,12 +1255,7 @@ def draw_minimap() -> None:
             return
         mx, my, mw, mh, padding, y_margin = rect
 
-        # Expand bounds by a small margin so frame labels stay inside the minimap
-        LABEL_MARGIN_PX = 3 * ui_scale
-        bbox_h = max(bounds[3] - bounds[1], 1.0)
-        inner_h = max(mh - 2 * padding, 1.0)
-        margin = LABEL_MARGIN_PX * bbox_h / inner_h
-        bounds = (bounds[0] - margin, bounds[1] - margin, bounds[2] + margin, bounds[3] + margin)
+        bounds = _expand_bounds_margin(bounds, ui_scale, mh, padding)
 
         st.rect = (mx, my, mw, mh)
         st.tree_bounds = bounds
