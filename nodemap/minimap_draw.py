@@ -203,9 +203,15 @@ def _compute_minimap_rect(
 
     # Clamp to safe bounds instead of bailing
     mx = max(mx, float(sx) + x_margin)
-    my = max(my, float(sy) + y_margin)
     mw = min(mw, float(ex) - mx - x_margin)
-    mh = min(mh, float(ey) - my - margin)
+    if corner in ("TOP_RIGHT", "TOP_LEFT"):
+        # Top corners: bottom is limited by margin (margin_bottom), top is limited by y_margin
+        my = max(my, float(sy) + margin)
+        mh = min(mh, float(ey) - my - y_margin)
+    else:
+        # Bottom corners: bottom is limited by y_margin, top is limited by margin
+        my = max(my, float(sy) + y_margin)
+        mh = min(mh, float(ey) - my - margin)
 
     # Only bail if the minimap would be too small to be useful
     MIN_DIM = 50 * ui_scale
