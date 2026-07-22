@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.3] - 2026-07-21
+
+### Changed
+- Nodemap overlay is now hidden by default
+
+### Fixed
+- Fixed node label initials to only show characters that are alphanumeric
+
 ## [1.3.0] - 2026-07-11
 
 ### Added
