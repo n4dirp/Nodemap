@@ -89,7 +89,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_by_default: BoolProperty(
         name="Show by Default",
         description="Show minimap on newly opened Node Editor areas",
-        default=True,
+        default=False,
     )
 
     position: EnumProperty(

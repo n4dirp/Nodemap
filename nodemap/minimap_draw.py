@@ -1548,7 +1548,7 @@ def _draw_minimap_scrollbars(
         _draw_pill(thumb_x2, thumb_y2, bar_thick, thumb_h, scroll_color)
 
 
-BTN_BG_COLOR = (0, 0, 0, 0.3)
+BTN_BG_COLOR = (0, 0, 0, 0.35)
 
 
 def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):
@@ -1574,7 +1574,7 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     x = inner_l + mw - btn_size - margin - padding
     y = inner_t - btn_size - margin
     ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
-    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.2)
+    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
 
     show_frame_view = getattr(settings, "show_frame_view_btn", True) and getattr(settings, "interactive", True)
     if show_frame_view:

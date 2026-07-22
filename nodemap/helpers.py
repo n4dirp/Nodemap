@@ -778,12 +778,13 @@ def _get_node_initials(name: str) -> str:
         return "?"
     words = name.split()
     if len(words) >= 2:
-        return "".join(w[0] for w in words).upper()[:2]
-    word = words[0]
-    for i, ch in enumerate(word):
-        if ch.isalpha():
-            return word[:i] + ch.upper()
-    return word[0].upper()
+        initials = "".join(w[0] for w in words if w[0].isalnum()).upper()[:2]
+        if initials:
+            return initials
+    for ch in name:
+        if ch.isalnum():
+            return ch.upper()
+    return name[0].upper()
 
 
 def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: float, max_lines: int = 3) -> list[str]:
