@@ -22,24 +22,30 @@ A minimap overlay for the Blender Node Editor that provides an interactive overv
 | Shortcut | Action |
 | --- | --- |
 | `Ctrl+M` | Toggle minimap on/off |
-| `Home` | Frame all nodes |
-| `Shift+Home` | Frame current view |
-| `Numpad .` | Frame selected nodes |
 
-### Mouse (inside minimap)
+### Keyboard *(when the cursor is over the minimap)*
 
-| Input | Action |
-| --- | --- |
-| `Left Click` | Pan / Select / Pan+Select (configurable) |
-| `Left Drag` | Pan the Node Editor view |
-| `Right Click` | Pan / Select / Pan+Select (configurable) |
-| `Right Drag` | Pan the Node Editor view |
-| `Middle Drag` | Pan the minimap's own view |
-| `Scroll` | Zoom minimap or Node Editor (configurable) |
-| `Alt + Scroll` | Temporarily swap scroll zoom target |
-| `Ctrl + Scroll` | Pan editor view horizontally |
-| `Shift + Scroll` | Pan editor view vertically |
-| `Drag edge / corner` | Resize the minimap |
+| Shortcut     | Action               |
+| ------------ | -------------------- |
+| `Home`       | Frame all nodes      |
+| `Shift+Home` | Frame current view   |
+| `Numpad .`   | Frame selected nodes |
+
+### Mouse *(inside the minimap)*
+
+| Input                | Action                                         |
+| -------------------- | ---------------------------------------------- |
+| `Left Click`         | Pan / Select / Pan+Select (configurable)       |
+| `Left Drag`          | Pan the Node Editor view                       |
+| `Right Click`        | Pan / Select / Pan+Select (configurable)       |
+| `Right Drag`         | Pan the Node Editor view                       |
+| `Middle Drag`        | Pan the minimap                                |
+| `Scroll`             | Zoom the minimap or Node Editor (configurable) |
+| `Alt + Scroll`       | Temporarily swap the scroll zoom target        |
+| `Ctrl + Scroll`      | Pan the editor horizontally                    |
+| `Shift + Scroll`     | Pan the editor vertically                      |
+| `Drag edge / corner` | Resize the minimap                             |
+
 
 ## Requirements
 
