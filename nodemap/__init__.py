@@ -27,6 +27,23 @@ classes = (
 
 _draw_handler = None
 _modal_operator = None
+addon_keymaps: list[tuple[bpy.types.KeyMap, bpy.types.KeyMapItem]] = []
+
+
+def _register_keymaps():
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if not kc:
+        return
+    km = kc.keymaps.new(name="Node Editor", space_type="NODE_EDITOR")
+    kmi = km.keymap_items.new("nodemap.toggle", type="M", value="PRESS", ctrl=True)
+    addon_keymaps.append((km, kmi))
+
+
+def _unregister_keymaps():
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
 
 
 def register():
@@ -51,8 +68,12 @@ def register():
     _registration_state["done"] = True
     logger.debug("Registration fully complete (_registration_done=True)")
 
+    _register_keymaps()
+
 
 def unregister():
+    _unregister_keymaps()
+
     global _draw_handler, _modal_operator
     if _draw_handler is not None:
         try:

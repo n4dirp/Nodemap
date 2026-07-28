@@ -101,7 +101,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("BOTTOM_LEFT", "Bottom Left", "Display in the bottom-left corner"),
             ("BOTTOM_RIGHT", "Bottom Right", "Display in the bottom-right corner"),
         ],
-        default="TOP_LEFT",
+        default="BOTTOM_RIGHT",
         update=_update_minimap_cache,
     )
 
@@ -147,7 +147,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Opacity",
         description="Adjusts the overall opacity of the minimap",
         default=1.0,
-        min=0.1,
+        min=0.15,
         max=1.0,
         precision=3,
         subtype="FACTOR",
@@ -197,22 +197,22 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     show_frame_all_btn: BoolProperty(
         name="Frame All Button",
-        description="Show a frame-all button inside the minimap",
-        default=True,
+        description="Show a Frame-all button inside the minimap",
+        default=False,
         update=_update_minimap_cache,
     )
 
     show_frame_view_btn: BoolProperty(
         name="Frame View Button",
-        description="Show a frame-view button inside the minimap",
-        default=True,
+        description="Show a Frame-view button inside the minimap",
+        default=False,
         update=_update_minimap_cache,
     )
 
     show_names: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
-        default=True,
+        default=False,
         update=_update_minimap_cache,
     )
 
@@ -226,7 +226,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_labels: BoolProperty(
         name="Show Frame Labels",
         description="Display labels above frame nodes in the minimap",
-        default=True,
+        default=False,
         update=_update_minimap_cache,
     )
 
@@ -265,14 +265,14 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_socket_indicators: BoolProperty(
         name="Socket Indicators",
         description="Display colored indicator pills on node sockets",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
     debounce_interval: FloatProperty(
         name="Update Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",
-        default=0.08,
+        default=0.1,
         min=0.0,
         max=0.5,
         step=0.01,
@@ -296,8 +296,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Scroll Wheel",
         description="Choose what the scroll wheel zooms (Hold Alt to switch)",
         items=[
-            ("NODE_EDITOR", "Editor Zoom", "Zoom the node editor view"),
             ("MINIMAP", "Minimap Zoom", "Zoom the minimap view"),
+            ("NODE_EDITOR", "Node Editor Zoom", "Zoom the node editor view"),
         ],
         default="NODE_EDITOR",
     )
@@ -339,7 +339,10 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     smooth_pan: BoolProperty(
         name="Smooth Pan",
-        description="Apply inertia and smooth animations when panning the view with the minimap",
+        description=(
+            "Apply inertia and smooth animations when panning the view with the minimap\n"
+            "* Overridden by the Reduce Motion accessibility option"
+        ),
         default=True,
     )
 
@@ -384,10 +387,76 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+        settings = self.settings
 
+        layout.label(text="Nodemap")
+        layout.prop(settings, "show_by_default", text="Show in New Editors")
+
+        layout.separator()
+        layout.label(text="Keymap")
+        wm = context.window_manager
+        kc = wm.keyconfigs.user
+        from . import addon_keymaps
+
+        row = layout.row()
+        row.use_property_split = False
+        for km_addon, kmi_addon in addon_keymaps:
+            km = kc.keymaps.get(km_addon.name)
+            if not km:
+                continue
+            kmi = km.keymap_items.get(kmi_addon.idname)
+            if kmi:
+                from rna_keymap_ui import draw_kmi
+
+                draw_kmi([], kc, km, kmi, row, 0)
+            else:
+                layout.operator("nodemap.restore_keymap", text="Restore")
+
+        layout.separator()
+        sub_body = layout.column()
+        sub_body.active = settings.interactive
+        col = sub_body.column()
+        col.label(text="Navigation")
+        col.row().prop(settings, "left_click_action", text="Left Click", expand=True)
+        col.row().prop(settings, "right_click_action", text="Right Click", expand=True)
+        col.row().prop(settings, "scroll_wheel_mode", expand=True)
+
+        if {"SELECT", "PAN_SELECT"} & {
+            settings.left_click_action,
+            settings.right_click_action,
+        }:
+            col.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+
+        col.separator()
+
+        col = sub_body.column(heading="Pan Animation")
+        _reduce_motion = context.preferences.view.use_reduce_motion
+        col.active = not _reduce_motion
+        row = col.row(align=True, heading="")
+        row.prop(settings, "smooth_pan", text="")
+        sub = row.row(align=True)
+        sub.active = settings.smooth_pan
+        sub.row().prop(settings, "pan_speed", expand=True)
+
+        # layout.separator()
+        # col = layout.column(align=True, heading="Frame View")
+        # col.prop(settings, "frame_view_fill", text="Fill View")
+
+        layout.separator()
+        layout.label(text="Layout")
+        col = layout.column(align=True)
+        col.prop(settings, "minimap_width", text="Size X")
+        col.prop(settings, "minimap_height", text="Y")
+
+        col = layout.column(align=True)
+        col.prop(settings, "max_width_pct", text="Max Region X")
+        col.prop(settings, "max_height_pct", text="Y")
+
+        layout.separator()
         layout.label(text="Performance")
         layout.prop(self.settings, "debounce_interval", text="Update Delay")
 
+        layout.separator()
         layout.label(text="Development")
         row = layout.row(align=True, heading="Console Logging")
         row.prop(self, "logging_enabled", text="")

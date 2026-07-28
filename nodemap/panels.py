@@ -9,7 +9,7 @@ class NODEMAP_PT_popup(Panel):
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
-    bl_ui_units_x = 12
+    bl_ui_units_x = 14
 
     @classmethod
     def poll(cls, context):
@@ -17,129 +17,99 @@ class NODEMAP_PT_popup(Panel):
 
     def draw(self, context):
         layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        overlay = context.space_data.overlay
-        layout.enabled = overlay.show_overlays
         prefs = context.preferences.addons.get(__package__).preferences
         settings = prefs.settings
+        st = _state()
+        layout.active = st.enabled
 
         layout.label(text="Nodemap")
 
         row = layout.row(align=True)
         row.operator("nodemap.frame_all", text="Frame All")
         row.operator("nodemap.frame_view", text="Frame View")
+        row.operator("nodemap.frame_selected", text="Frame Selected")
 
-        header, body = layout.panel("NODEMAP_PT_appearance", default_closed=False)
-        header.label(text="Appearance")
-        if body:
-            col = body.column(heading="Show", align=True)
+        header, sub_body = layout.panel("NODEMAP_PT_layout", default_closed=False)
+        header.label(text="Layout")
+        if sub_body:
+            sub_body.prop(settings, "position", text="Position")
+
+            sub_body.separator()
+            sub_body.label(text="Show")
+            split = sub_body.split()
+
+            col = split.column()
+            col.prop(settings, "show_node_count", text="Count")
             col.prop(settings, "show_frames", text="Frames")
-            col.prop(settings, "show_node_count", text="Node Count")
 
-            row = body.row(heading="Frame", align=True)
+            col = split.column()
+            col.prop(settings, "show_socket_indicators", text="Sockets")
+            col.prop(settings, "show_wires", text="Wires")
+
+            col = split.column()
+            row = col.row()
+            row.prop(settings, "show_frame_all_btn", text="Frame All")
             row.active = settings.interactive
-            row.prop(settings, "show_frame_all_btn", text="All")
-            row.prop(settings, "show_frame_view_btn", text="View")
 
-            row = body.row(heading="Connections", align=True)
-            row.prop(settings, "show_socket_indicators", text="Sockets")
-            row.prop(settings, "show_wires", text="Wires")
+            row = col.row()
+            row.prop(settings, "show_frame_view_btn", text="Frame View")
+            row.active = settings.interactive
 
-            col = body.column(heading="Labels")
-            row = col.row(align=True, heading="")
-            row.prop(settings, "show_names", text="")
-            sub = row.row(align=True)
+            sub_body.separator()
+            col = sub_body.column()
+            split = col.split()
+            row = split.row()
+            row.prop(settings, "show_names", text="Node Labels")
+            sub = split.row()
             sub.active = settings.show_names
             sub.prop(settings, "node_label_mode", expand=True)
+
             sub = col.row(align=True)
             sub.active = settings.show_frames
             sub.prop(settings, "show_frame_labels", text="Frame Labels")
 
-            header, sub_body = body.panel("NODEMAP_PT_layout", default_closed=True)
-            header.label(text="Layout")
-            if sub_body:
-                sub_body.prop(settings, "position", text="Position")
+        header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
+        header.label(text="Theme")
+        if body:
+            body.prop(settings, "opacity", text="Panel Opacity", slider=True)
 
-                col = sub_body.column(align=True)
-                col.prop(settings, "minimap_width", text="Size X")
-                col.prop(settings, "minimap_height", text="Y")
+            col = body.column()
+            row = col.row(align=True)
+            row.prop(settings, "show_viewport_overlay", text="Overlay")
+            sub = row.row(align=True)
+            sub.active = settings.show_viewport_overlay
+            sub.prop(settings, "viewport_overlay_color", text="")
 
-                col = sub_body.column(align=True)
-                col.prop(settings, "max_width_pct", text="Max Region X")
-                col.prop(settings, "max_height_pct", text="Y")
+            row = col.row(align=True)
+            row.prop(settings, "custom_bg_color", text="Background")
+            sub = row.row(align=True)
+            sub.active = settings.custom_bg_color
+            sub.prop(settings, "bg_color", text="")
 
-            header, body = body.panel("NODEMAP_PT_theme", default_closed=True)
-            header.label(text="Theme")
-            if body:
-                body.prop(settings, "opacity", text="Opacity", slider=True)
+            row = body.row()
+            row.prop(settings, "colored_nodes", text="Node Colors")
+            sub = row.row()
+            sub.active = settings.show_wires | settings.show_socket_indicators
+            sub.prop(settings, "show_wire_color", text="Wire Colors")
 
-                row = body.row(heading="Color", align=True)
-                row.prop(settings, "colored_nodes", text="Nodes")
-                sub = row.row(align=True)
-                sub.active = settings.show_wires | settings.show_socket_indicators
-                sub.prop(settings, "show_wire_color", text="Wires")
-
-                col = body.column()
-                row = col.row(heading="Overlay", align=True)
-                row.prop(settings, "show_viewport_overlay", text="")
-                sub = row.row(align=True)
-                sub.active = settings.show_viewport_overlay
-                sub.prop(settings, "viewport_overlay_color", text="")
-
-                row = col.row(heading="Background", align=True)
-                row.prop(settings, "custom_bg_color", text="")
-                sub = row.row(align=True)
-                sub.active = settings.custom_bg_color
-                sub.prop(settings, "bg_color", text="")
-
-        header, body = layout.panel("NODEMAP_PT_behavior", default_closed=True)
+        header, body = layout.panel("NODEMAP_PT_options", default_closed=False)
         header.label(text="Options")
         if body:
-            col = body.column(heading="Minimap", align=True)
-            col.prop(settings, "show_by_default", text="Show in New Editors")
-
-            body.prop(settings, "follow_view", text="Follow View")
-
-            col = body.column(heading="Frame View", align=True)
-            col.prop(settings, "frame_view_fill", text="Fill")
-
-            sub_header, sub_body = body.panel("NODEMAP_PT_interactive", default_closed=False)
-            sub_header.use_property_split = False
-            sub_header.use_property_decorate = False
-            sub_header.prop(settings, "interactive", text="Map Navigation")
-
-            if sub_body:
-                sub_body.active = settings.interactive
-
-                col = sub_body.column()
-                col.prop(settings, "left_click_action", text="Left Click")
-                col.prop(settings, "right_click_action", text="Right Click")
-                col.prop(settings, "scroll_wheel_mode", text="Scroll Wheel")
-
-                if {"SELECT", "PAN_SELECT"} & {
-                    settings.left_click_action,
-                    settings.right_click_action,
-                }:
-                    sub_body.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
-
-                col = sub_body.column(heading="Smooth Pan")
-                row = col.row(align=True, heading="")
-                row.prop(settings, "smooth_pan", text="")
-                sub = row.row(align=True)
-                sub.active = settings.smooth_pan
-                sub.prop(settings, "pan_speed", text="")
+            flow = body.grid_flow(columns=2)
+            flow.prop(settings, "interactive", text="Map Navigation")
+            flow.prop(settings, "follow_view", text="Follow View")
 
 
 def draw_minimap_header_button(self, context):
     if context.area.type != "NODE_EDITOR":
         return
     layout = self.layout
+    snode = context.space_data
     overlay = context.space_data.overlay
     st = _state()
 
     row = layout.row(align=True)
-    row.active = overlay.show_overlays
+    row.active = snode.node_tree is not None and overlay.show_overlays
     row.operator("nodemap.toggle", text="", depress=st.enabled, icon="META_PLANE")
     row.popover(panel="NODEMAP_PT_popup", text="")
 
