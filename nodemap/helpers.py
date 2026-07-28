@@ -541,7 +541,7 @@ def frame_all(
     """Adjust minimap zoom/pan to frame the entire node tree.
 
     When ``follow_view`` is enabled the editor viewport is included in the
-    fit so that clamping cannot clip nodes afterward.
+    frame so that clamping cannot clip nodes afterward.
     """
     st = _state(area_ptr)
     if space is None:
@@ -614,7 +614,7 @@ def _frame_to_bounds(
     """Adjust minimap zoom/pan to frame the given bounds in tree coordinates.
 
     When *fill* is True the bounds are zoomed to entirely fill the minimap
-    (one axis may clip); when False the bounds fit within the minimap
+    (one axis may clip); when False the bounds frame within the minimap
     (empty space may remain).
     """
     st = _state(area_ptr)
@@ -683,9 +683,7 @@ def frame_selected(
 
     rect = st.rect
     _, _, mw, mh = rect
-    st.tree_bounds = _expand_bounds_margin(
-        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding
-    )
+    st.tree_bounds = _expand_bounds_margin(_get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding)
     _frame_to_bounds((min_x, min_y, max_x, max_y), area_ptr=area_ptr)
 
 
@@ -715,9 +713,7 @@ def frame_view(
 
     rect = st.rect
     _, _, mw, mh = rect
-    st.tree_bounds = _expand_bounds_margin(
-        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding
-    )
+    st.tree_bounds = _expand_bounds_margin(_get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding)
     _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
 
 
@@ -759,16 +755,17 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
 def get_tree_fingerprint(node_tree) -> tuple:
     """Generate a lightweight fingerprint of the node tree structure and selection states."""
     if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
-        return (0, 0.0, "", 0, 0, 0, 0.0, 0)
+        return (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
     nodes = node_tree.nodes
     loc_sum = sum(n.location_absolute.x + n.location_absolute.y for n in nodes)
     select_sum = sum(1 for n in nodes if n.select)
     mute_sum = sum(1 for n in nodes if n.mute)
     hide_sum = sum(1 for n in nodes if n.hide)
     width_sum = sum(n.width for n in nodes)
+    height_sum = sum(abs(n.dimensions[1]) for n in nodes)
     links_count = len(node_tree.links) if hasattr(node_tree, "links") else 0
     active_name = nodes.active.name if nodes.active else ""
-    return (len(nodes), loc_sum, active_name, select_sum, mute_sum, hide_sum, width_sum, links_count)
+    return (len(nodes), loc_sum, active_name, select_sum, mute_sum, hide_sum, width_sum, height_sum, links_count)
 
 
 def _get_node_initials(name: str) -> str:

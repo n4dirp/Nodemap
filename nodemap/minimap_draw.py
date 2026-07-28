@@ -1425,7 +1425,7 @@ def draw_minimap() -> None:
     with _Timer("_draw_frame_all_button"):
         _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha)
 
-    # Frame-view button (below frame-all)
+    # frame-view button (below frame-all)
     with _Timer("_draw_frame_view_button"):
         _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
 
@@ -1571,7 +1571,7 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
 
     btn_size = FRAME_ALL_BTN_SIZE * ui_scale
     margin = FRAME_ALL_BTN_MARGIN * ui_scale
-    x = inner_l + mw - btn_size - margin - padding
+    x = round(inner_l + mw - btn_size - margin - padding)
     y = inner_t - btn_size - margin
     ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
     border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
@@ -1579,7 +1579,7 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     show_frame_view = getattr(settings, "show_frame_view_btn", True) and getattr(settings, "interactive", True)
     if show_frame_view:
         gap = 3 * ui_scale
-        fy = y - gap - btn_size
+        fy = round(y - gap - btn_size)
         _draw_pill(x, fy, btn_size, btn_size * 2 + gap, _alpha_mul(BTN_BG_COLOR, master_alpha))
         _draw_pill_border(x, fy, btn_size, btn_size * 2 + gap, border_color, 0.5)
     else:
@@ -1628,6 +1628,7 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
     has_frame_all = getattr(settings, "show_frame_all_btn", True) and getattr(settings, "interactive", True)
     fy = y - gap - btn_size if has_frame_all else y
     ico_color = _alpha_mul(colors["text"], master_alpha * 0.8)
+    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
 
     # Viewport rectangle icon
     inset = 5 * ui_scale
@@ -1639,6 +1640,7 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
 
     if not _state().frame_all_btn:
         _draw_pill(x, fy, btn_size, btn_size, BTN_BG_COLOR)
+        _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)
 
     _draw_rounded_rect_border(rx, ry, rw, rh, t, ico_color, 0.1)
 

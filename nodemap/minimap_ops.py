@@ -134,7 +134,41 @@ class NODEMAP_OT_toggle(Operator):
     def execute(self, context: Context) -> set[str]:
         st = _state()
         st.enabled = not st.enabled
+        if not st.enabled:
+            win = context.window
+            if win:
+                op = _minimap_window_operators.get(win.as_pointer())
+                if op:
+                    op._cancel_interaction(context)
         redraw_ui("NODE_EDITOR")
+        return {"FINISHED"}
+
+
+class NODEMAP_OT_restore_keymap(Operator):
+    """Restore the default Nodemap keymap shortcut."""
+
+    bl_idname = "nodemap.restore_keymap"
+    bl_label = "Restore Default Shortcut"
+    bl_options = {"INTERNAL"}
+
+    @classmethod
+    def poll(cls, context: Context) -> bool:
+        wm = context.window_manager
+        kc = wm.keyconfigs.user
+        if not kc:
+            return False
+        km = kc.keymaps.get("Node Editor")
+        if km:
+            return km.keymap_items.get("nodemap.toggle") is None
+        return True
+
+    def execute(self, context: Context) -> set[str]:
+        wm = context.window_manager
+        kc = wm.keyconfigs.user
+        km = kc.keymaps.get("Node Editor")
+        if not km:
+            km = kc.keymaps.new(name="Node Editor", space_type="NODE_EDITOR")
+        km.keymap_items.new("nodemap.toggle", type="M", value="PRESS", ctrl=True)
         return {"FINISHED"}
 
 
@@ -194,6 +228,11 @@ class NODEMAP_OT_navigate(Operator):
     _drag_target: list[float]
     _drag_active: bool = False
 
+    def _is_smooth_pan(self, settings, context, default=True) -> bool:
+        if context.preferences.view.use_reduce_motion:
+            return False
+        return getattr(settings, "smooth_pan", default)
+
     def _override_ctx(self, context: Context):
         return context.temp_override(
             area=self._area,
@@ -233,6 +272,11 @@ class NODEMAP_OT_navigate(Operator):
             _clamp_pan_to_viewport(self._space, self._region, self._st)
 
         if not self._st or not self._st.enabled:
+            return {"PASS_THROUGH"}
+
+        if self._space and not self._space.overlay.show_overlays:
+            if _is_interacting:
+                self._cancel_interaction(context)
             return {"PASS_THROUGH"}
 
         if self._region is not None:
@@ -297,7 +341,7 @@ class NODEMAP_OT_navigate(Operator):
                             self._pan_acc[1] += self._drag_target[1]
                             self._drag_target = [0.0, 0.0]
                             self._drag_active = False
-                        if settings and getattr(settings, "smooth_pan", True):
+                        if settings and self._is_smooth_pan(settings, context):
                             speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
                             if speed > 2.0:
                                 self._inertia_active = True
@@ -397,7 +441,7 @@ class NODEMAP_OT_navigate(Operator):
                             self._pan_acc[1] += self._drag_target[1]
                             self._drag_target = [0.0, 0.0]
                             self._drag_active = False
-                        if settings and getattr(settings, "smooth_pan", True):
+                        if settings and self._is_smooth_pan(settings, context):
                             speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
                             if speed > 2.0:
                                 self._inertia_active = True
@@ -468,7 +512,7 @@ class NODEMAP_OT_navigate(Operator):
                     self._mmb_dragging = False
                     self._mmb_drag_start = None
                     _clamp_pan_to_viewport(self._space, self._region, st)
-                    if settings and getattr(settings, "smooth_pan", True):
+                    if settings and self._is_smooth_pan(settings, context):
                         speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
                         if speed > 2.0:
                             self._inertia_active = True
@@ -533,7 +577,7 @@ class NODEMAP_OT_navigate(Operator):
                         self._dragging = True
                         if self._was_in_minimap:
                             st.pressed = True
-                            smooth = settings and getattr(settings, "smooth_pan", False)
+                            smooth = settings and self._is_smooth_pan(settings, context, default=False)
                             self._pan_view(context, dx, dy, smooth)
                             self._drag_start = (self._mx, self._my)
                     return {"RUNNING_MODAL"}
@@ -617,7 +661,10 @@ class NODEMAP_OT_navigate(Operator):
 
             case "HOME":
                 if event.value == "PRESS" and in_minimap:
-                    frame_all(self._space, self._region, self._area.as_pointer())
+                    if event.shift:
+                        frame_view(self._space, self._region, self._area.as_pointer())
+                    else:
+                        frame_all(self._space, self._region, self._area.as_pointer())
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -813,7 +860,7 @@ class NODEMAP_OT_navigate(Operator):
         st.pressed = True
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
-        if settings and getattr(settings, "smooth_pan", True):
+        if settings and self._is_smooth_pan(settings, context):
             self._anim_target = [float(pan_x), float(pan_y)]
             self._anim_applied = [0.0, 0.0]
             self._anim_progress = 0.0
@@ -840,6 +887,35 @@ class NODEMAP_OT_navigate(Operator):
             except (RuntimeError, ValueError):
                 pass
             self._smooth_timer = None
+
+    def _cancel_interaction(self, context: Context) -> None:
+        self._cancel_smooth(context)
+        if self._dragging or self._drag_start is not None:
+            self._dragging = False
+            self._drag_start = None
+            self._drag_active = False
+            self._drag_target = [0.0, 0.0]
+        if self._mmb_dragging:
+            self._mmb_dragging = False
+            self._mmb_drag_start = None
+        if self._resize_handle:
+            self._resize_handle = None
+            self._resize_start_mouse = None
+            self._resize_start_values = None
+            st = self._st
+            if st:
+                st.width_clamped = False
+                st.height_clamped = False
+                st.hovered_handle = None
+                st.resize_active = None
+        context.window.cursor_modal_set("DEFAULT")
+        self._last_cursor = ""
+        self._frame_all_armed = False
+        self._frame_view_armed = False
+        st = self._st
+        if st and st.pressed:
+            st.pressed = False
+        redraw_ui("NODE_EDITOR")
 
     def _cancel_smooth(self, context: Context) -> None:
         if self._inertia_active:
@@ -937,7 +1013,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         speed = getattr(settings, "pan_speed", "MEDIUM")
-        frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 40}.get(speed, 24)
+        frames = {"FAST": 12, "MEDIUM": 20, "SLOW": 40}.get(speed, 24)
         self._anim_progress += 1 / frames
         if self._anim_progress >= 1.0:
             remaining_x = self._anim_target[0] - self._anim_applied[0]
@@ -1060,6 +1136,7 @@ class NODEMAP_OT_navigate(Operator):
         self._pan_acc = [0.0, 0.0]
         self._redirect_acc = [0.0, 0.0]
         self._frame_all_armed = False
+        self._frame_view_armed = False
         self._smooth_timer = None
         self._inertia_active = False
         self._inertia_mode = None
@@ -1118,6 +1195,7 @@ class NODEMAP_OT_frame_view(Operator):
 
 classes = (
     NODEMAP_OT_toggle,
+    NODEMAP_OT_restore_keymap,
     NODEMAP_OT_frame_all,
     NODEMAP_OT_frame_selected,
     NODEMAP_OT_frame_view,
