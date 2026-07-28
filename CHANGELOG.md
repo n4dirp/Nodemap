@@ -1,12 +1,21 @@
 # Changelog
 
-## [1.3.3] - 2026-07-21
+## [1.4.0] - 2026-07-28
+
+### Added
+- Toggle Nodemap shortcut (Ctrl+M)
+- Frame View shortcut (Shift+Home)
 
 ### Changed
-- Nodemap overlay is now hidden by default
+- Moved advanced options from popup panel to the addon preferences
+- Nodemap overlay is now hidden by default in new editors
+- Pan animation is now disabled when the Reduce Motion option is enabled
 
 ### Fixed
-- Fixed node label initials to only show characters that are alphanumeric
+- Node label initials now display only alphanumeric characters
+- Node sizes don't update when expanding node properties
+- Fixed the Nodemap toogle button status when the editor is empty
+- Fixed map interaction cancellation when the editor overlays are hidden
 
 ## [1.3.0] - 2026-07-11
 
