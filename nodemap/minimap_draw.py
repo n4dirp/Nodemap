@@ -468,7 +468,8 @@ _NODE_ROUNDNESS_DEFAULT = 2.0
 
 def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
     """Timer callback: compile tree data after fingerprint settles, then force redraw."""
-    current_fingerprint = get_tree_fingerprint(node_tree)
+    include_selection = getattr(settings, "show_node_borders", True)
+    current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
     if st.cached_fingerprint == current_fingerprint:
         st.pending_timer = None
         return None
@@ -1289,7 +1290,8 @@ def draw_minimap() -> None:
         _clamp_pan_to_viewport(space, region, st)
 
     # Debounce: schedule compile after fingerprint settles (via bpy.app.timers)
-    current_fingerprint = get_tree_fingerprint(node_tree)
+    show_borders = getattr(settings, "show_node_borders", True)
+    current_fingerprint = get_tree_fingerprint(node_tree, include_selection=show_borders)
     if st.cached_fingerprint != current_fingerprint:
         if st.pending_timer is not None:
             try:
@@ -1305,7 +1307,6 @@ def draw_minimap() -> None:
 
     # Build screen-space batches every frame (applies current zoom/pan)
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
-    show_borders = getattr(settings, "show_node_borders", True)
     with _Timer("build_batches"):
         _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders)
 

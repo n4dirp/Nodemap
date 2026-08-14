@@ -424,8 +424,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub_body.active = settings.interactive
         col = sub_body.column()
         col.label(text="Navigation")
-        col.row().prop(settings, "left_click_action", text="Left Click", expand=True)
-        col.row().prop(settings, "right_click_action", text="Right Click", expand=True)
+        col.row().prop(settings, "left_click_action", text="Left Click")
+        col.row().prop(settings, "right_click_action", text="Right Click")
         col.row().prop(settings, "scroll_wheel_mode", expand=True)
 
         if {"SELECT", "PAN_SELECT"} & {
@@ -444,10 +444,6 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub = row.row(align=True)
         sub.active = settings.smooth_pan
         sub.row().prop(settings, "pan_speed", expand=True)
-
-        # layout.separator()
-        # col = layout.column(align=True, heading="Frame View")
-        # col.prop(settings, "frame_view_fill", text="Fill View")
 
         layout.separator()
         layout.label(text="Layout")

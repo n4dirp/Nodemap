@@ -752,19 +752,23 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     }
 
 
-def get_tree_fingerprint(node_tree) -> tuple:
+def get_tree_fingerprint(node_tree, include_selection: bool = True) -> tuple:
     """Generate a lightweight fingerprint of the node tree structure and selection states."""
     if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
         return (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
     nodes = node_tree.nodes
     loc_sum = sum(n.location_absolute.x + n.location_absolute.y for n in nodes)
-    select_sum = sum(1 for n in nodes if n.select)
     mute_sum = sum(1 for n in nodes if n.mute)
     hide_sum = sum(1 for n in nodes if n.hide)
     width_sum = sum(n.width for n in nodes)
     height_sum = sum(abs(n.dimensions[1]) for n in nodes)
     links_count = len(node_tree.links) if hasattr(node_tree, "links") else 0
-    active_name = nodes.active.name if nodes.active else ""
+    if include_selection:
+        select_sum = sum(1 for n in nodes if n.select)
+        active_name = nodes.active.name if nodes.active else ""
+    else:
+        select_sum = 0
+        active_name = ""
     return (len(nodes), loc_sum, active_name, select_sum, mute_sum, hide_sum, width_sum, height_sum, links_count)
 
 
