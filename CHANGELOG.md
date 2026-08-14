@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.5.0] - 2026-08-14
+
+### Added
+- Active View Fill theme option to highlight the active view rect with a customizable color
+
 ## [1.4.1] - 2026-08-14
 
 ### Added
