@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.1] - 2026-08-14
+
+### Added
+- Node Borders toggle to show or hide node selection and active borders
+
+### Fixed
+- Node borders no longer hidden on small nodes, so selection and active state stay visible regardless of node size
+- Node label initials now show every word's initial instead of limiting to the first two
+
 ## [1.4.0] - 2026-07-28
 
 ### Added
@@ -14,7 +23,7 @@
 ### Fixed
 - Node label initials now display only alphanumeric characters
 - Node sizes don't update when expanding node properties
-- Fixed the Nodemap toogle button status when the editor is empty
+- Fixed the Nodemap toggle button status when the editor is empty
 - Fixed map interaction cancellation when the editor overlays are hidden
 
 ## [1.3.0] - 2026-07-11
