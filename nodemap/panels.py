@@ -75,14 +75,21 @@ class NODEMAP_PT_popup(Panel):
             body.prop(settings, "opacity", text="Panel Opacity", slider=True)
 
             col = body.column()
+
             row = col.row(align=True)
-            row.prop(settings, "show_viewport_overlay", text="Overlay")
+            row.prop(settings, "viewport_fill_rect", text="View Highlight")
+            sub = row.row(align=True)
+            sub.active = settings.viewport_fill_rect
+            sub.prop(settings, "viewport_fill_color", text="")
+
+            row = col.row(align=True)
+            row.prop(settings, "show_viewport_overlay", text="View Dimming")
             sub = row.row(align=True)
             sub.active = settings.show_viewport_overlay
             sub.prop(settings, "viewport_overlay_color", text="")
 
             row = col.row(align=True)
-            row.prop(settings, "custom_bg_color", text="Background")
+            row.prop(settings, "custom_bg_color", text="Custom Backdrop")
             sub = row.row(align=True)
             sub.active = settings.custom_bg_color
             sub.prop(settings, "bg_color", text="")

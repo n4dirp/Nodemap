@@ -329,6 +329,50 @@ def _draw_resize_handles(
             _draw_pill(mx + margin, hy, mw - 2 * margin, thick, col_warn if h_clamped else col_base)
 
 
+def _draw_view_fill(
+    settings,
+    space,
+    region,
+    mx: float,
+    my: float,
+    mw: float,
+    mh: float,
+    cx: float,
+    cy: float,
+    scale: float,
+    tree_cx: float,
+    tree_cy: float,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+) -> None:
+    """Draw a filled rect over the active view region, behind nodes and wires."""
+    if not getattr(settings, "viewport_fill_rect", False):
+        return
+    visible = _get_visible_rect(space, region)
+    if not visible:
+        return
+
+    vx = round(cx + (visible[0] - tree_cx) * scale)
+    vy = round(cy + (visible[1] - tree_cy) * scale)
+    vw = round(max((visible[2] - visible[0]) * scale, 1.0))
+    vh = round(max((visible[3] - visible[1]) * scale, 1.0))
+
+    v_left = max(vx, mx)
+    v_bottom = max(vy, my)
+    v_right = min(vx + vw, mx + mw)
+    v_top = min(vy + vh, my + mh)
+    hole_w = v_right - v_left
+    hole_h = v_top - v_bottom
+    if hole_w <= 0 or hole_h <= 0:
+        return
+
+    fill_color = getattr(settings, "viewport_fill_color", (0.28, 0.45, 0.7, 1.0))
+    fill = _alpha_mul(fill_color, master_alpha)
+    node_r = colors.get("node_roundness", 2.0) * ui_scale
+    _draw_filled_rounded_rect(v_left, v_bottom, hole_w, hole_h, node_r, fill)
+
+
 def _draw_viewport_overlay(
     settings,
     space,
@@ -1324,6 +1368,26 @@ def draw_minimap() -> None:
     with _Timer("setup_scissor"):
         scissor_state = _setup_scissor(mx, my, mw, mh)
         scissor_active = scissor_state[0]
+
+    # Fill rect over the background, behind frames/nodes/wires
+    with _Timer("draw_view_fill"):
+        _draw_view_fill(
+            settings,
+            space,
+            region,
+            mx,
+            my,
+            mw,
+            mh,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            colors,
+            master_alpha,
+            ui_scale,
+        )
 
     # Layer 1: Frame nodes (behind wires)
     frames_fill_batch = st.cached_frames_fill_batch

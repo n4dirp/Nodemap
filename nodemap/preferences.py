@@ -188,6 +188,22 @@ class NODEMAP_PG_settings(PropertyGroup):
         subtype="COLOR_GAMMA",
     )
 
+    viewport_fill_rect: BoolProperty(
+        name="Active View Fill",
+        description="Fill the active view rect with a color",
+        default=False,
+    )
+
+    viewport_fill_color: FloatVectorProperty(
+        name="Active View Fill Color",
+        description="Color of the active view fill rect",
+        default=(0.28, 0.45, 0.7, 1.0),
+        size=4,
+        min=0.0,
+        max=1.0,
+        subtype="COLOR_GAMMA",
+    )
+
     show_node_count: BoolProperty(
         name="Show Node Count",
         description="Display node count at the bottom of the minimap",
