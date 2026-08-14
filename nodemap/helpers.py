@@ -769,13 +769,13 @@ def get_tree_fingerprint(node_tree) -> tuple:
 
 
 def _get_node_initials(name: str) -> str:
-    """Extract 1-2 uppercase initials from a node label."""
+    """Extract uppercase initials from each word of a node label."""
     name = name.strip()
     if not name:
         return "?"
     words = name.split()
     if len(words) >= 2:
-        initials = "".join(w[0] for w in words if w[0].isalnum()).upper()[:2]
+        initials = "".join(w[0] for w in words if w[0].isalnum()).upper()
         if initials:
             return initials
     for ch in name:

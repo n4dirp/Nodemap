@@ -41,6 +41,7 @@ class NODEMAP_PT_popup(Panel):
             col = split.column()
             col.prop(settings, "show_node_count", text="Count")
             col.prop(settings, "show_frames", text="Frames")
+            col.prop(settings, "show_node_borders", text="Borders")
 
             col = split.column()
             col.prop(settings, "show_socket_indicators", text="Sockets")

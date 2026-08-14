@@ -843,7 +843,9 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     st.tree_data = tree_data
 
 
-def _build_minimap_batches(st: MinimapState, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha):
+def _build_minimap_batches(
+    st: MinimapState, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders
+):
     """Transform tree-space data to screen-space and compile GPU draw batches.
 
     Must be called every frame after ``_compile_tree_data()`` has stored
@@ -922,6 +924,21 @@ def _build_minimap_batches(st: MinimapState, rect, cx, cy, scale, tree_cx, tree_
             all_half_size_fill.extend([(hw, hh)] * 4)
             all_radius_fill.extend([node_r] * 4)
             all_color_fill.extend([info["fill_color"]] * 4)
+
+            if show_borders:
+                all_pos_border.extend(
+                    [
+                        (nx, ny, 0.0),
+                        (nx + nw_s_final, ny, 0.0),
+                        (nx + nw_s_final, ny + nh_s_final, 0.0),
+                        (nx, ny + nh_s_final, 0.0),
+                    ]
+                )
+                all_uv_border.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
+                all_half_size_border.extend([(hw, hh)] * 4)
+                all_radius_border.extend([node_r] * 4)
+                all_color_border.extend([info["border_color"]] * 4)
+                all_line_width_border.extend([info["border_w"]] * 4)
         else:
             hw = nw_s / 2
             hh = nh_s / 2
@@ -944,26 +961,27 @@ def _build_minimap_batches(st: MinimapState, rect, cx, cy, scale, tree_cx, tree_
             rad_fill.extend([node_r] * 4)
             col_fill.extend([info["fill_color"]] * 4)
 
-            bw = info["border_w"]
-            pb = frame_pos_border if is_frame else all_pos_border
-            ub = frame_uv_border if is_frame else all_uv_border
-            hsb = frame_half_size_border if is_frame else all_half_size_border
-            rb = frame_radius_border if is_frame else all_radius_border
-            cb = frame_color_border if is_frame else all_color_border
-            lwb = frame_line_width_border if is_frame else all_line_width_border
-            pb.extend(
-                [
-                    (nx, ny, 0.0),
-                    (nx + nw_s, ny, 0.0),
-                    (nx + nw_s, ny + nh_s, 0.0),
-                    (nx, ny + nh_s, 0.0),
-                ]
-            )
-            ub.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
-            hsb.extend([(hw, hh)] * 4)
-            rb.extend([node_r] * 4)
-            cb.extend([info["border_color"]] * 4)
-            lwb.extend([bw] * 4)
+            if show_borders:
+                bw = info["border_w"]
+                pb = frame_pos_border if is_frame else all_pos_border
+                ub = frame_uv_border if is_frame else all_uv_border
+                hsb = frame_half_size_border if is_frame else all_half_size_border
+                rb = frame_radius_border if is_frame else all_radius_border
+                cb = frame_color_border if is_frame else all_color_border
+                lwb = frame_line_width_border if is_frame else all_line_width_border
+                pb.extend(
+                    [
+                        (nx, ny, 0.0),
+                        (nx + nw_s, ny, 0.0),
+                        (nx + nw_s, ny + nh_s, 0.0),
+                        (nx, ny + nh_s, 0.0),
+                    ]
+                )
+                ub.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
+                hsb.extend([(hw, hh)] * 4)
+                rb.extend([node_r] * 4)
+                cb.extend([info["border_color"]] * 4)
+                lwb.extend([bw] * 4)
 
             # Labels
             if is_frame:
@@ -1287,8 +1305,9 @@ def draw_minimap() -> None:
 
     # Build screen-space batches every frame (applies current zoom/pan)
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
+    show_borders = getattr(settings, "show_node_borders", True)
     with _Timer("build_batches"):
-        _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha)
+        _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders)
 
     # Draw minimap panel
     try:

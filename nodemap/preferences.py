@@ -269,6 +269,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_minimap_cache,
     )
 
+    show_node_borders: BoolProperty(
+        name="Node Borders",
+        description="Display borders around nodes, highlighting selection and active state",
+        default=True,
+        update=_update_minimap_cache,
+    )
+
     debounce_interval: FloatProperty(
         name="Update Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",
