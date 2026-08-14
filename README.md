@@ -15,36 +15,31 @@ A minimap overlay for the Blender Node Editor that provides an interactive overv
 * **Theme-aware** -- Matches your Blender theme while supporting custom colors
 
 
+## Location
+
+**How do I toggle the minimap?** Click the minimap icon at the right end of the Node Editor header, or press `Ctrl+M`.
+
+**Where are the settings?** Basic options are in the Nodemap Options popover next to the header icon; advanced options are in `Edit > Preferences > Extensions > Nodemap`.
+
+
 ## Shortcuts
 
-### Keyboard
-
-| Shortcut | Action |
-| --- | --- |
-| `Ctrl+M` | Toggle minimap on/off |
-
-### Keyboard *(when the cursor is over the minimap)*
-
-| Shortcut     | Action               |
-| ------------ | -------------------- |
-| `Home`       | Frame all nodes      |
-| `Shift+Home` | Frame current view   |
-| `Numpad .`   | Frame selected nodes |
-
-### Mouse *(inside the minimap)*
-
-| Input                | Action                                         |
-| -------------------- | ---------------------------------------------- |
-| `Left Click`         | Pan / Select / Pan+Select (configurable)       |
-| `Left Drag`          | Pan the Node Editor view                       |
-| `Right Click`        | Pan / Select / Pan+Select (configurable)       |
-| `Right Drag`         | Pan the Node Editor view                       |
-| `Middle Drag`        | Pan the minimap                                |
-| `Scroll`             | Zoom the minimap or Node Editor (configurable) |
-| `Alt + Scroll`       | Temporarily swap the scroll zoom target        |
-| `Ctrl + Scroll`      | Pan the editor horizontally                    |
-| `Shift + Scroll`     | Pan the editor vertically                      |
-| `Drag edge / corner` | Resize the minimap                             |
+| Input                      | Shortcut             | Action                       |
+| -------------------------- | -------------------- | ---------------------------- |
+| Keyboard                   | `Ctrl+M`             | Toggle minimap               |
+| Keyboard · Minimap focused | `Home`               | Frame all nodes              |
+| Keyboard · Minimap focused | `Shift+Home`         | Frame current view           |
+| Keyboard · Minimap focused | `Numpad .`           | Frame selected nodes         |
+| Minimap                    | `Left Click`         | Pan / Select / Pan+Select*   |
+| Minimap                    | `Left Drag`          | Pan the Node Editor          |
+| Minimap                    | `Right Click`        | Pan / Select / Pan+Select*   |
+| Minimap                    | `Right Drag`         | Pan the Node Editor          |
+| Minimap                    | `Middle Drag`        | Pan the minimap              |
+| Minimap                    | `Scroll`             | Zoom minimap / Node Editor*  |
+| Minimap                    | `Alt + Scroll`       | Temporarily swap zoom target |
+| Minimap                    | `Ctrl + Scroll`      | Pan horizontally             |
+| Minimap                    | `Shift + Scroll`     | Pan vertically               |
+| Minimap                    | `Drag edge / corner` | Resize minimap               |
 
 
 ## Requirements
