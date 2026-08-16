@@ -146,7 +146,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     opacity: FloatProperty(
         name="Opacity",
         description="Adjusts the overall opacity of the minimap",
-        default=1.0,
+        default=0.95,
         min=0.15,
         max=1.0,
         precision=3,
@@ -191,13 +191,13 @@ class NODEMAP_PG_settings(PropertyGroup):
     viewport_fill_rect: BoolProperty(
         name="Active View Fill",
         description="Fill the active view rect with a color",
-        default=False,
+        default=True,
     )
 
     viewport_fill_color: FloatVectorProperty(
         name="Active View Fill Color",
         description="Color of the active view fill rect",
-        default=(0.28, 0.45, 0.7, 1.0),
+        default=(1.0, 1.0, 1.0, 0.05),
         size=4,
         min=0.0,
         max=1.0,
