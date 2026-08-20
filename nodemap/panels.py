@@ -1,8 +1,10 @@
 """Nodemap popover in the topbar."""
 
+from bl_ui.utils import PresetPanel
 from bpy.types import Panel
 
 from .helpers import _state
+from .presets import PRESET_SUBDIR
 
 
 class NODEMAP_PT_popup(Panel):
@@ -22,7 +24,11 @@ class NODEMAP_PT_popup(Panel):
         st = _state()
         layout.active = st.enabled
 
-        layout.label(text="Nodemap")
+        row = layout.row()
+        row.label(text="Nodemap")
+
+        sub = row.row()
+        NODEMAP_PT_presets.draw_panel_header(sub)
 
         row = layout.row(align=True)
         row.operator("nodemap.frame_all", text="Frame All")
@@ -122,4 +128,11 @@ def draw_minimap_header_button(self, context):
     row.popover(panel="NODEMAP_PT_popup", text="")
 
 
-classes = (NODEMAP_PT_popup,)
+class NODEMAP_PT_presets(PresetPanel, Panel):
+    bl_label = "Nodemap Presets"
+    preset_subdir = PRESET_SUBDIR
+    preset_operator = "script.execute_preset"
+    preset_add_operator = "nodemap.preset_add"
+
+
+classes = (NODEMAP_PT_presets, NODEMAP_PT_popup)

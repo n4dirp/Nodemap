@@ -14,6 +14,7 @@ from .panels import classes as panel_classes
 from .panels import draw_minimap_header_button
 from .preferences import _update_logger_from_prefs
 from .preferences import classes as prefs_classes
+from .presets import classes as preset_classes
 
 logger = logging.getLogger(__package__)
 logger.propagate = False
@@ -21,6 +22,7 @@ logger.addHandler(logging.NullHandler())
 
 classes = (
     *prefs_classes,
+    *preset_classes,
     *operator_classes,
     *panel_classes,
 )
