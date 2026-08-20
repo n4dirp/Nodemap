@@ -16,6 +16,7 @@ OUTLINE_ALPHA: float = 0.8
 MAP_PADDING: float = 12.0
 MIN_MAP_WIDTH: int = 64
 MIN_MAP_HEIGHT: int = 64
+MAX_FRAME_ZOOM: float = 20.0
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
@@ -678,25 +679,46 @@ def _frame_to_bounds(
     redraw_ui("NODE_EDITOR")
 
 
-def frame_selected(
+def _compute_center_pan(tree_x: float, tree_y: float, area_ptr: int | None = None) -> tuple[float, float]:
+    """Compute minimap pan values that center the given tree point, keeping zoom."""
+    st = _state(area_ptr)
+    bounds = st.tree_bounds
+    padding = st.padding
+    _, _, mw, mh = st.rect
+    inner_w = max(mw - 2 * padding, 1.0)
+    inner_h = max(mh - 2 * padding, 1.0)
+    bbox_w = max(bounds[2] - bounds[0], 1.0)
+    bbox_h = max(bounds[3] - bounds[1], 1.0)
+    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+    scale = base_scale * st.zoom
+    tree_cx = (bounds[0] + bounds[2]) / 2
+    tree_cy = (bounds[1] + bounds[3]) / 2
+    return -(tree_x - tree_cx) * scale, -(tree_y - tree_cy) * scale
+
+
+def _compute_frame_selected_targets(
     space: bpy.types.SpaceNodeEditor | None = None,
     region: bpy.types.Region | None = None,
     area_ptr: int | None = None,
-) -> None:
-    """Adjust minimap zoom/pan to frame the selected node(s)."""
+) -> tuple[float | None, float, float] | None:
+    """Compute target zoom and pan for the selected nodes without applying them.
+
+    Returns ``(zoom, pan_x, pan_y)`` where *zoom* is ``None`` when the current
+    zoom should be kept (single regular node selected). Returns ``None`` when
+    nothing is selected or data is unavailable.
+    """
     st = _state(area_ptr)
     if space is None:
         space = bpy.context.space_data
     if not space or space.type != "NODE_EDITOR":
-        return
+        return None
     node_tree = space.edit_tree
     if not node_tree:
-        return
+        return None
 
     selected = [n for n in node_tree.nodes if n.select]
     if not selected:
-        frame_all(space, region, area_ptr)
-        return
+        return None
 
     min_x = min_y = float("inf")
     max_x = max_y = float("-inf")
@@ -711,7 +733,37 @@ def frame_selected(
     rect = st.rect
     _, _, mw, mh = rect
     st.tree_bounds = _expand_bounds_margin(_get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding)
-    _frame_to_bounds((min_x, min_y, max_x, max_y), area_ptr=area_ptr)
+
+    if len(selected) > 1 or selected[0].type == "FRAME":
+        zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(
+            (min_x, min_y, max_x, max_y), fill=True, area_ptr=area_ptr
+        )
+        return min(zoom, MAX_FRAME_ZOOM), pan_x, pan_y
+
+    pan_x, pan_y = _compute_center_pan((min_x + max_x) / 2, (min_y + max_y) / 2, area_ptr)
+    return None, pan_x, pan_y
+
+
+def frame_selected(
+    space: bpy.types.SpaceNodeEditor | None = None,
+    region: bpy.types.Region | None = None,
+    area_ptr: int | None = None,
+) -> None:
+    """Adjust minimap zoom/pan to frame the selected node(s).
+
+    Zooms to fit multiple selections or a single frame; centers a single
+    regular node without changing the zoom level.
+    """
+    targets = _compute_frame_selected_targets(space, region, area_ptr)
+    if targets is None:
+        return
+    zoom, pan_x, pan_y = targets
+    st = _state(area_ptr)
+    if zoom is not None:
+        st.base_zoom = zoom
+        st.zoom = zoom
+    st.pan = [pan_x, pan_y]
+    redraw_ui("NODE_EDITOR")
 
 
 def frame_view(

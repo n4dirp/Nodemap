@@ -33,7 +33,8 @@ class NODEMAP_PT_popup(Panel):
         row = layout.row(align=True)
         row.operator("nodemap.frame_all", text="Frame All")
         row.operator("nodemap.frame_view", text="Frame View")
-        row.operator("nodemap.frame_selected", text="Frame Selected")
+        if not settings.follow_view:
+            row.operator("nodemap.frame_selected", text="Frame Selected")
 
         header, sub_body = layout.panel("NODEMAP_PT_layout", default_closed=False)
         header.label(text="Layout")

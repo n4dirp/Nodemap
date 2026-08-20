@@ -11,6 +11,7 @@ from .helpers import (
     MinimapState,
     _clamp_pan_to_viewport,
     _compute_frame_all_targets,
+    _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
     _expand_bounds_margin,
     _find_node_at,
@@ -728,7 +729,13 @@ class NODEMAP_OT_navigate(Operator):
 
             case "NUMPAD_PERIOD":
                 if event.value == "PRESS" and in_minimap:
-                    frame_selected(self._space, self._region, self._area.as_pointer())
+                    if settings and self._is_smooth_pan(settings, context):
+                        targets = _compute_frame_selected_targets(self._space, self._region, self._area.as_pointer())
+                        if targets:
+                            target_zoom = targets[0] if targets[0] is not None else st.zoom
+                            self._start_frame_animation(context, target_zoom, [targets[1], targets[2]])
+                    else:
+                        frame_selected(self._space, self._region, self._area.as_pointer())
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
