@@ -10,10 +10,14 @@ from .helpers import (
     MIN_MAP_WIDTH,
     MinimapState,
     _clamp_pan_to_viewport,
+    _compute_frame_all_targets,
+    _compute_frame_to_bounds_targets,
+    _expand_bounds_margin,
     _find_node_at,
     _get_area_and_region_under_mouse,
     _get_minimap_margins,
     _get_minimap_transform,
+    _get_node_tree_bounds,
     _get_safe_bounds,
     _get_ui_scale,
     _get_visible_rect,
@@ -227,6 +231,11 @@ class NODEMAP_OT_navigate(Operator):
     _anim_acc: list[float]
     _drag_target: list[float]
     _drag_active: bool = False
+    _frame_anim_active: bool = False
+    _frame_anim_start_zoom: float = 1.0
+    _frame_anim_start_pan: list[float]
+    _frame_anim_target_zoom: float = 1.0
+    _frame_anim_target_pan: list[float]
 
     def _is_smooth_pan(self, settings, context, default=True) -> bool:
         if context.preferences.view.use_reduce_motion:
@@ -255,6 +264,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._anim_active
             or self._inertia_active
             or self._drag_active
+            or self._frame_anim_active
         )
 
         if not _is_interacting:
@@ -309,7 +319,14 @@ class NODEMAP_OT_navigate(Operator):
                             mx = self._mx
                             my = self._my
                             if bx <= mx <= bx + bw and by <= my <= by + bh:
-                                frame_all(self._space, self._region, self._area.as_pointer())
+                                if settings and self._is_smooth_pan(settings, context):
+                                    targets = _compute_frame_all_targets(
+                                        self._space, self._region, self._area.as_pointer()
+                                    )
+                                    if targets:
+                                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                                else:
+                                    frame_all(self._space, self._region, self._area.as_pointer())
                         return {"RUNNING_MODAL"}
                     if self._frame_view_armed:
                         self._frame_view_armed = False
@@ -319,7 +336,26 @@ class NODEMAP_OT_navigate(Operator):
                             mx = self._mx
                             my = self._my
                             if bx <= mx <= bx + bw and by <= my <= by + bh:
-                                frame_view(self._space, self._region, self._area.as_pointer())
+                                if settings and self._is_smooth_pan(settings, context):
+                                    visible = _get_visible_rect(self._space, self._region)
+                                    if visible:
+                                        node_tree = self._space.edit_tree
+                                        if node_tree:
+                                            rect = st.rect
+                                            _, _, mw, mh = rect
+                                            st.tree_bounds = _expand_bounds_margin(
+                                                _get_node_tree_bounds(node_tree.nodes),
+                                                _get_ui_scale(),
+                                                mh,
+                                                st.padding,
+                                            )
+                                        fill = settings.frame_view_fill
+                                        targets = _compute_frame_to_bounds_targets(
+                                            visible, fill, self._area.as_pointer()
+                                        )
+                                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                                else:
+                                    frame_view(self._space, self._region, self._area.as_pointer())
                         return {"RUNNING_MODAL"}
                     if self._resize_handle:
                         self._resize_handle = None
@@ -572,7 +608,7 @@ class NODEMAP_OT_navigate(Operator):
                     dx = self._mx - self._drag_start[0]
                     dy = self._my - self._drag_start[1]
                     if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
-                        if not self._dragging and self._anim_active:
+                        if not self._dragging and (self._anim_active or self._frame_anim_active):
                             self._cancel_smooth(context)
                         self._dragging = True
                         if self._was_in_minimap:
@@ -662,9 +698,31 @@ class NODEMAP_OT_navigate(Operator):
             case "HOME":
                 if event.value == "PRESS" and in_minimap:
                     if event.shift:
-                        frame_view(self._space, self._region, self._area.as_pointer())
+                        if settings and self._is_smooth_pan(settings, context):
+                            visible = _get_visible_rect(self._space, self._region)
+                            if visible:
+                                node_tree = self._space.edit_tree
+                                if node_tree:
+                                    rect = st.rect
+                                    _, _, mw, mh = rect
+                                    st.tree_bounds = _expand_bounds_margin(
+                                        _get_node_tree_bounds(node_tree.nodes),
+                                        _get_ui_scale(),
+                                        mh,
+                                        st.padding,
+                                    )
+                                fill = settings.frame_view_fill
+                                targets = _compute_frame_to_bounds_targets(visible, fill, self._area.as_pointer())
+                                self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                        else:
+                            frame_view(self._space, self._region, self._area.as_pointer())
                     else:
-                        frame_all(self._space, self._region, self._area.as_pointer())
+                        if settings and self._is_smooth_pan(settings, context):
+                            targets = _compute_frame_all_targets(self._space, self._region, self._area.as_pointer())
+                            if targets:
+                                self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                        else:
+                            frame_all(self._space, self._region, self._area.as_pointer())
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -680,6 +738,9 @@ class NODEMAP_OT_navigate(Operator):
                     return {"RUNNING_MODAL"}
                 if self._inertia_active:
                     self._apply_inertia(context)
+                    return {"RUNNING_MODAL"}
+                if self._frame_anim_active:
+                    self._apply_frame_animation(context)
                     return {"RUNNING_MODAL"}
                 if self._anim_active:
                     self._apply_center_animation(context)
@@ -935,6 +996,16 @@ class NODEMAP_OT_navigate(Operator):
                         pass
             self._anim_active = False
             self._destroy_timer(context)
+        if self._frame_anim_active:
+            st = self._st
+            if st:
+                st.base_zoom = self._frame_anim_target_zoom
+                st.zoom = self._frame_anim_target_zoom
+                st.pan = [self._frame_anim_target_pan[0], self._frame_anim_target_pan[1]]
+                _clamp_pan_to_viewport(self._space, self._region, st)
+            self._frame_anim_active = False
+            self._frame_anim_progress = 0.0
+            self._destroy_timer(context)
 
     def _apply_inertia(self, context: Context) -> None:
         decay = 0.92
@@ -1013,7 +1084,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         speed = getattr(settings, "pan_speed", "MEDIUM")
-        frames = {"FAST": 12, "MEDIUM": 20, "SLOW": 40}.get(speed, 24)
+        frames = {"FAST": 12, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
         self._anim_progress += 1 / frames
         if self._anim_progress >= 1.0:
             remaining_x = self._anim_target[0] - self._anim_applied[0]
@@ -1046,6 +1117,54 @@ class NODEMAP_OT_navigate(Operator):
                     bpy.ops.view2d.pan(deltax=dx, deltay=dy)
             except RuntimeError:
                 pass
+        redraw_ui("NODE_EDITOR")
+
+    def _start_frame_animation(self, context: Context, target_zoom: float, target_pan: list[float]) -> None:
+        st = self._st
+        if not st:
+            return
+        if self._frame_anim_active:
+            self._frame_anim_active = False
+        self._frame_anim_progress = 0.0
+        self._frame_anim_start_zoom = st.zoom
+        self._frame_anim_start_pan = [st.pan[0], st.pan[1]]
+        self._frame_anim_target_zoom = target_zoom
+        self._frame_anim_target_pan = [target_pan[0], target_pan[1]]
+        self._frame_anim_active = True
+        self._create_timer(context)
+
+    def _apply_frame_animation(self, context: Context) -> None:
+        if not self._frame_anim_active:
+            return
+        st = self._st
+        if not st:
+            self._frame_anim_active = False
+            self._destroy_timer(context)
+            return
+        addon = context.preferences.addons.get(__package__)
+        settings = addon.preferences.settings if addon else None
+        speed = getattr(settings, "pan_speed", "MEDIUM")
+        frames = {"FAST": 12, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
+        progress = self._frame_anim_progress + 1 / frames
+        self._frame_anim_progress = progress
+        if progress >= 1.0:
+            st.base_zoom = self._frame_anim_target_zoom
+            st.zoom = self._frame_anim_target_zoom
+            st.pan = [self._frame_anim_target_pan[0], self._frame_anim_target_pan[1]]
+            _clamp_pan_to_viewport(self._space, self._region, st)
+            self._frame_anim_active = False
+            self._frame_anim_progress = 0.0
+            self._destroy_timer(context)
+            redraw_ui("NODE_EDITOR")
+            return
+        eased = 1.0 - (1.0 - progress) ** 3
+        st.zoom = self._frame_anim_start_zoom + (self._frame_anim_target_zoom - self._frame_anim_start_zoom) * eased
+        st.base_zoom = st.zoom
+        st.pan = [
+            self._frame_anim_start_pan[0] + (self._frame_anim_target_pan[0] - self._frame_anim_start_pan[0]) * eased,
+            self._frame_anim_start_pan[1] + (self._frame_anim_target_pan[1] - self._frame_anim_start_pan[1]) * eased,
+        ]
+        _clamp_pan_to_viewport(self._space, self._region, st)
         redraw_ui("NODE_EDITOR")
 
     def _update_cursor(self, context: Context, event: Event) -> None:
@@ -1148,6 +1267,12 @@ class NODEMAP_OT_navigate(Operator):
         self._anim_acc = [0.0, 0.0]
         self._drag_target = [0.0, 0.0]
         self._drag_active = False
+        self._frame_anim_active = False
+        self._frame_anim_start_zoom = 1.0
+        self._frame_anim_start_pan = [0.0, 0.0]
+        self._frame_anim_target_zoom = 1.0
+        self._frame_anim_target_pan = [0.0, 0.0]
+        self._frame_anim_progress = 0.0
         _minimap_window_operators[self._window_ptr] = self
         context.window_manager.modal_handler_add(self)
         ops_keys = list(_minimap_window_operators.keys())

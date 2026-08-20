@@ -666,7 +666,8 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 border_col = frame_color
                 if node.select:
                     border_col = colors["node_active"] if node == active_node else colors["node_selected"]
-                info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, master_alpha))
+                frame_border_alpha = master_alpha if node.select else master_alpha * 0.9
+                info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, frame_border_alpha))
                 info["frame_color"] = frame_color
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT
             else:
@@ -696,10 +697,12 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 border_col = colors["node_border"]
                 if node.select:
                     border_col = colors["node_active"] if node == active_node else colors["node_selected"]
+                border_alpha = master_alpha
+                if not node.select:
+                    border_alpha *= 0.6
                 if node.mute:
-                    info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, 0.35 * master_alpha))
-                else:
-                    info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, master_alpha))
+                    border_alpha = 0.35 * master_alpha
+                info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, border_alpha))
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT * 2
 
             # Labels (tree-space positions computed in build)

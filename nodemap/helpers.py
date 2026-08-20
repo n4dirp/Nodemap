@@ -533,15 +533,16 @@ def _get_visible_rect(
         return None
 
 
-def frame_all(
+def _compute_frame_all_targets(
     space: bpy.types.SpaceNodeEditor | None = None,
     region: bpy.types.Region | None = None,
     area_ptr: int | None = None,
-) -> None:
-    """Adjust minimap zoom/pan to frame the entire node tree.
+) -> tuple[float, float, float] | None:
+    """Compute target zoom and pan to frame the entire node tree.
 
-    When ``follow_view`` is enabled the editor viewport is included in the
-    frame so that clamping cannot clip nodes afterward.
+    Updates ``st.tree_bounds`` immediately (required for correct targets and
+    drawing during animation). Returns ``(zoom, pan_x, pan_y)`` or ``None``
+    when data is unavailable.
     """
     st = _state(area_ptr)
     if space is None:
@@ -549,10 +550,10 @@ def frame_all(
     if region is None:
         region = bpy.context.region
     if not space or not region:
-        return
+        return None
     node_tree = space.edit_tree
     if not node_tree:
-        return
+        return None
 
     bounds = _get_node_tree_bounds(node_tree.nodes)
 
@@ -566,11 +567,7 @@ def frame_all(
     follow = addon and getattr(addon.preferences.settings, "follow_view", False)
 
     if not follow:
-        st.base_zoom = 1.0
-        st.zoom = 1.0
-        st.pan = [0.0, 0.0]
-        redraw_ui("NODE_EDITOR")
-        return
+        return 1.0, 0.0, 0.0
 
     visible = _get_visible_rect(space, region)
     if visible:
@@ -597,25 +594,40 @@ def frame_all(
     combined_cx = (c_min_x + c_max_x) / 2
     combined_cy = (c_min_y + c_max_y) / 2
 
+    pan_x = -(combined_cx - tree_cx) * base_scale * zoom
+    pan_y = -(combined_cy - tree_cy) * base_scale * zoom
+    return zoom, pan_x, pan_y
+
+
+def frame_all(
+    space: bpy.types.SpaceNodeEditor | None = None,
+    region: bpy.types.Region | None = None,
+    area_ptr: int | None = None,
+) -> None:
+    """Adjust minimap zoom/pan to frame the entire node tree.
+
+    When ``follow_view`` is enabled the editor viewport is included in the
+    frame so that clamping cannot clip nodes afterward.
+    """
+    targets = _compute_frame_all_targets(space, region, area_ptr)
+    if targets is None:
+        return
+    st = _state(area_ptr)
+    zoom, pan_x, pan_y = targets
     st.base_zoom = zoom
     st.zoom = zoom
-    st.pan = [
-        -(combined_cx - tree_cx) * base_scale * zoom,
-        -(combined_cy - tree_cy) * base_scale * zoom,
-    ]
+    st.pan = [pan_x, pan_y]
     redraw_ui("NODE_EDITOR")
 
 
-def _frame_to_bounds(
+def _compute_frame_to_bounds_targets(
     target_bounds: tuple[float, float, float, float],
     fill: bool = False,
     area_ptr: int | None = None,
-) -> None:
-    """Adjust minimap zoom/pan to frame the given bounds in tree coordinates.
+) -> tuple[float, float, float]:
+    """Compute target zoom and pan to frame the given bounds without applying them.
 
-    When *fill* is True the bounds are zoomed to entirely fill the minimap
-    (one axis may clip); when False the bounds frame within the minimap
-    (empty space may remain).
+    Returns ``(zoom, pan_x, pan_y)``.
     """
     st = _state(area_ptr)
 
@@ -642,12 +654,27 @@ def _frame_to_bounds(
     target_cx = (target_bounds[0] + target_bounds[2]) / 2
     target_cy = (target_bounds[1] + target_bounds[3]) / 2
 
+    pan_x = -(target_cx - tree_cx) * base_scale * zoom
+    pan_y = -(target_cy - tree_cy) * base_scale * zoom
+    return zoom, pan_x, pan_y
+
+
+def _frame_to_bounds(
+    target_bounds: tuple[float, float, float, float],
+    fill: bool = False,
+    area_ptr: int | None = None,
+) -> None:
+    """Adjust minimap zoom/pan to frame the given bounds in tree coordinates.
+
+    When *fill* is True the bounds are zoomed to entirely fill the minimap
+    (one axis may clip); when False the bounds frame within the minimap
+    (empty space may remain).
+    """
+    st = _state(area_ptr)
+    zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(target_bounds, fill, area_ptr)
     st.base_zoom = zoom
     st.zoom = zoom
-    st.pan = [
-        -(target_cx - tree_cx) * base_scale * zoom,
-        -(target_cy - tree_cy) * base_scale * zoom,
-    ]
+    st.pan = [pan_x, pan_y]
     redraw_ui("NODE_EDITOR")
 
 
