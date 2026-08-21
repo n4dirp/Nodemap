@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import logging
+import os
 
 import bpy
 from bpy.types import SpaceNodeEditor
@@ -15,6 +16,8 @@ from .panels import draw_minimap_header_button
 from .preferences import _update_logger_from_prefs
 from .preferences import classes as prefs_classes
 from .presets import classes as preset_classes
+
+ADDON_DIR = os.path.dirname(__file__)
 
 logger = logging.getLogger(__package__)
 logger.propagate = False
@@ -72,8 +75,13 @@ def register():
 
     _register_keymaps()
 
+    bpy.utils.register_preset_path(ADDON_DIR)
+
 
 def unregister():
+
+    bpy.utils.unregister_preset_path(ADDON_DIR)
+
     _unregister_keymaps()
 
     global _draw_handler, _modal_operator
