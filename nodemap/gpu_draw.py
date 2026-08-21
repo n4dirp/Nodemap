@@ -78,8 +78,8 @@ float sdRoundRect(vec2 p, vec2 b, float r) {
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 void main() {
-    float fillDist = sdRoundRect(vUv, halfSize, radius);
-    float clipDist = sdRoundRect(vUv - clipOffset, clipHalfSize, clipRadius);
+    float fillDist = sdRoundRect(vUv, sizeData.xy, sizeData.z);
+    float clipDist = sdRoundRect(vUv - clipData.xy, clipData.zw, sizeData.w);
     float dist = max(fillDist, clipDist);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
@@ -284,11 +284,8 @@ def _get_sdf_fill_clip_shader() -> gpu.types.GPUShader:
         info = GPUShaderCreateInfo()
         info.push_constant("MAT4", "ModelViewProjectionMatrix")
         info.push_constant("VEC4", "color")
-        info.push_constant("VEC2", "halfSize")
-        info.push_constant("FLOAT", "radius")
-        info.push_constant("VEC2", "clipOffset")
-        info.push_constant("VEC2", "clipHalfSize")
-        info.push_constant("FLOAT", "clipRadius")
+        info.push_constant("VEC4", "sizeData")
+        info.push_constant("VEC4", "clipData")
         info.vertex_in(0, "VEC3", "pos")
         info.vertex_in(1, "VEC2", "uv")
         info.vertex_out(vert_out)
@@ -703,11 +700,8 @@ def _draw_filled_rounded_rect_clipped(x, y, w, h, r, color, clip_x, clip_y, clip
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("halfSize", (hw, hh))
-    shader.uniform_float("radius", r)
-    shader.uniform_float("clipOffset", (off_x, off_y))
-    shader.uniform_float("clipHalfSize", (clip_hw, clip_hh))
-    shader.uniform_float("clipRadius", clip_r)
+    shader.uniform_float("sizeData", (hw, hh, r, clip_r))
+    shader.uniform_float("clipData", (off_x, off_y, clip_hw, clip_hh))
     batch.draw(shader)
 
 
