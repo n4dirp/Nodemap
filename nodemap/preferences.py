@@ -306,14 +306,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_minimap_cache,
     )
 
-    show_group_markers: BoolProperty(
-        name="Show Group Markers",
-        description="Display an underline beneath group nodes in the minimap",
-        default=True,
-        update=_update_minimap_cache,
-    )
-
-    show_type_stats: BoolProperty(
+    show_type_list: BoolProperty(
         name="Type List",
         description=(
             "Show an interactive node-type list beside the map; "
@@ -321,6 +314,16 @@ class NODEMAP_PG_settings(PropertyGroup):
         ),
         default=False,
         update=_update_minimap_cache,
+    )
+
+    type_list_sort: EnumProperty(
+        name="Type List Sort",
+        description="How entries are ordered in the node-type list",
+        items=[
+            ("COUNT", "Count", "Order by node count, highest first"),
+            ("NAME", "Name", "Order alphabetically by type name"),
+        ],
+        default="COUNT",
     )
 
     debounce_interval: FloatProperty(

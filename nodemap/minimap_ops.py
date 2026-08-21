@@ -843,7 +843,7 @@ class NODEMAP_OT_navigate(Operator):
             return
         if btn_id == "LIST":
             if settings:
-                settings.show_type_stats = not settings.show_type_stats
+                settings.show_type_list = not settings.show_type_list
                 start_list_width_animation(st, settings)
                 redraw_ui("NODE_EDITOR")
             return

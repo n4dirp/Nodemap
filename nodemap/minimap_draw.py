@@ -77,7 +77,6 @@ FRAME_ALL_BTN_MARGIN = 1
 FRAME_BTN_GAP = 2
 _MIN_SOCKET_SCALE = 0.15
 
-BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.5)
 BTN_HOVER_ALPHA = 0.015
 
 _SCROLLBAR_THICKNESS = 3.0
@@ -593,7 +592,10 @@ def _draw_type_list(
     row_h = line_h + 4 * ui_scale
     st.list_row_h = row_h
 
-    entries = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
+    if getattr(settings, "type_list_sort", "COUNT") == "NAME":
+        entries = sorted(type_stats.items(), key=lambda kv: kv[0].lower())
+    else:
+        entries = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
     type_colors = (tree_data.get("type_colors") or {}) if tree_data else {}
 
     pad_x = _LIST_PAD_X * ui_scale
@@ -773,8 +775,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     show_frame_labels = getattr(settings, "show_frame_labels", True)
     colored_nodes = getattr(settings, "colored_nodes", True)
     node_label_mode = getattr(settings, "node_label_mode", "COMPACT")
-    show_group_markers = getattr(settings, "show_group_markers", True)
-    show_type_stats = getattr(settings, "show_type_stats", False)
+    show_type_list = getattr(settings, "show_type_list", False)
 
     # Single pre-pass: classify nodes + cache dims/location + compute bounds
     frames = []
@@ -906,7 +907,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 else:
                     node_color = colors["node"]
 
-                if show_type_stats:
+                if show_type_list:
                     label = node.bl_label or node.type.replace("_", " ").title()
                     if label not in type_counts:
                         type_colors[label] = node_color
@@ -938,7 +939,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, border_alpha))
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT * 2
 
-                if show_group_markers and node.type == "GROUP":
+                if node.type == "GROUP":
                     marker_col = node_color if colored_nodes and not node.select else border_col
                     marker_color = _alpha_mul(marker_col, border_alpha)
                     group_markers.setdefault(marker_color, []).append((loc_x + w / 2, ty, w))
@@ -1755,8 +1756,8 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
         return
     rects = _layout_minimap_buttons(st, visible_ids, mx, my, mw, mh, padding, ui_scale)
 
-    bg_color = _alpha_mul(BTN_BG_COLOR, master_alpha)
-    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
+    bg_color = _alpha_mul(colors["bg"], master_alpha)
+    border_color = _alpha_mul(colors["bg"], master_alpha * 0.25)
 
     # Shared capsule behind the right-edge stack, anchored at its bottom button
     stack = [btn_id for btn_id in visible_ids if btn_id != "LIST"]
@@ -1995,7 +1996,7 @@ def draw_minimap() -> None:
 
     # Group node underline markers
     markers_by_color = st.cached_group_markers or {}
-    if getattr(settings, "show_group_markers", True) and markers_by_color:
+    if markers_by_color:
         with _Timer("draw_group_markers"):
             marker_thick = max(1.0, 1.5 * ui_scale)
             for marker_color, group in markers_by_color.items():

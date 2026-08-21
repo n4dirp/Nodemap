@@ -404,7 +404,7 @@ def _get_type_list_width(settings, st: MinimapState, mw: float, ui_scale: float)
     Called before the map transform is computed so node framing can reserve
     the zone; ``st.list_width`` must be assigned from its result.
     """
-    if not getattr(settings, "show_type_stats", False):
+    if not getattr(settings, "show_type_list", False):
         return 0.0
     tree_data = st.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
@@ -440,7 +440,7 @@ def start_list_width_animation(st: MinimapState, settings) -> None:
         pass
     st.list_anim_active = True
     st.list_anim_from = st.list_width
-    st.list_anim_target = 0.0 if not getattr(settings, "show_type_stats", False) else -1.0
+    st.list_anim_target = 0.0 if not getattr(settings, "show_type_list", False) else -1.0
     frames = _LIST_ANIM_FRAMES.get(getattr(settings, "pan_speed", "MEDIUM"), 24)
     st.list_anim_duration = frames / 60.0
     st.list_anim_start = time.perf_counter()
