@@ -36,6 +36,7 @@ from .helpers import (
     _LIST_PAD_X,
     _LIST_SWATCH,
     _LIST_SWATCH_GAP,
+    _MINIMAP_BUTTONS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     STATS_FONT_ID,
@@ -1619,223 +1620,167 @@ def _draw_minimap_scrollbars(
         )
 
 
-def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):
-    """Draw a frame-all button at the top-right of the minimap inner area."""
-    addon = bpy.context.preferences.addons.get(__package__)
-    settings = getattr(addon.preferences, "settings", None) if addon else None
-    if not settings or not getattr(settings, "show_frame_all_btn", True) or not getattr(settings, "interactive", True):
-        _state().frame_all_btn = None
-        return
-    inner_l = mx
-    inner_t = my + mh - padding
-
-    bbox_l, bbox_b, bbox_r, bbox_t = bounds
-    bbox_w = bbox_r - bbox_l
-    bbox_h = bbox_t - bbox_b
-    if bbox_w <= 0 or bbox_h <= 0:
-        return
-
-    st = _state()
-
-    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
-    margin = FRAME_ALL_BTN_MARGIN * ui_scale
-    gap = FRAME_BTN_GAP * ui_scale
-    x = round(inner_l + mw - btn_size - margin - padding)
-    y = inner_t - btn_size - margin
-    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
-    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
-
-    # Shared capsule spans every visible button in the stack below this one
-    extra = (1 if getattr(settings, "show_frame_view_btn", True) else 0) + (
-        1 if getattr(settings, "show_frame_selected_btn", True) else 0
-    )
-    total_h = btn_size * (extra + 1) + gap * extra
-    py = round(y - extra * (gap + btn_size))
-    _draw_pill(x, py, btn_size, total_h, _alpha_mul(BTN_BG_COLOR, master_alpha))
-    _draw_pill_border(x, py, btn_size, total_h, border_color, 0.5)
-
-    if st.hovered_frame_btn == "ALL":
-        _draw_pill(x + 1, y + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
-        ico_color = _alpha_mul(colors["text"], master_alpha)
-
-    # Corner brackets icon (four brackets pointing outward)
+def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+    """Draw the frame-all corner brackets icon."""
     i = 5 * ui_scale
     t = max(1, int(1.5 * ui_scale))
-    arm = btn_size * 0.15
+    arm = size * 0.15
 
     # Top-left bracket
-    _draw_filled_rounded_rect(x + i, y + i, arm, t, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + i, y + i, t, arm, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + i, y + i, arm, t, t * 0.5, color)
+    _draw_filled_rounded_rect(x + i, y + i, t, arm, t * 0.5, color)
     # Top-right bracket
-    _draw_filled_rounded_rect(x + btn_size - i - arm, y + i, arm, t, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + btn_size - i - t, y + i, t, arm, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + size - i - arm, y + i, arm, t, t * 0.5, color)
+    _draw_filled_rounded_rect(x + size - i - t, y + i, t, arm, t * 0.5, color)
     # Bottom-left bracket
-    _draw_filled_rounded_rect(x + i, y + btn_size - i - t, arm, t, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + i, y + btn_size - i - arm, t, arm, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + i, y + size - i - t, arm, t, t * 0.5, color)
+    _draw_filled_rounded_rect(x + i, y + size - i - arm, t, arm, t * 0.5, color)
     # Bottom-right bracket
-    _draw_filled_rounded_rect(x + btn_size - i - arm, y + btn_size - i - t, arm, t, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + btn_size - i - t, y + btn_size - i - arm, t, arm, t * 0.5, ico_color)
-
-    st.frame_all_btn = (x, y, btn_size, btn_size)
+    _draw_filled_rounded_rect(x + size - i - arm, y + size - i - t, arm, t, t * 0.5, color)
+    _draw_filled_rounded_rect(x + size - i - t, y + size - i - arm, t, arm, t * 0.5, color)
 
 
-def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
-    """Draw a frame-view button below the frame-all button."""
-    addon = bpy.context.preferences.addons.get(__package__)
-    settings = getattr(addon.preferences, "settings", None) if addon else None
-    if not settings or not getattr(settings, "show_frame_view_btn", True) or not getattr(settings, "interactive", True):
-        _state().frame_view_btn = None
-        return
-
-    inner_l = mx
-    inner_t = my + mh - padding
-
-    st = _state()
-
-    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
-    margin = FRAME_ALL_BTN_MARGIN * ui_scale
-    gap = FRAME_BTN_GAP * ui_scale
-    x = inner_l + mw - btn_size - margin - padding
-    y = inner_t - btn_size - margin  # frame-all y
-    above = 1 if getattr(settings, "show_frame_all_btn", True) else 0
-    fy = y - above * (gap + btn_size)
-    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
-    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
-
-    # Topmost visible button owns the shared capsule background
-    if not above:
-        below = 1 if getattr(settings, "show_frame_selected_btn", True) else 0
-        total_h = btn_size * (below + 1) + gap * below
-        py = fy - below * (gap + btn_size)
-        _draw_pill(x, py, btn_size, total_h, _alpha_mul(BTN_BG_COLOR, master_alpha))
-        _draw_pill_border(x, py, btn_size, total_h, border_color, 0.5)
-
-    if st.hovered_frame_btn == "VIEW":
-        _draw_pill(
-            x + 1, fy + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha)
-        )
-        ico_color = _alpha_mul(colors["text"], master_alpha)
-
-    # Viewport rectangle icon
+def _paint_frame_view_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+    """Draw the frame-view viewport rectangle icon."""
     inset = 5 * ui_scale
-    rx = round(x + inset)
-    ry = round(fy + inset)
-    rw = btn_size - 2 * inset
-    rh = btn_size - 2 * inset
     t = max(4, int(4.0 * ui_scale))
-
-    _draw_rounded_rect_border(rx, ry, rw, rh, t, ico_color, 0.5 * ui_scale)
-    st.frame_view_btn = (x, fy, btn_size, btn_size)
-
-
-def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
-    """Draw a frame-selected button below the other frame buttons."""
-    addon = bpy.context.preferences.addons.get(__package__)
-    settings = getattr(addon.preferences, "settings", None) if addon else None
-    if (
-        not settings
-        or not getattr(settings, "show_frame_selected_btn", True)
-        or not getattr(settings, "interactive", True)
-    ):
-        _state().frame_selected_btn = None
-        return
-
-    inner_l = mx
-    inner_t = my + mh - padding
-
-    st = _state()
-
-    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
-    margin = FRAME_ALL_BTN_MARGIN * ui_scale
-    gap = FRAME_BTN_GAP * ui_scale
-    x = inner_l + mw - btn_size - margin - padding
-    y = inner_t - btn_size - margin  # frame-all y
-    above = (1 if getattr(settings, "show_frame_all_btn", True) else 0) + (
-        1 if getattr(settings, "show_frame_view_btn", True) else 0
+    _draw_rounded_rect_border(
+        round(x + inset),
+        round(y + inset),
+        round(size - 2 * inset),
+        round(size - 2 * inset),
+        t,
+        color,
+        0.5 * ui_scale,
     )
-    fy = y - above * (gap + btn_size)
-    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
-    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
 
-    # Topmost visible button owns the shared capsule background
-    if not above:
-        _draw_pill(x, fy, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
-        _draw_pill_border(x, fy, btn_size, btn_size, border_color, 0.5)
 
-    if st.hovered_frame_btn == "SELECTED":
-        _draw_pill(
-            x + 1, fy + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha)
-        )
-        ico_color = _alpha_mul(colors["text"], master_alpha)
-
-    # Frame-all style rails with corner arms around a center box
+def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+    """Draw the frame-selected rails and center box icon."""
     i = 5 * ui_scale
     t = max(1, int(1.5 * ui_scale))
-    arm = btn_size * 0.15
+    arm = size * 0.15
 
     # Left/right rails connecting top and bottom corners
-    _draw_filled_rounded_rect(x + i, fy + i, t, btn_size - 2 * i, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + btn_size - i - t, fy + i, t, btn_size - 2 * i, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + i, y + i, t, size - 2 * i, t * 0.5, color)
+    _draw_filled_rounded_rect(x + size - i - t, y + i, t, size - 2 * i, t * 0.5, color)
     # Corner arms
-    _draw_filled_rounded_rect(x + i, fy + i, arm, t, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + btn_size - i - arm, fy + i, arm, t, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + i, fy + btn_size - i - t, arm, t, t * 0.5, ico_color)
-    _draw_filled_rounded_rect(x + btn_size - i - arm, fy + btn_size - i - t, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + i, y + i, arm, t, t * 0.5, color)
+    _draw_filled_rounded_rect(x + size - i - arm, y + i, arm, t, t * 0.5, color)
+    _draw_filled_rounded_rect(x + i, y + size - i - t, arm, t, t * 0.5, color)
+    _draw_filled_rounded_rect(x + size - i - arm, y + size - i - t, arm, t, t * 0.5, color)
 
     # Center box
-    bw = bh = 2 * ui_scale
-    bx = x + (btn_size - bw) / 2
-    by = fy + (btn_size - bh) / 2
-    _draw_filled_rounded_rect(bx, by, bw, bh, 1.5 * ui_scale, ico_color)
-
-    st.frame_selected_btn = (x, fy, btn_size, btn_size)
+    box_w = box_h = 2 * ui_scale
+    box_x = x + (size - box_w) / 2
+    box_y = y + (size - box_h) / 2
+    _draw_filled_rounded_rect(box_x, box_y, box_w, box_h, 1.5 * ui_scale, color)
 
 
-def _draw_list_toggle_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
-    """Draw a type-list toggle button at the top-left of the minimap."""
-    addon = bpy.context.preferences.addons.get(__package__)
-    settings = getattr(addon.preferences, "settings", None) if addon else None
-    if (
-        not settings
-        or not getattr(settings, "show_list_toggle_btn", True)
-        or not getattr(settings, "interactive", True)
-    ):
-        _state().list_toggle_btn = None
-        return
-
-    inner_t = my + mh - padding
-
-    st = _state()
-
-    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
-    margin = FRAME_ALL_BTN_MARGIN * ui_scale
-    x = round(mx + padding + margin)
-    if st.list_width > 0:
-        # Slide right of the list zone: list, padding, button.
-        x = max(x, round(_get_map_content_rect(st)[0] + margin))
-    y = round(inner_t - btn_size - margin)
-
-    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
-    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
-
-    _draw_pill(x, y, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
-    _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)
-
-    if st.hovered_frame_btn == "LIST":
-        _draw_pill(x + 1, y + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
-        ico_color = _alpha_mul(colors["text"], master_alpha)
-
-    # Static list icon: three horizontal bars.
+def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+    """Draw the list-toggle three horizontal bars icon."""
     t = max(1, int(1.5 * ui_scale))
-    bar_w = btn_size * 0.5
+    bar_w = size * 0.5
     bar_gap = 2.0 * ui_scale
-    bx = x + (btn_size - bar_w) / 2
-    by0 = y + (btn_size - (3 * t + 2 * bar_gap)) / 2 - 0.5
+    bar_x = x + (size - bar_w) / 2
+    bar_y = y + (size - (3 * t + 2 * bar_gap)) / 2 - 0.5
 
     for i in range(3):
-        _draw_filled_rounded_rect(bx, by0 + i * (t + bar_gap), bar_w, t, t * 0.5, ico_color)
+        _draw_filled_rounded_rect(bar_x, bar_y + i * (t + bar_gap), bar_w, t, t * 0.5, color)
 
-    st.list_toggle_btn = (x, y, btn_size, btn_size)
+
+_BUTTON_ICONS = {
+    "ALL": _paint_frame_all_icon,
+    "VIEW": _paint_frame_view_icon,
+    "SELECTED": _paint_frame_selected_icon,
+    "LIST": _paint_list_toggle_icon,
+}
+
+
+def _get_visible_minimap_buttons(settings) -> list[str]:
+    """Return ids of enabled minimap buttons in draw order."""
+    if not settings or not getattr(settings, "interactive", True):
+        return []
+    return [btn_id for btn_id, pref_attr, _state_attr in _MINIMAP_BUTTONS if getattr(settings, pref_attr, True)]
+
+
+def _layout_minimap_buttons(
+    st: MinimapState,
+    visible_ids: list[str],
+    mx: float,
+    my: float,
+    mw: float,
+    mh: float,
+    padding: float,
+    ui_scale: float,
+) -> dict[str, tuple[float, float, float]]:
+    """Return hit-rect origins {id: (x, y, size)} for every visible button.
+
+    Frame buttons stack top-down along the right edge; the list toggle
+    sits at the top-left and slides right of an open type-list zone.
+    """
+    size = FRAME_ALL_BTN_SIZE * ui_scale
+    margin = FRAME_ALL_BTN_MARGIN * ui_scale
+    gap = FRAME_BTN_GAP * ui_scale
+    top_y = round(my + mh - padding - margin - size)
+    stack_x = round(mx + mw - padding - margin - size)
+
+    rects: dict[str, tuple[float, float, float]] = {}
+    stack_index = 0
+    for btn_id in visible_ids:
+        if btn_id == "LIST":
+            lx = round(mx + padding + margin)
+            if st.list_width > 0:
+                # Slide right of the list zone: list, padding, button.
+                lx = max(lx, round(_get_map_content_rect(st)[0] + margin))
+            rects[btn_id] = (lx, top_y, size)
+        else:
+            rects[btn_id] = (stack_x, round(top_y - stack_index * (gap + size)), size)
+            stack_index += 1
+    return rects
+
+
+def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
+    """Draw the interactive minimap buttons and record their hit rects."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    settings = getattr(addon.preferences, "settings", None) if addon else None
+    st = _state()
+    st.frame_all_btn = None
+    st.frame_view_btn = None
+    st.frame_selected_btn = None
+    st.list_toggle_btn = None
+
+    visible_ids = _get_visible_minimap_buttons(settings)
+    if not visible_ids:
+        return
+    rects = _layout_minimap_buttons(st, visible_ids, mx, my, mw, mh, padding, ui_scale)
+
+    bg_color = _alpha_mul(BTN_BG_COLOR, master_alpha)
+    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
+
+    # Shared capsule behind the right-edge stack, anchored at its bottom button
+    stack = [btn_id for btn_id in visible_ids if btn_id != "LIST"]
+    if stack:
+        sx, sy, size = rects[stack[-1]]
+        span_h = len(stack) * size + (len(stack) - 1) * FRAME_BTN_GAP * ui_scale
+        _draw_pill(sx, sy, size, span_h, bg_color)
+        _draw_pill_border(sx, sy, size, span_h, border_color, 0.5)
+
+    for btn_id, _pref_attr, state_attr in _MINIMAP_BUTTONS:
+        if btn_id not in rects:
+            continue
+        bx, by, size = rects[btn_id]
+        if btn_id == "LIST":
+            # Standalone capsule outside the shared stack
+            _draw_pill(bx, by, size, size, bg_color)
+            _draw_pill_border(bx, by, size, size, border_color, 0.5)
+        hovered = st.hovered_frame_btn == btn_id
+        ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
+        if hovered:
+            _draw_pill(bx + 1, by + 1, size - 2, size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
+            ico_color = _alpha_mul(colors["text"], master_alpha)
+        _BUTTON_ICONS[btn_id](bx, by, size, ico_color, ui_scale)
+        setattr(st, state_attr, (bx, by, size, size))
 
 
 def draw_minimap() -> None:
@@ -2119,22 +2064,9 @@ def draw_minimap() -> None:
             master_alpha,
         )
 
-    # Minimap Buttons
-    # Frame-all button
-    with _Timer("_draw_frame_all_button"):
-        _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha)
-
-    # Frame-view button
-    with _Timer("_draw_frame_view_button"):
-        _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
-
-    # Frame-selected button
-    with _Timer("_draw_frame_selected_button"):
-        _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
-
-    # Type-list toggle button
-    with _Timer("_draw_list_toggle_button"):
-        _draw_list_toggle_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
+    # Minimap buttons
+    with _Timer("draw_buttons"):
+        _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
 
     # Node count overlay text
     with _Timer("draw_node_count"):

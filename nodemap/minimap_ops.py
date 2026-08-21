@@ -7,6 +7,7 @@ from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
 from .helpers import (
     _HANDLE_THICKNESS,
+    _MINIMAP_BUTTONS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     MinimapState,
@@ -34,6 +35,9 @@ from .helpers import (
 )
 
 logger = logging.getLogger(__package__)
+
+# Minimap button id -> MinimapState hit-rect attribute
+_BTN_STATE_ATTRS = {btn_id: state_attr for btn_id, _pref_attr, state_attr in _MINIMAP_BUTTONS}
 
 
 def _is_in_minimap(region_x: int, region_y: int, st: MinimapState | None = None) -> bool:
@@ -276,10 +280,7 @@ class NODEMAP_OT_navigate(Operator):
     _last_cursor: str = ""
     _pan_acc: list[float]
     _redirect_acc: list[float]
-    _frame_all_armed: bool = False
-    _frame_view_armed: bool = False
-    _frame_selected_armed: bool = False
-    _list_toggle_armed: bool = False
+    _armed_btn: str | None = None
     _list_row_pressed: str | None = None
 
     _smooth_timer: str | None = None
@@ -373,83 +374,8 @@ class NODEMAP_OT_navigate(Operator):
                     if st.pressed:
                         st.pressed = False
                         redraw_ui("NODE_EDITOR")
-                    if self._frame_all_armed:
-                        self._frame_all_armed = False
-                        btn = st.frame_all_btn
-                        if btn:
-                            bx, by, bw, bh = btn
-                            mx = self._mx
-                            my = self._my
-                            if bx <= mx <= bx + bw and by <= my <= by + bh:
-                                if settings and self._is_smooth_pan(settings, context):
-                                    targets = _compute_frame_all_targets(
-                                        self._space, self._region, self._area.as_pointer()
-                                    )
-                                    if targets:
-                                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
-                                else:
-                                    frame_all(self._space, self._region, self._area.as_pointer())
-                        return {"RUNNING_MODAL"}
-                    if self._frame_view_armed:
-                        self._frame_view_armed = False
-                        btn = st.frame_view_btn
-                        if btn:
-                            bx, by, bw, bh = btn
-                            mx = self._mx
-                            my = self._my
-                            if bx <= mx <= bx + bw and by <= my <= by + bh:
-                                if settings and self._is_smooth_pan(settings, context):
-                                    visible = _get_visible_rect(self._space, self._region)
-                                    if visible:
-                                        node_tree = self._space.edit_tree
-                                        if node_tree:
-                                            rect = st.rect
-                                            _, _, mw, mh = rect
-                                            st.tree_bounds = _expand_bounds_margin(
-                                                _get_node_tree_bounds(node_tree.nodes),
-                                                _get_ui_scale(),
-                                                mh,
-                                                st.padding,
-                                            )
-                                        fill = settings.frame_view_fill
-                                        targets = _compute_frame_to_bounds_targets(
-                                            visible, fill, self._area.as_pointer()
-                                        )
-                                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
-                                else:
-                                    frame_view(self._space, self._region, self._area.as_pointer())
-                        return {"RUNNING_MODAL"}
-                    if self._frame_selected_armed:
-                        self._frame_selected_armed = False
-                        btn = st.frame_selected_btn
-                        if btn:
-                            bx, by, bw, bh = btn
-                            mx = self._mx
-                            my = self._my
-                            if bx <= mx <= bx + bw and by <= my <= by + bh:
-                                if settings and self._is_smooth_pan(settings, context):
-                                    targets = _compute_frame_selected_targets(
-                                        self._space, self._region, self._area.as_pointer()
-                                    )
-                                    if targets:
-                                        target_zoom = targets[0] if targets[0] is not None else st.zoom
-                                        self._start_frame_animation(context, target_zoom, [targets[1], targets[2]])
-                                else:
-                                    frame_selected(self._space, self._region, self._area.as_pointer())
-                        return {"RUNNING_MODAL"}
-                    if self._list_toggle_armed:
-                        self._list_toggle_armed = False
-                        btn = st.list_toggle_btn
-                        if btn:
-                            bx, by, bw, bh = btn
-                            mx = self._mx
-                            my = self._my
-                            if bx <= mx <= bx + bw and by <= my <= by + bh:
-                                addon = context.preferences.addons.get(__package__)
-                                if addon:
-                                    settings.show_type_stats = not settings.show_type_stats
-                                    start_list_width_animation(st, settings)
-                                    redraw_ui("NODE_EDITOR")
+                    if self._armed_btn:
+                        self._activate_armed_button(context, settings)
                         return {"RUNNING_MODAL"}
                     if self._list_row_pressed:
                         label = self._list_row_pressed
@@ -510,38 +436,10 @@ class NODEMAP_OT_navigate(Operator):
                 self._was_in_minimap = in_minimap
                 if self._was_in_minimap:
                     self._cancel_smooth(context)
-                    btn = st.frame_all_btn
-                    if btn:
-                        bx, by, bw, bh = btn
-                        mx = self._mx
-                        my = self._my
-                        if bx <= mx <= bx + bw and by <= my <= by + bh:
-                            self._frame_all_armed = True
-                            return {"RUNNING_MODAL"}
-                    btn = st.frame_view_btn
-                    if btn:
-                        bx, by, bw, bh = btn
-                        mx = self._mx
-                        my = self._my
-                        if bx <= mx <= bx + bw and by <= my <= by + bh:
-                            self._frame_view_armed = True
-                            return {"RUNNING_MODAL"}
-                    btn = st.frame_selected_btn
-                    if btn:
-                        bx, by, bw, bh = btn
-                        mx = self._mx
-                        my = self._my
-                        if bx <= mx <= bx + bw and by <= my <= by + bh:
-                            self._frame_selected_armed = True
-                            return {"RUNNING_MODAL"}
-                    btn = st.list_toggle_btn
-                    if btn:
-                        bx, by, bw, bh = btn
-                        mx = self._mx
-                        my = self._my
-                        if bx <= mx <= bx + bw and by <= my <= by + bh:
-                            self._list_toggle_armed = True
-                            return {"RUNNING_MODAL"}
+                    armed = _frame_btn_at(self._mx, self._my, st)
+                    if armed:
+                        self._armed_btn = armed
+                        return {"RUNNING_MODAL"}
                     if _in_list_zone(self._mx, self._my, st):
                         self._list_row_pressed = _list_row_at(self._mx, self._my, st)
                         return {"RUNNING_MODAL"}
@@ -843,44 +741,13 @@ class NODEMAP_OT_navigate(Operator):
 
             case "HOME":
                 if event.value == "PRESS" and in_minimap:
-                    if event.shift:
-                        if settings and self._is_smooth_pan(settings, context):
-                            visible = _get_visible_rect(self._space, self._region)
-                            if visible:
-                                node_tree = self._space.edit_tree
-                                if node_tree:
-                                    rect = st.rect
-                                    _, _, mw, mh = rect
-                                    st.tree_bounds = _expand_bounds_margin(
-                                        _get_node_tree_bounds(node_tree.nodes),
-                                        _get_ui_scale(),
-                                        mh,
-                                        st.padding,
-                                    )
-                                fill = settings.frame_view_fill
-                                targets = _compute_frame_to_bounds_targets(visible, fill, self._area.as_pointer())
-                                self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
-                        else:
-                            frame_view(self._space, self._region, self._area.as_pointer())
-                    else:
-                        if settings and self._is_smooth_pan(settings, context):
-                            targets = _compute_frame_all_targets(self._space, self._region, self._area.as_pointer())
-                            if targets:
-                                self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
-                        else:
-                            frame_all(self._space, self._region, self._area.as_pointer())
+                    self._dispatch_frame_action(context, settings, "VIEW" if event.shift else "ALL")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
             case "NUMPAD_PERIOD":
                 if event.value == "PRESS" and in_minimap:
-                    if settings and self._is_smooth_pan(settings, context):
-                        targets = _compute_frame_selected_targets(self._space, self._region, self._area.as_pointer())
-                        if targets:
-                            target_zoom = targets[0] if targets[0] is not None else st.zoom
-                            self._start_frame_animation(context, target_zoom, [targets[1], targets[2]])
-                    else:
-                        frame_selected(self._space, self._region, self._area.as_pointer())
+                    self._dispatch_frame_action(context, settings, "SELECTED")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -960,6 +827,72 @@ class NODEMAP_OT_navigate(Operator):
                     node_tree.nodes.active = node
                     active_set = True
         redraw_ui("NODE_EDITOR")
+
+    def _activate_armed_button(self, context: Context, settings) -> None:
+        """Release the armed minimap button; run its action when still under the cursor."""
+        btn_id = self._armed_btn
+        self._armed_btn = None
+        st = self._st
+        if not btn_id or st is None:
+            return
+        rect = getattr(st, _BTN_STATE_ATTRS[btn_id])
+        if not rect:
+            return
+        bx, by, bw, bh = rect
+        if not (bx <= self._mx <= bx + bw and by <= self._my <= by + bh):
+            return
+        if btn_id == "LIST":
+            if settings:
+                settings.show_type_stats = not settings.show_type_stats
+                start_list_width_animation(st, settings)
+                redraw_ui("NODE_EDITOR")
+            return
+        self._dispatch_frame_action(context, settings, btn_id)
+
+    def _dispatch_frame_action(self, context: Context, settings, btn_id: str) -> None:
+        """Run a frame action directly, or eased via animation when smooth pan applies.
+
+        Shared by the minimap button release and the Home / Numpad shortcuts.
+        """
+        st = self._st
+        if not st:
+            return
+        smooth = bool(settings) and self._is_smooth_pan(settings, context)
+        area_ptr = self._area.as_pointer() if self._area else 0
+        match btn_id:
+            case "ALL":
+                if smooth:
+                    targets = _compute_frame_all_targets(self._space, self._region, area_ptr)
+                    if targets:
+                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                else:
+                    frame_all(self._space, self._region, area_ptr)
+            case "VIEW":
+                if smooth:
+                    visible = _get_visible_rect(self._space, self._region)
+                    if visible:
+                        node_tree = self._space.edit_tree
+                        if node_tree:
+                            _, _, mw, mh = st.rect
+                            st.tree_bounds = _expand_bounds_margin(
+                                _get_node_tree_bounds(node_tree.nodes),
+                                _get_ui_scale(),
+                                mh,
+                                st.padding,
+                            )
+                        fill = settings.frame_view_fill
+                        targets = _compute_frame_to_bounds_targets(visible, fill, area_ptr)
+                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                else:
+                    frame_view(self._space, self._region, area_ptr)
+            case "SELECTED":
+                if smooth:
+                    targets = _compute_frame_selected_targets(self._space, self._region, area_ptr)
+                    if targets:
+                        target_zoom = targets[0] if targets[0] is not None else st.zoom
+                        self._start_frame_animation(context, target_zoom, [targets[1], targets[2]])
+                else:
+                    frame_selected(self._space, self._region, area_ptr)
 
     def _pan_view(self, context: Context, dx: int, dy: int, smooth: bool = False) -> None:
         st = self._st
@@ -1144,10 +1077,7 @@ class NODEMAP_OT_navigate(Operator):
                 st.resize_active = None
         context.window.cursor_modal_set("DEFAULT")
         self._last_cursor = ""
-        self._frame_all_armed = False
-        self._frame_view_armed = False
-        self._frame_selected_armed = False
-        self._list_toggle_armed = False
+        self._armed_btn = None
         self._list_row_pressed = None
         st = self._st
         if st:
@@ -1438,10 +1368,7 @@ class NODEMAP_OT_navigate(Operator):
         self._window_ptr = context.window.as_pointer()
         self._pan_acc = [0.0, 0.0]
         self._redirect_acc = [0.0, 0.0]
-        self._frame_all_armed = False
-        self._frame_view_armed = False
-        self._frame_selected_armed = False
-        self._list_toggle_armed = False
+        self._armed_btn = None
         self._list_row_pressed = None
         self._smooth_timer = None
         self._inertia_active = False

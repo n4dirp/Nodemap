@@ -252,6 +252,15 @@ _minimap_state: dict[int, MinimapState] = {}
 _minimap_window_operators: dict[int, Any] = {}
 _registration_state: dict[str, bool] = {"done": False}
 
+# Interactive minimap buttons as (id, show-preference attr, MinimapState attr).
+# Order defines the right-edge capsule stack; "LIST" renders standalone.
+_MINIMAP_BUTTONS: tuple[tuple[str, str, str], ...] = (
+    ("ALL", "show_frame_all_btn", "frame_all_btn"),
+    ("VIEW", "show_frame_view_btn", "frame_view_btn"),
+    ("SELECTED", "show_frame_selected_btn", "frame_selected_btn"),
+    ("LIST", "show_list_toggle_btn", "list_toggle_btn"),
+)
+
 
 def _state(area_ptr: int | None = None) -> MinimapState:
     """Return the minimap state for the given area, initializing defaults if needed."""
