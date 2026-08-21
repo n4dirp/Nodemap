@@ -70,6 +70,20 @@ def _region_to_tree(region_x: int, region_y: int, st: MinimapState | None = None
     return tx, ty
 
 
+def _frame_btn_at(mx: int, my: int, st: MinimapState) -> str | None:
+    """Return the id of the frame button under the cursor, if any."""
+    for name, btn in (
+        ("ALL", st.frame_all_btn),
+        ("VIEW", st.frame_view_btn),
+        ("SELECTED", st.frame_selected_btn),
+    ):
+        if btn:
+            bx, by, bw, bh = btn
+            if bx <= mx <= bx + bw and by <= my <= by + bh:
+                return name
+    return None
+
+
 _HANDLE_THICKNESS = 6
 
 _CURSOR_MAP: dict[str, str] = {
@@ -634,6 +648,11 @@ class NODEMAP_OT_navigate(Operator):
                     if old_hovered != new_hovered:
                         st.hovered_node = new_hovered
                         redraw_ui("NODE_EDITOR")
+                    old_btn = st.hovered_frame_btn
+                    new_btn = _frame_btn_at(self._mx, self._my, st) if in_minimap else None
+                    if old_btn != new_btn:
+                        st.hovered_frame_btn = new_btn
+                        redraw_ui("NODE_EDITOR")
                 if self._mmb_dragging and self._mmb_drag_start:
                     dx = self._mx - self._mmb_drag_start[0]
                     dy = self._my - self._mmb_drag_start[1]
@@ -1035,8 +1054,10 @@ class NODEMAP_OT_navigate(Operator):
         self._frame_view_armed = False
         self._frame_selected_armed = False
         st = self._st
-        if st and st.pressed:
-            st.pressed = False
+        if st:
+            st.hovered_frame_btn = None
+            if st.pressed:
+                st.pressed = False
         redraw_ui("NODE_EDITOR")
 
     def _cancel_smooth(self, context: Context) -> None:
@@ -1352,6 +1373,7 @@ class NODEMAP_OT_navigate(Operator):
             self._st.height_clamped = False
             self._st.hovered_handle = None
             self._st.resize_active = None
+            self._st.hovered_frame_btn = None
 
 
 classes = (

@@ -1639,7 +1639,8 @@ def _draw_minimap_scrollbars(
         _draw_pill(thumb_x2, thumb_y2, bar_thick, thumb_h, scroll_color)
 
 
-BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.7)
+BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.6)
+BTN_HOVER_ALPHA = 0.015
 
 
 def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):
@@ -1676,6 +1677,9 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
     py = round(y - extra * (gap + btn_size))
     _draw_pill(x, py, btn_size, total_h, _alpha_mul(BTN_BG_COLOR, master_alpha))
     _draw_pill_border(x, py, btn_size, total_h, border_color, 0.5)
+
+    if st.hovered_frame_btn == "ALL":
+        _draw_pill(x + 1, y + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
 
     # Corner brackets icon (four brackets pointing outward)
     i = 5 * ui_scale
@@ -1729,6 +1733,11 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
         _draw_pill(x, py, btn_size, total_h, _alpha_mul(BTN_BG_COLOR, master_alpha))
         _draw_pill_border(x, py, btn_size, total_h, border_color, 0.5)
 
+    if st.hovered_frame_btn == "VIEW":
+        _draw_pill(
+            x + 1, fy + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha)
+        )
+
     # Viewport rectangle icon
     inset = 5 * ui_scale
     rx = round(x + inset)
@@ -1738,7 +1747,6 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
     t = max(4, int(4.0 * ui_scale))
 
     _draw_rounded_rect_border(rx, ry, rw, rh, t, ico_color, 0.1)
-
     st.frame_view_btn = (x, fy, btn_size, btn_size)
 
 
@@ -1776,6 +1784,11 @@ def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, maste
         _draw_pill(x, fy, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
         _draw_pill_border(x, fy, btn_size, btn_size, border_color, 0.5)
 
+    if st.hovered_frame_btn == "SELECTED":
+        _draw_pill(
+            x + 1, fy + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha)
+        )
+
     # Frame-all style rails with corner arms around a center box
     i = 5 * ui_scale
     t = max(1, int(1.5 * ui_scale))
@@ -1791,9 +1804,10 @@ def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, maste
     _draw_filled_rounded_rect(x + btn_size - i - arm, fy + btn_size - i - t, arm, t, t * 0.5, ico_color)
 
     # Center box
-    bw = bh = 6 * ui_scale
+    bw = bh = 2 * ui_scale
     bx = x + (btn_size - bw) / 2
     by = fy + (btn_size - bh) / 2
-    _draw_rounded_rect_border(bx, by, bw, bh, 1.5 * ui_scale, ico_color, t)
+    # _draw_rounded_rect_border(bx, by, bw, bh, 1.5 * ui_scale, ico_color, t)
+    _draw_filled_rounded_rect(bx, by, bw, bh, 1.5 * ui_scale, ico_color)
 
     st.frame_selected_btn = (x, fy, btn_size, btn_size)

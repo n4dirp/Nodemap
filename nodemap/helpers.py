@@ -208,6 +208,7 @@ class MinimapState:
     frame_all_btn: tuple[float, float, float, float] | None = None
     frame_view_btn: tuple[float, float, float, float] | None = None
     frame_selected_btn: tuple[float, float, float, float] | None = None
+    hovered_frame_btn: str | None = None
     width_clamped: bool = False
     height_clamped: bool = False
     hovered_handle: str | None = None
