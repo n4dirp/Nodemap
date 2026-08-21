@@ -31,6 +31,7 @@ from .gpu_draw import (
 )
 from .helpers import (
     _COLOR_TAG_TO_THEME_ATTR,
+    _HANDLE_THICKNESS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     MinimapState,
@@ -38,6 +39,7 @@ from .helpers import (
     _clamp_pan_to_viewport,
     _compute_outline_color,
     _expand_bounds_margin,
+    _get_map_content_rect,
     _get_minimap_margins,
     _get_minimap_transform,
     _get_node_dims,
@@ -453,7 +455,6 @@ def _draw_viewport_overlay(
         finally:
             if scissor_overlay:
                 gpu.state.scissor_test_set(True)
-                gpu.state.scissor_set(int(mx + 1), int(my + 1), int(mw - 2), int(mh - 2))
 
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
@@ -502,13 +503,13 @@ def _draw_node_count(
 
 
 _NODE_TYPE_LABELS = {
-    "TEX_IMAGE": "Img",
+    "TEX_IMAGE": "Texture Image",
     "MOVIECLIP": "Clip",
-    "OBJECT_INFO": "Obj",
-    "COLLECTION_INFO": "Coll",
-    "GROUP": "Grp",
-    "GROUP_INPUT": "Grp In",
-    "GROUP_OUTPUT": "Grp Out",
+    "OBJECT_INFO": "Object",
+    "COLLECTION_INFO": "Collection",
+    "GROUP": "Group",
+    "GROUP_INPUT": "Group In",
+    "GROUP_OUTPUT": "Group Out",
     "MATH": "Math",
     "MIX": "Mix",
     "MIX_SHADER": "Mix",
@@ -533,7 +534,41 @@ _NODE_TYPE_LABELS = {
 }
 
 
-def _draw_type_stats(
+_TYPE_LIST_MIN_WIDTH = 70.0
+_TYPE_LIST_MAX_WIDTH_PCT = 0.35
+_TYPE_LIST_HOVER_ALPHA = 0.12
+_LIST_PAD_X = 6.0
+_LIST_SWATCH = 5.0
+_LIST_SWATCH_GAP = 5.0
+_LIST_COUNT_GAP = 8.0
+
+
+def _get_type_list_width(settings, st: MinimapState, mw: float, ui_scale: float) -> float:
+    """Measure the type-list zone width for the current tree data (0 when disabled).
+
+    Called before the map transform is computed so node framing can reserve
+    the zone; ``st.list_width`` must be assigned from its result.
+    """
+    if not getattr(settings, "show_type_stats", False):
+        return 0.0
+    tree_data = st.tree_data
+    type_stats = tree_data.get("type_stats") if tree_data else None
+    if not type_stats:
+        return 0.0
+
+    font_id = STATS_FONT_ID
+    blf.size(font_id, int(STATS_FONT_SIZE * ui_scale))
+    pad_x = _LIST_PAD_X * ui_scale
+    swatch = _LIST_SWATCH * ui_scale
+    swatch_gap = _LIST_SWATCH_GAP * ui_scale
+    count_gap = _LIST_COUNT_GAP * ui_scale
+    widest_label = max(blf.dimensions(font_id, label)[0] for label in type_stats)
+    widest_count = max(blf.dimensions(font_id, str(count))[0] for count in type_stats.values())
+    content_w = pad_x * 2 + swatch + swatch_gap + widest_label + count_gap + widest_count
+    return min(max(content_w, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
+
+
+def _draw_type_list(
     settings,
     st: MinimapState,
     mx: float,
@@ -544,56 +579,142 @@ def _draw_type_stats(
     master_alpha: float,
     ui_scale: float,
 ) -> None:
-    """Draw per-type node counts as left-aligned columns inside the minimap."""
-    if not getattr(settings, "show_type_stats", False):
+    """Draw the interactive node-type list zone along the minimap's left edge."""
+    st.list_row_rects = []
+    st.list_scroll_max = 0.0
+    if st.list_width <= 0 or not getattr(settings, "show_type_stats", False):
+        st.hovered_type_label = None
         return
     tree_data = st.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
+        st.hovered_type_label = None
         return
 
     font_id = STATS_FONT_ID
     font_size = int(STATS_FONT_SIZE * ui_scale)
     blf.size(font_id, font_size)
-    line_h = blf.dimensions(font_id, "Ay")[1] + 2 * ui_scale
+    _, line_h = blf.dimensions(font_id, "Ay")
+    row_h = line_h + 4 * ui_scale
+    st.list_row_h = row_h
 
     entries = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
-    rows = [(f"{count} {label}", label) for label, count in entries]
-
-    default_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
-    use_type_colors = getattr(settings, "colored_nodes", True)
     type_colors = (tree_data.get("type_colors") or {}) if tree_data else {}
-    tx = mx + 6 * ui_scale
-    y_start = my + mh - padding - font_size
-    y_min = my + padding
-    max_rows = max(1, int((y_start - y_min) / line_h) + 1)
 
-    # Overflow flows into a second column to the right of the first
-    capacity = max_rows * 2
-    if len(rows) > capacity:
-        rows = rows[: capacity - 1]
-        rows.append(("...", ""))
-    columns = [rows[:max_rows]]
-    if len(rows) > max_rows:
-        columns.append(rows[max_rows:])
+    pad_x = _LIST_PAD_X * ui_scale
+    swatch = _LIST_SWATCH * ui_scale
+    swatch_gap = _LIST_SWATCH_GAP * ui_scale
+    count_gap = _LIST_COUNT_GAP * ui_scale
 
-    col_x = tx
-    for col_index, col_rows in enumerate(columns):
-        y = y_start
-        for info_text, label in col_rows:
-            if y < y_min:
-                break
-            text_color = default_color
-            if use_type_colors:
-                c = type_colors.get(label)
-                if c:
-                    text_color = _alpha_mul(c, 0.85 * master_alpha)
-            _draw_text_with_shadow(font_id, info_text, col_x + 1, y + 1, text_color, font_size)
-            y -= line_h
-        if col_index == 0 and len(columns) > 1:
-            blf.size(font_id, font_size)
-            widest = max(blf.dimensions(font_id, text)[0] for text, _ in col_rows)
-            col_x += widest + 14 * ui_scale
+    # Zone geometry: inset by the resize-handle thickness so edge resize
+    # borders stay reachable around the list
+    handle_pad = _HANDLE_THICKNESS * ui_scale
+    zone_x = mx + handle_pad
+    zone_w = mx + padding + st.list_width - 2 * ui_scale - zone_x
+    zone_y = my + handle_pad
+    zone_h = mh - 2 * handle_pad
+
+    zone_r = colors.get("panel_roundness", 4.0) * 0.6
+    _draw_filled_rounded_rect(zone_x, zone_y, zone_w, zone_h, zone_r, _alpha_mul(colors["bg"], 0.9 * master_alpha))
+    _draw_rounded_rect_border(
+        zone_x, zone_y, zone_w, zone_h, zone_r, _alpha_mul(colors["bg_border"], master_alpha), 0.5
+    )
+
+    # Scrollable rows viewport inside the zone
+    row_pad_v = 3 * ui_scale
+    view_t = zone_y + zone_h - row_pad_v
+    view_b = zone_y + row_pad_v
+    view_h = max(view_t - view_b, row_h)
+    total_h = row_h * len(entries)
+    scroll_max = max(0.0, total_h - view_h)
+    st.list_scroll = min(max(st.list_scroll, 0.0), scroll_max)
+    st.list_scroll_max = scroll_max
+
+    show_swatch = getattr(settings, "colored_nodes", True)
+
+    widest_count = max(blf.dimensions(font_id, str(count))[0] for _, count in entries)
+    content_x = zone_x + pad_x
+    count_right = zone_x + zone_w - pad_x
+    label_x = content_x + (swatch + swatch_gap if show_swatch else 0.0)
+    label_max_w = count_right - widest_count - count_gap - label_x
+    text_y_off = (row_h - line_h) / 2
+    swatch_y_off = (row_h - swatch) / 2
+
+    text_col = _alpha_mul(colors["text"], 0.9 * master_alpha)
+    count_col = _alpha_mul(colors["text"], 0.55 * master_alpha)
+    hover_col = _alpha_mul(colors["text"], 0.02 * master_alpha)
+
+    pill_x = zone_x + 2 * ui_scale
+    pill_w = zone_w - 4 * ui_scale
+
+    first = int(st.list_scroll // row_h)
+    last = min(len(entries), first + int(view_h / row_h) + 2)
+
+    # Clip rows to the zone interior so partial rows never bleed onto the map
+    saved_scissor = None
+    try:
+        was_active = gpu.state.scissor_test_get()
+        saved_scissor = (was_active, gpu.state.scissor_get() if was_active else None)
+    except Exception:
+        saved_scissor = None
+    try:
+        gpu.state.scissor_set(int(zone_x + 1), int(zone_y + 1), max(0, int(zone_w - 2)), max(0, int(zone_h - 2)))
+        gpu.state.scissor_test_set(True)
+
+        row_rects = []
+        for i in range(first, last):
+            label, count = entries[i]
+            row_top = view_t - i * row_h + st.list_scroll
+            row_bottom = row_top - row_h
+            if row_top <= view_b or row_bottom >= view_t:
+                continue
+            # Text drawing disables blending; restore it before the pill draws.
+            gpu.state.blend_set("ALPHA")
+            if st.hovered_type_label == label:
+                _draw_filled_rounded_rect(pill_x, row_bottom, pill_w, row_h, 4.0 * ui_scale, hover_col)
+            if show_swatch:
+                c = type_colors.get(label) or colors["node"]
+                _draw_pill(content_x, row_bottom + swatch_y_off, swatch, swatch, _alpha_mul(c, master_alpha))
+            text_y = row_bottom + text_y_off
+            # Clip overlong labels at the column edge instead of truncating.
+            blf.enable(font_id, blf.CLIPPING)
+            blf.clipping(font_id, int(label_x), int(view_b), int(label_x + label_max_w), int(view_t))
+            _draw_text_with_shadow(font_id, label, label_x, text_y, text_col, font_size)
+            blf.disable(font_id, blf.CLIPPING)
+            count_text = str(count)
+            cw = blf.dimensions(font_id, count_text)[0]
+            _draw_text_with_shadow(font_id, count_text, count_right - cw, text_y, count_col, font_size)
+            row_rects.append((pill_x, row_bottom, pill_w, row_h, label))
+        st.list_row_rects = row_rects
+    finally:
+        try:
+            was_active, old_rect = saved_scissor or (False, None)
+            if was_active and old_rect:
+                gpu.state.scissor_set(*old_rect)
+                gpu.state.scissor_test_set(True)
+            else:
+                gpu.state.scissor_set(0, 0, 65535, 65535)
+                gpu.state.scissor_test_set(False)
+        except Exception:
+            pass
+
+    # Scrollbar thumb when the list overflows (same style as the map scrollbars)
+    if scroll_max > 0:
+        gpu.state.blend_set("ALPHA")
+        track_h = zone_h - 4 * ui_scale
+        bar_thick = max(2, int(3 * ui_scale))
+        bar_off = int(2 * ui_scale)
+        min_thumb = int(6 * ui_scale)
+        thumb_h = max(min_thumb, int(track_h * view_h / total_h))
+        frac = st.list_scroll / scroll_max
+        thumb_y = zone_y + bar_off + (track_h - thumb_h) * (1.0 - frac)
+        _draw_pill(
+            zone_x + zone_w - bar_thick - bar_off,
+            thumb_y,
+            bar_thick,
+            thumb_h,
+            _alpha_mul(colors["scroll_item"], master_alpha * 0.65),
+        )
 
 
 def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
@@ -665,6 +786,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     group_markers: dict[tuple, list[tuple[float, float, float]]] = {}
     type_counts: dict[str, int] = {}
     type_colors: dict[str, tuple[float, float, float, float]] = {}
+    type_nodes: dict[str, list[str]] = {}
 
     bounds_min_x = float("inf")
     bounds_min_y = float("inf")
@@ -789,7 +911,9 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     label = _NODE_TYPE_LABELS.get(node.type) or (node.bl_label or node.type.replace("_", " ")).title()
                     if label not in type_counts:
                         type_colors[label] = node_color
+                    info["type_label"] = label
                     type_counts[label] = type_counts.get(label, 0) + 1
+                    type_nodes.setdefault(label, []).append(node.name)
 
                 if node.mute:
                     bg_color = colors["bg"]
@@ -940,6 +1064,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
         tree_data["group_markers"] = group_markers
         tree_data["type_stats"] = type_counts
         tree_data["type_colors"] = type_colors
+        tree_data["type_nodes"] = type_nodes
 
     # ------------------------------------------------------------------
     # REROUTE wire endpoints (not in sorted_items, handled separately)
@@ -1010,12 +1135,23 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
 
 
 def _build_minimap_batches(
-    st: MinimapState, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders
+    st: MinimapState,
+    rect,
+    cx,
+    cy,
+    scale,
+    tree_cx,
+    tree_cy,
+    ui_scale,
+    master_alpha,
+    show_borders,
+    highlight_border=None,
 ):
     """Transform tree-space data to screen-space and compile GPU draw batches.
 
     Must be called every frame after ``_compile_tree_data()`` has stored
-    ``st.tree_data``.
+    ``st.tree_data``. When *highlight_border* is an RGBA color, nodes whose
+    type matches ``st.hovered_type_label`` get a highlighted border.
     """
     tree_data = st.tree_data
     if tree_data is None:
@@ -1030,6 +1166,7 @@ def _build_minimap_batches(
     font_id = 0
     min_dim = 3.0 * ui_scale
     node_infos = tree_data["node_infos"]
+    hovered_type = st.hovered_type_label
 
     all_pos_fill = []
     all_uv_fill = []
@@ -1073,6 +1210,12 @@ def _build_minimap_batches(
 
         is_tiny = (nw_s < min_dim or nh_s < min_dim) and not is_frame
 
+        border_color = info["border_color"]
+        border_w = info["border_w"]
+        if not is_frame and hovered_type and highlight_border is not None and info.get("type_label") == hovered_type:
+            border_color = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
+            border_w = 1.25
+
         if is_tiny:
             nw_s_final = max(nw_s, min_dim)
             nh_s_final = max(nh_s, min_dim)
@@ -1103,8 +1246,8 @@ def _build_minimap_batches(
                 all_uv_border.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
                 all_half_size_border.extend([(hw, hh)] * 4)
                 all_radius_border.extend([node_r] * 4)
-                all_color_border.extend([info["border_color"]] * 4)
-                all_line_width_border.extend([info["border_w"]] * 4)
+                all_color_border.extend([border_color] * 4)
+                all_line_width_border.extend([border_w] * 4)
         else:
             hw = nw_s / 2
             hh = nh_s / 2
@@ -1128,7 +1271,6 @@ def _build_minimap_batches(
             col_fill.extend([info["fill_color"]] * 4)
 
             if show_borders:
-                bw = info["border_w"]
                 pb = frame_pos_border if is_frame else all_pos_border
                 ub = frame_uv_border if is_frame else all_uv_border
                 hsb = frame_half_size_border if is_frame else all_half_size_border
@@ -1146,8 +1288,8 @@ def _build_minimap_batches(
                 ub.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
                 hsb.extend([(hw, hh)] * 4)
                 rb.extend([node_r] * 4)
-                cb.extend([info["border_color"]] * 4)
-                lwb.extend([bw] * 4)
+                cb.extend([border_color] * 4)
+                lwb.extend([border_w] * 4)
 
             # Labels
             if is_frame:
@@ -1470,6 +1612,11 @@ def draw_minimap() -> None:
         st.margin = y_margin
         st.padding = padding
 
+        # Reserve the type-list zone before computing the map transform so
+        # node framing and panning never place tree content behind the list.
+        with _Timer("type_list_width"):
+            st.list_width = _get_type_list_width(settings, st, mw, ui_scale)
+
         _clamp_pan_to_viewport(space, region, st)
 
     # Debounce: schedule compile after fingerprint settles (via bpy.app.timers)
@@ -1491,7 +1638,10 @@ def draw_minimap() -> None:
     # Build screen-space batches every frame (applies current zoom/pan)
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
     with _Timer("build_batches"):
-        _build_minimap_batches(st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders)
+        highlight_border = colors["node_active"] if st.hovered_type_label else None
+        _build_minimap_batches(
+            st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders, highlight_border
+        )
 
     # Draw minimap panel
     try:
@@ -1503,7 +1653,7 @@ def draw_minimap() -> None:
     with _Timer("draw_background"):
         bg_color, panel_r = _draw_background(mx, my, mw, mh, colors, master_alpha)
 
-    # Clip node/wire content to minimap interior
+    # Clip node/wire content to the minimap interior
     with _Timer("setup_scissor"):
         scissor_state = _setup_scissor(mx, my, mw, mh)
         scissor_active = scissor_state[0]
@@ -1665,6 +1815,10 @@ def draw_minimap() -> None:
     with _Timer("_draw_frame_selected_button"):
         _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
 
+    # type-list toggle button (top-left)
+    with _Timer("_draw_list_toggle_button"):
+        _draw_list_toggle_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
+
     # Edge resize handle pills
     with _Timer("draw_resize_handles"):
         _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
@@ -1675,16 +1829,23 @@ def draw_minimap() -> None:
         font_id = 0
         _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
 
-    # Type stats column
-    with _Timer("draw_type_stats"):
-        _draw_type_stats(settings, st, mx, my, mh, padding, colors, master_alpha, ui_scale)
-
     # Restore GPU state
     _teardown_scissor(scissor_state)
     try:
         gpu.state.blend_set(original_blend if original_blend else "NONE")
     except Exception:
         gpu.state.blend_set("NONE")
+
+    # Interactive node-type list zone (drawn unclipped, on top of map content)
+    try:
+        gpu.state.blend_set("ALPHA")
+        with _Timer("draw_type_list"):
+            _draw_type_list(settings, st, mx, my, mh, padding, colors, master_alpha, ui_scale)
+    finally:
+        try:
+            gpu.state.blend_set(original_blend if original_blend else "NONE")
+        except Exception:
+            gpu.state.blend_set("NONE")
 
     # Stop & dump profile stats after N frames
     _maybe_stop_profiler(st)
@@ -1897,7 +2058,7 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
     rh = btn_size - 2 * inset
     t = max(4, int(4.0 * ui_scale))
 
-    _draw_rounded_rect_border(rx, ry, rw, rh, t, ico_color, 0.1)
+    _draw_rounded_rect_border(rx, ry, rw, rh, t, ico_color, 0.5 * ui_scale)
     st.frame_view_btn = (x, fy, btn_size, btn_size)
 
 
@@ -1963,3 +2124,50 @@ def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, maste
     _draw_filled_rounded_rect(bx, by, bw, bh, 1.5 * ui_scale, ico_color)
 
     st.frame_selected_btn = (x, fy, btn_size, btn_size)
+
+
+def _draw_list_toggle_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
+    """Draw a type-list toggle button at the top-left of the minimap."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    settings = getattr(addon.preferences, "settings", None) if addon else None
+    if (
+        not settings
+        or not getattr(settings, "show_list_toggle_btn", True)
+        or not getattr(settings, "interactive", True)
+    ):
+        _state().list_toggle_btn = None
+        return
+
+    inner_t = my + mh - padding
+
+    st = _state()
+
+    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
+    margin = FRAME_ALL_BTN_MARGIN * ui_scale
+    x = round(mx + padding + margin)
+    if st.list_width > 0:
+        # Slide right of the list zone: list, padding, button.
+        x = max(x, round(_get_map_content_rect(st)[0] + margin))
+    y = round(inner_t - btn_size - margin)
+
+    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
+    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
+
+    _draw_pill(x, y, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
+    _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)
+
+    if st.hovered_frame_btn == "LIST":
+        _draw_pill(x + 1, y + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
+        ico_color = _alpha_mul(colors["text"], master_alpha)
+
+    # Static list icon: three horizontal bars.
+    t = max(1, int(1.5 * ui_scale))
+    bar_w = btn_size * 0.5
+    bar_gap = 2.0 * ui_scale
+    bx = x + (btn_size - bar_w) / 2
+    by0 = y + (btn_size - (3 * t + 2 * bar_gap)) / 2 - 0.5
+
+    for i in range(3):
+        _draw_filled_rounded_rect(bx, by0 + i * (t + bar_gap), bar_w, t, t * 0.5, ico_color)
+
+    st.list_toggle_btn = (x, y, btn_size, btn_size)

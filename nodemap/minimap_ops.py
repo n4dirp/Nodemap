@@ -6,6 +6,7 @@ import bpy
 from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
 from .helpers import (
+    _HANDLE_THICKNESS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     MinimapState,
@@ -16,6 +17,7 @@ from .helpers import (
     _expand_bounds_margin,
     _find_node_at,
     _get_area_and_region_under_mouse,
+    _get_map_content_rect,
     _get_minimap_margins,
     _get_minimap_transform,
     _get_node_tree_bounds,
@@ -50,10 +52,7 @@ def _region_to_tree(region_x: int, region_y: int, st: MinimapState | None = None
     if not bounds:
         return None
 
-    mx, my, mw, mh = rect
-    padding = st.padding
-    inner_w = max(mw - 2 * padding, 1.0)
-    inner_h = max(mh - 2 * padding, 1.0)
+    inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
     base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
@@ -61,8 +60,8 @@ def _region_to_tree(region_x: int, region_y: int, st: MinimapState | None = None
     if scale <= 0:
         return None
 
-    cx = mx + padding + inner_w / 2 + st.pan[0]
-    cy = my + padding + inner_h / 2 + st.pan[1]
+    cx = inner_l + inner_w / 2 + st.pan[0]
+    cy = inner_b + inner_h / 2 + st.pan[1]
     tree_cx = (bounds[0] + bounds[2]) / 2
     tree_cy = (bounds[1] + bounds[3]) / 2
     tx = tree_cx + (region_x - cx) / scale
@@ -76,6 +75,7 @@ def _frame_btn_at(mx: int, my: int, st: MinimapState) -> str | None:
         ("ALL", st.frame_all_btn),
         ("VIEW", st.frame_view_btn),
         ("SELECTED", st.frame_selected_btn),
+        ("LIST", st.list_toggle_btn),
     ):
         if btn:
             bx, by, bw, bh = btn
@@ -84,7 +84,24 @@ def _frame_btn_at(mx: int, my: int, st: MinimapState) -> str | None:
     return None
 
 
-_HANDLE_THICKNESS = 6
+def _in_list_zone(region_x: int, region_y: int, st: MinimapState) -> bool:
+    """Return True when the cursor is over the type-list zone of the minimap."""
+    if st.list_width <= 0 or not st.rect:
+        return False
+    mx, my, _, mh = st.rect
+    pad = _HANDLE_THICKNESS * _get_ui_scale()
+    zone_left = mx + pad
+    zone_right = mx + st.padding + st.list_width
+    return zone_left <= region_x <= zone_right and my + pad <= region_y <= my + mh - pad
+
+
+def _list_row_at(region_x: int, region_y: int, st: MinimapState) -> str | None:
+    """Return the type label of the type-list row under the cursor, if any."""
+    for x, y, w, h, label in st.list_row_rects:
+        if x <= region_x <= x + w and y <= region_y <= y + h:
+            return label
+    return None
+
 
 _CURSOR_MAP: dict[str, str] = {
     "W": "MOVE_X",
@@ -261,6 +278,8 @@ class NODEMAP_OT_navigate(Operator):
     _frame_all_armed: bool = False
     _frame_view_armed: bool = False
     _frame_selected_armed: bool = False
+    _list_toggle_armed: bool = False
+    _list_row_pressed: str | None = None
 
     _smooth_timer: str | None = None
     _inertia_active: bool = False
@@ -417,6 +436,24 @@ class NODEMAP_OT_navigate(Operator):
                                 else:
                                     frame_selected(self._space, self._region, self._area.as_pointer())
                         return {"RUNNING_MODAL"}
+                    if self._list_toggle_armed:
+                        self._list_toggle_armed = False
+                        btn = st.list_toggle_btn
+                        if btn:
+                            bx, by, bw, bh = btn
+                            mx = self._mx
+                            my = self._my
+                            if bx <= mx <= bx + bw and by <= my <= by + bh:
+                                addon = context.preferences.addons.get(__package__)
+                                if addon:
+                                    settings.show_type_stats = not settings.show_type_stats
+                        return {"RUNNING_MODAL"}
+                    if self._list_row_pressed:
+                        label = self._list_row_pressed
+                        self._list_row_pressed = None
+                        if _in_list_zone(self._mx, self._my, st) and _list_row_at(self._mx, self._my, st) == label:
+                            self._select_type_nodes(context, label)
+                        return {"RUNNING_MODAL"}
                     if self._resize_handle:
                         self._resize_handle = None
                         self._resize_start_mouse = None
@@ -494,6 +531,17 @@ class NODEMAP_OT_navigate(Operator):
                         if bx <= mx <= bx + bw and by <= my <= by + bh:
                             self._frame_selected_armed = True
                             return {"RUNNING_MODAL"}
+                    btn = st.list_toggle_btn
+                    if btn:
+                        bx, by, bw, bh = btn
+                        mx = self._mx
+                        my = self._my
+                        if bx <= mx <= bx + bw and by <= my <= by + bh:
+                            self._list_toggle_armed = True
+                            return {"RUNNING_MODAL"}
+                    if _in_list_zone(self._mx, self._my, st):
+                        self._list_row_pressed = _list_row_at(self._mx, self._my, st)
+                        return {"RUNNING_MODAL"}
                     if addon:
                         handle = self._get_handle_at(context, event)
                         if handle:
@@ -565,7 +613,7 @@ class NODEMAP_OT_navigate(Operator):
                                 pass
                         self._destroy_timer(context)
                         return {"RUNNING_MODAL"}
-                    if not self._dragging and self._was_in_minimap:
+                    if not self._dragging and self._was_in_minimap and not _in_list_zone(self._mx, self._my, st):
                         if settings and settings.right_click_action in ("SELECT", "PAN_SELECT"):
                             self._handle_click_selection(context, event, st)
                         self._was_in_minimap = False
@@ -578,6 +626,17 @@ class NODEMAP_OT_navigate(Operator):
                 self._was_in_minimap = in_minimap
                 if self._was_in_minimap:
                     self._cancel_smooth(context)
+                    if _in_list_zone(self._mx, self._my, st):
+                        label = _list_row_at(self._mx, self._my, st)
+                        if label:
+                            self._select_type_nodes(context, label)
+                            try:
+                                with self._override_ctx(context):
+                                    bpy.ops.node.view_selected()
+                            except RuntimeError:
+                                pass
+                        self._was_in_minimap = False
+                        return {"RUNNING_MODAL"}
                     if addon:
                         handle = self._get_handle_at(context, event)
                         if handle:
@@ -637,9 +696,14 @@ class NODEMAP_OT_navigate(Operator):
                 if not self._dragging and not self._mmb_dragging and not self._drag_start:
                     self._update_cursor(context, event)
                 if not self._dragging and not self._mmb_dragging and not self._resize_handle:
+                    in_list = _in_list_zone(self._mx, self._my, st)
+                    row_label = _list_row_at(self._mx, self._my, st) if in_list else None
+                    if st.hovered_type_label != row_label:
+                        st.hovered_type_label = row_label
+                        redraw_ui("NODE_EDITOR")
                     old_hovered = st.hovered_node
                     new_hovered = None
-                    if in_minimap:
+                    if in_minimap and not in_list:
                         tree_coord = _region_to_tree(self._mx, self._my, st)
                         if tree_coord and self._space and self._space.edit_tree:
                             hovered = _find_node_at(self._space.edit_tree.nodes, tree_coord[0], tree_coord[1])
@@ -649,7 +713,7 @@ class NODEMAP_OT_navigate(Operator):
                         st.hovered_node = new_hovered
                         redraw_ui("NODE_EDITOR")
                     old_btn = st.hovered_frame_btn
-                    new_btn = _frame_btn_at(self._mx, self._my, st) if in_minimap else None
+                    new_btn = _frame_btn_at(self._mx, self._my, st) if in_minimap and not in_list else None
                     if old_btn != new_btn:
                         st.hovered_frame_btn = new_btn
                         redraw_ui("NODE_EDITOR")
@@ -695,6 +759,12 @@ class NODEMAP_OT_navigate(Operator):
                 return {"PASS_THROUGH"}
 
             case "WHEELUPMOUSE" | "WHEELDOWNMOUSE":
+                if in_minimap and _in_list_zone(self._mx, self._my, st):
+                    direction = -1 if event.type == "WHEELUPMOUSE" else 1
+                    st.list_scroll = min(max(st.list_scroll + direction * st.list_row_h * 3, 0.0), st.list_scroll_max)
+                    st.hovered_type_label = _list_row_at(self._mx, self._my, st)
+                    redraw_ui("NODE_EDITOR")
+                    return {"RUNNING_MODAL"}
                 if in_minimap:
                     if event.ctrl or event.shift:
                         visible = _get_visible_rect(self._space, self._region)
@@ -859,16 +929,41 @@ class NODEMAP_OT_navigate(Operator):
         st.hovered_node = None
         redraw_ui("NODE_EDITOR")
 
+    def _select_type_nodes(self, context: Context, label: str) -> None:
+        """Select all editor nodes whose compiled type label matches *label*."""
+        space = self._space
+        st = self._st
+        if not space or space.type != "NODE_EDITOR" or not st:
+            return
+        node_tree = space.edit_tree
+        if not node_tree:
+            return
+        type_nodes = (st.tree_data or {}).get("type_nodes") or {}
+        names = type_nodes.get(label)
+        if not names:
+            return
+
+        try:
+            with self._override_ctx(context):
+                bpy.ops.node.select_all(action="DESELECT")
+        except RuntimeError:
+            pass
+        active_set = False
+        for name in names:
+            node = node_tree.nodes.get(name)
+            if node:
+                node.select = True
+                if not active_set:
+                    node_tree.nodes.active = node
+                    active_set = True
+        redraw_ui("NODE_EDITOR")
+
     def _pan_view(self, context: Context, dx: int, dy: int, smooth: bool = False) -> None:
         st = self._st
         if not st:
             return
-        rect = st.rect
         bounds = st.tree_bounds
-        padding = st.padding
-        mx, my, mw, mh = rect
-        inner_w = max(mw - 2 * padding, 1.0)
-        inner_h = max(mh - 2 * padding, 1.0)
+        _, _, inner_w, inner_h = _get_map_content_rect(st)
         bbox_w = max(bounds[2] - bounds[0], 1.0)
         bbox_h = max(bounds[3] - bounds[1], 1.0)
         base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
@@ -938,12 +1033,8 @@ class NODEMAP_OT_navigate(Operator):
         st = self._st
         if not st:
             return
-        rect = st.rect
         bounds = st.tree_bounds
-        padding = st.padding
-        mx, my, mw, mh = rect
-        inner_w = max(mw - 2 * padding, 1.0)
-        inner_h = max(mh - 2 * padding, 1.0)
+        _, _, inner_w, inner_h = _get_map_content_rect(st)
         bbox_w = max(bounds[2] - bounds[0], 1.0)
         bbox_h = max(bounds[3] - bounds[1], 1.0)
         base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
@@ -1053,9 +1144,12 @@ class NODEMAP_OT_navigate(Operator):
         self._frame_all_armed = False
         self._frame_view_armed = False
         self._frame_selected_armed = False
+        self._list_toggle_armed = False
+        self._list_row_pressed = None
         st = self._st
         if st:
             st.hovered_frame_btn = None
+            st.hovered_type_label = None
             if st.pressed:
                 st.pressed = False
         redraw_ui("NODE_EDITOR")
@@ -1268,6 +1362,11 @@ class NODEMAP_OT_navigate(Operator):
         st.hovered_handle = handle
         if handle != old_handle:
             redraw_ui("NODE_EDITOR")
+        if _in_list_zone(self._mx, self._my, st):
+            if self._last_cursor:
+                context.window.cursor_modal_set("DEFAULT")
+                self._last_cursor = ""
+            return
         is_clamped = handle and (st.width_clamped or st.height_clamped)
         cursor = "HAND" if is_clamped else _CURSOR_MAP.get(handle, "DEFAULT")
         if cursor != self._last_cursor:
@@ -1339,6 +1438,8 @@ class NODEMAP_OT_navigate(Operator):
         self._frame_all_armed = False
         self._frame_view_armed = False
         self._frame_selected_armed = False
+        self._list_toggle_armed = False
+        self._list_row_pressed = None
         self._smooth_timer = None
         self._inertia_active = False
         self._inertia_mode = None
@@ -1374,6 +1475,8 @@ class NODEMAP_OT_navigate(Operator):
             self._st.hovered_handle = None
             self._st.resize_active = None
             self._st.hovered_frame_btn = None
+            self._st.hovered_type_label = None
+        self._list_row_pressed = None
 
 
 classes = (

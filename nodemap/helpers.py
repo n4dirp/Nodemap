@@ -17,6 +17,7 @@ MAP_PADDING: float = 12.0
 MIN_MAP_WIDTH: int = 120
 MIN_MAP_HEIGHT: int = 80
 MAX_FRAME_ZOOM: float = 20.0
+_HANDLE_THICKNESS: int = 6
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
@@ -208,12 +209,19 @@ class MinimapState:
     frame_all_btn: tuple[float, float, float, float] | None = None
     frame_view_btn: tuple[float, float, float, float] | None = None
     frame_selected_btn: tuple[float, float, float, float] | None = None
+    list_toggle_btn: tuple[float, float, float, float] | None = None
     hovered_frame_btn: str | None = None
     width_clamped: bool = False
     height_clamped: bool = False
     hovered_handle: str | None = None
     resize_active: str | None = None
     pressed: bool = False
+    list_width: float = 0.0
+    list_scroll: float = 0.0
+    list_scroll_max: float = 0.0
+    list_row_h: float = 16.0
+    hovered_type_label: str | None = None
+    list_row_rects: list = field(default_factory=list)
     cached_fingerprint: Any = None
     pending_timer: Any = None
     tree_data: dict | None = None
@@ -347,6 +355,23 @@ def _get_area_and_region_under_mouse(context, event) -> tuple:
     return None, None
 
 
+_LIST_CONTENT_GAP = 4.0
+
+
+def _get_map_content_rect(st: MinimapState) -> tuple[float, float, float, float]:
+    """Return ``(left, bottom, width, height)`` of the map content area.
+
+    Subtracts the type-list zone plus a margin from the left edge so node
+    framing and panning never place tree content behind the list.
+    """
+    mx, my, mw, mh = st.rect
+    pad = st.padding
+    left_inset = pad + st.list_width
+    if st.list_width > 0:
+        left_inset += _LIST_CONTENT_GAP * _get_ui_scale()
+    return mx + left_inset, my + pad, max(mw - pad - left_inset, 1.0), max(mh - 2 * pad, 1.0)
+
+
 def _get_minimap_transform(
     st: MinimapState | None = None,
     space: Any = None,
@@ -355,17 +380,13 @@ def _get_minimap_transform(
     """Computes internal transformations representing scale, zoom, and panning inside the minimap."""
     if st is None:
         st = _state()
-    rect = st.rect
     bounds = st.tree_bounds
-    padding = st.padding
 
     base_zoom = st.base_zoom
     zoom = base_zoom
     pan = st.pan
 
-    mx, my, mw, mh = rect
-    inner_w = max(mw - 2 * padding, 1.0)
-    inner_h = max(mh - 2 * padding, 1.0)
+    inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
 
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
@@ -402,8 +423,8 @@ def _get_minimap_transform(
     st.zoom = zoom
     scale = base_scale * zoom
 
-    cx = mx + padding + inner_w / 2 + pan[0]
-    cy = my + padding + inner_h / 2 + pan[1]
+    cx = inner_l + inner_w / 2 + pan[0]
+    cy = inner_b + inner_h / 2 + pan[1]
 
     tree_cx = (bounds[0] + bounds[2]) / 2
     tree_cy = (bounds[1] + bounds[3]) / 2
@@ -424,27 +445,21 @@ def _clamp_pan_to_viewport(space, region, st: MinimapState) -> None:
     if not visible:
         return
 
-    rect = st.rect
     bounds = st.tree_bounds
-    padding = st.padding
     zoom = st.zoom
     pan = st.pan
 
-    mx, my, mw, mh = rect
-    inner_l = mx + padding
-    inner_b = my + padding
-    inner_r = mx + mw - padding
-    inner_t = my + mh - padding
-    inner_w = max(mw - 2 * padding, 1.0)
-    inner_h = max(mh - 2 * padding, 1.0)
+    inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
+    inner_r = inner_l + inner_w
+    inner_t = inner_b + inner_h
 
     bbox_w = bounds[2] - bounds[0]
     bbox_h = bounds[3] - bounds[1]
     base_scale = min(inner_w / max(bbox_w, 1.0), inner_h / max(bbox_h, 1.0))
     scale = base_scale * zoom
 
-    cx = mx + padding + inner_w / 2 + pan[0]
-    cy = my + padding + inner_h / 2 + pan[1]
+    cx = inner_l + inner_w / 2 + pan[0]
+    cy = inner_b + inner_h / 2 + pan[1]
     tree_cx = (bounds[0] + bounds[2]) / 2
     tree_cy = (bounds[1] + bounds[3]) / 2
 
@@ -561,10 +576,8 @@ def _compute_frame_all_targets(
 
     bounds = _get_node_tree_bounds(node_tree.nodes)
 
-    rect = st.rect
-    padding = st.padding
-    _, _, mw, mh = rect
-    bounds = _expand_bounds_margin(bounds, _get_ui_scale(), mh, padding)
+    _, _, _, mh = st.rect
+    bounds = _expand_bounds_margin(bounds, _get_ui_scale(), mh, st.padding)
     st.tree_bounds = bounds
 
     addon = bpy.context.preferences.addons.get(__package__)
@@ -582,8 +595,7 @@ def _compute_frame_all_targets(
     else:
         c_min_x, c_min_y, c_max_x, c_max_y = bounds
 
-    inner_w = max(mw - 2 * padding, 1.0)
-    inner_h = max(mh - 2 * padding, 1.0)
+    _, _, inner_w, inner_h = _get_map_content_rect(st)
 
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
@@ -635,11 +647,7 @@ def _compute_frame_to_bounds_targets(
     """
     st = _state(area_ptr)
 
-    rect = st.rect
-    padding = st.padding
-    _, _, mw, mh = rect
-    inner_w = max(mw - 2 * padding, 1.0)
-    inner_h = max(mh - 2 * padding, 1.0)
+    _, _, inner_w, inner_h = _get_map_content_rect(st)
 
     bounds = st.tree_bounds
     bbox_w = max(bounds[2] - bounds[0], 1.0)
@@ -686,10 +694,7 @@ def _compute_center_pan(tree_x: float, tree_y: float, area_ptr: int | None = Non
     """Compute minimap pan values that center the given tree point, keeping zoom."""
     st = _state(area_ptr)
     bounds = st.tree_bounds
-    padding = st.padding
-    _, _, mw, mh = st.rect
-    inner_w = max(mw - 2 * padding, 1.0)
-    inner_h = max(mh - 2 * padding, 1.0)
+    _, _, inner_w, inner_h = _get_map_content_rect(st)
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
     base_scale = min(inner_w / bbox_w, inner_h / bbox_h)

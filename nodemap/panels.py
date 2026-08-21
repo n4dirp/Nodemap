@@ -70,7 +70,7 @@ class NODEMAP_PT_popup(Panel):
             grid.prop(settings, "show_socket_indicators", text="Sockets")
             grid.prop(settings, "show_wires", text="Wires")
             grid.prop(settings, "show_group_markers", text="Group Marks")
-            grid.prop(settings, "show_type_stats", text="Type Stats")
+            grid.prop(settings, "show_type_stats", text="Type List")
 
             col = body.column()
             col.label(text="Labels")
@@ -90,6 +90,7 @@ class NODEMAP_PT_popup(Panel):
                 row.prop(settings, "show_frame_all_btn", text="Frame All")
                 row.prop(settings, "show_frame_view_btn", text="Frame View")
                 row.prop(settings, "show_frame_selected_btn", text="Frame Selected")
+                col.prop(settings, "show_list_toggle_btn", text="List Toggle")
 
         header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
         header.label(text="Theme")

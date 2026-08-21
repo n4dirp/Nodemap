@@ -232,6 +232,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_minimap_cache,
     )
 
+    show_list_toggle_btn: BoolProperty(
+        name="List Toggle Button",
+        description="Show a button in the minimap to toggle the node-type list",
+        default=True,
+        update=_update_minimap_cache,
+    )
+
     show_names: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
@@ -307,8 +314,11 @@ class NODEMAP_PG_settings(PropertyGroup):
     )
 
     show_type_stats: BoolProperty(
-        name="Show Type Stats",
-        description="Display per-type node counts inside the minimap",
+        name="Type List",
+        description=(
+            "Show an interactive node-type list beside the map; "
+            "hovering a row highlights those nodes, clicking selects them"
+        ),
         default=False,
         update=_update_minimap_cache,
     )
@@ -491,6 +501,10 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = layout.column(align=True)
         col.prop(settings, "max_width_pct", text="Max Region X")
         col.prop(settings, "max_height_pct", text="Y")
+
+        layout.separator()
+        layout.label(text="Buttons")
+        layout.prop(settings, "show_list_toggle_btn")
 
         layout.separator()
         layout.label(text="Performance")
