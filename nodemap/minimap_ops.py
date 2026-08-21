@@ -12,6 +12,7 @@ from .helpers import (
     MIN_MAP_WIDTH,
     MinimapState,
     _clamp_pan_to_viewport,
+    _compute_editor_frame_selected_targets,
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
@@ -299,6 +300,11 @@ class NODEMAP_OT_navigate(Operator):
     _frame_anim_start_pan: list[float]
     _frame_anim_target_zoom: float = 1.0
     _frame_anim_target_pan: list[float]
+    _editor_anim_active: bool = False
+    _editor_anim_progress: float = 0.0
+    _editor_anim_start_rect: list[float]
+    _editor_anim_target_rect: list[float]
+    _editor_anim_acc: list[float]
 
     def _is_smooth_pan(self, settings, context, default=True) -> bool:
         if context.preferences.view.use_reduce_motion:
@@ -328,6 +334,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._inertia_active
             or self._drag_active
             or self._frame_anim_active
+            or self._editor_anim_active
         )
 
         if not _is_interacting:
@@ -531,11 +538,12 @@ class NODEMAP_OT_navigate(Operator):
                         label = _list_row_at(self._mx, self._my, st)
                         if label:
                             self._select_type_nodes(context, label)
-                            try:
-                                with self._override_ctx(context):
-                                    bpy.ops.node.view_selected()
-                            except RuntimeError:
-                                pass
+                            if not self._view_selected_animated(context, settings):
+                                try:
+                                    with self._override_ctx(context):
+                                        bpy.ops.node.view_selected()
+                                except RuntimeError:
+                                    pass
                         self._was_in_minimap = False
                         return {"RUNNING_MODAL"}
                     if addon:
@@ -646,7 +654,9 @@ class NODEMAP_OT_navigate(Operator):
                     dx = self._mx - self._drag_start[0]
                     dy = self._my - self._drag_start[1]
                     if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
-                        if not self._dragging and (self._anim_active or self._frame_anim_active):
+                        if not self._dragging and (
+                            self._anim_active or self._frame_anim_active or self._editor_anim_active
+                        ):
                             self._cancel_smooth(context)
                         self._dragging = True
                         if self._was_in_minimap:
@@ -761,6 +771,9 @@ class NODEMAP_OT_navigate(Operator):
                 if self._frame_anim_active:
                     self._apply_frame_animation(context)
                     return {"RUNNING_MODAL"}
+                if self._editor_anim_active:
+                    self._apply_editor_animation(context)
+                    return {"RUNNING_MODAL"}
                 if self._anim_active:
                     self._apply_center_animation(context)
                     return {"RUNNING_MODAL"}
@@ -790,11 +803,13 @@ class NODEMAP_OT_navigate(Operator):
 
             addon = context.preferences.addons.get(__package__)
             if addon and getattr(addon.preferences.settings, "auto_frame_selected", True):
-                try:
-                    with self._override_ctx(context):
-                        bpy.ops.node.view_selected()
-                except RuntimeError:
-                    pass
+                settings = addon.preferences.settings
+                if not self._view_selected_animated(context, settings):
+                    try:
+                        with self._override_ctx(context):
+                            bpy.ops.node.view_selected()
+                    except RuntimeError:
+                        pass
 
         st.hovered_node = None
         redraw_ui("NODE_EDITOR")
@@ -1115,6 +1130,8 @@ class NODEMAP_OT_navigate(Operator):
             self._frame_anim_active = False
             self._frame_anim_progress = 0.0
             self._destroy_timer(context)
+        if self._editor_anim_active:
+            self._cancel_editor_animation(context)
 
     def _apply_inertia(self, context: Context) -> None:
         decay = 0.92
@@ -1276,6 +1293,127 @@ class NODEMAP_OT_navigate(Operator):
         _clamp_pan_to_viewport(self._space, self._region, st)
         redraw_ui("NODE_EDITOR")
 
+    def _view_selected_animated(self, context: Context, settings) -> bool:
+        """Ease the editor viewport onto the selected nodes; True when started.
+
+        Falls back to False so callers can run the instant ``node.view_selected``
+        operator when smooth pan is disabled or nothing is selected.
+        """
+        if not self._is_smooth_pan(settings, context):
+            return False
+        targets = _compute_editor_frame_selected_targets(self._space, self._region)
+        if targets is None:
+            return False
+        self._start_editor_animation(context, list(targets))
+        return True
+
+    def _start_editor_animation(self, context: Context, target_rect: list[float]) -> None:
+        """Begin animating the editor viewport toward the target tree-space rect."""
+        visible = _get_visible_rect(self._space, self._region)
+        if not visible:
+            return
+        self._editor_anim_progress = 0.0
+        self._editor_anim_start_rect = [visible[0], visible[1], visible[2], visible[3]]
+        self._editor_anim_target_rect = target_rect
+        self._editor_anim_acc = [0.0, 0.0]
+        self._editor_anim_active = True
+        self._create_timer(context)
+
+    def _apply_editor_animation(self, context: Context) -> None:
+        if not self._editor_anim_active:
+            return
+        if not self._space or not self._region or not self._st:
+            self._editor_anim_active = False
+            self._destroy_timer(context)
+            return
+        addon = context.preferences.addons.get(__package__)
+        settings = addon.preferences.settings if addon else None
+        speed = getattr(settings, "pan_speed", "MEDIUM")
+        frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
+        progress = self._editor_anim_progress + 1 / frames
+        if progress >= 1.0:
+            self._correct_editor_view(context, self._editor_anim_target_rect)
+            self._editor_anim_active = False
+            self._editor_anim_progress = 0.0
+            self._destroy_timer(context)
+            redraw_ui("NODE_EDITOR")
+            return
+        self._editor_anim_progress = progress
+        eased = 1.0 - (1.0 - progress) ** 3
+        desired = [
+            start + (target - start) * eased
+            for start, target in zip(self._editor_anim_start_rect, self._editor_anim_target_rect)
+        ]
+        self._correct_editor_view(context, desired)
+        redraw_ui("NODE_EDITOR")
+
+    def _correct_editor_view(self, context: Context, desired: list[float]) -> None:
+        """Nudge the editor view2d from its live state toward the desired rect."""
+        space = self._space
+        region = self._region
+        if not space or not region:
+            return
+
+        # Node editors enforce uniform zoom, so scale by whichever axis needs
+        # the most room. Blender's zoom factors are non-linear (a negative
+        # factor yields size / (1 + 2 * fac), singular at fac == -0.5), so
+        # invert the formulas and split large steps into safe chunks.
+        for _ in range(6):
+            current = _get_visible_rect(space, region)
+            if not current:
+                return
+            cur_w = max(current[2] - current[0], 1e-6)
+            cur_h = max(current[3] - current[1], 1e-6)
+            des_w = max(desired[2] - desired[0], 1e-6)
+            des_h = max(desired[3] - desired[1], 1e-6)
+            ratio = min(max(des_w / cur_w, des_h / cur_h), 1e6)
+            if abs(ratio - 1.0) <= 0.005:
+                break
+            try:
+                with self._override_ctx(context):
+                    if ratio < 1.0:
+                        fac = min((1.0 - ratio) / 2.0, 0.4)
+                        bpy.ops.view2d.zoom_in(zoomfacx=fac, zoomfacy=fac)
+                    else:
+                        fac = max((1.0 / ratio - 1.0) / 2.0, -0.4)
+                        bpy.ops.view2d.zoom_out(zoomfacx=fac, zoomfacy=fac)
+            except RuntimeError:
+                break
+
+        current = _get_visible_rect(space, region)
+        if not current:
+            return
+
+        cur_w = max(current[2] - current[0], 1e-6)
+        cur_h = max(current[3] - current[1], 1e-6)
+        view_zoom_x = region.width / cur_w
+        view_zoom_y = region.height / cur_h
+        delta_x = ((desired[0] + desired[2]) / 2 - (current[0] + current[2]) / 2) * view_zoom_x
+        delta_y = ((desired[1] + desired[3]) / 2 - (current[1] + current[3]) / 2) * view_zoom_y
+
+        self._editor_anim_acc[0] += delta_x
+        self._editor_anim_acc[1] += delta_y
+        pan_x = int(self._editor_anim_acc[0])
+        pan_y = int(self._editor_anim_acc[1])
+        self._editor_anim_acc[0] -= pan_x
+        self._editor_anim_acc[1] -= pan_y
+        if pan_x != 0 or pan_y != 0:
+            try:
+                with self._override_ctx(context):
+                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+            except RuntimeError:
+                pass
+
+    def _cancel_editor_animation(self, context: Context) -> None:
+        """Snap the editor viewport to the animation target and stop stepping."""
+        if not self._editor_anim_active:
+            return
+        self._editor_anim_active = False
+        self._editor_anim_progress = 0.0
+        if self._space and self._region:
+            self._correct_editor_view(context, self._editor_anim_target_rect)
+        self._destroy_timer(context)
+
     def _update_cursor(self, context: Context, event: Event) -> None:
         st = self._st
         if not st or not st.rect:
@@ -1387,6 +1525,11 @@ class NODEMAP_OT_navigate(Operator):
         self._frame_anim_target_zoom = 1.0
         self._frame_anim_target_pan = [0.0, 0.0]
         self._frame_anim_progress = 0.0
+        self._editor_anim_active = False
+        self._editor_anim_progress = 0.0
+        self._editor_anim_start_rect = [0.0, 0.0, 0.0, 0.0]
+        self._editor_anim_target_rect = [0.0, 0.0, 0.0, 0.0]
+        self._editor_anim_acc = [0.0, 0.0]
         _minimap_window_operators[self._window_ptr] = self
         context.window_manager.modal_handler_add(self)
         ops_keys = list(_minimap_window_operators.keys())

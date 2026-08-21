@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +19,7 @@ MAP_PADDING: float = 12.0
 MIN_MAP_WIDTH: int = 120
 MIN_MAP_HEIGHT: int = 80
 MAX_FRAME_ZOOM: float = 20.0
+_EDITOR_FIT_MARGIN: float = 0.10
 _HANDLE_THICKNESS: int = 6
 
 
@@ -795,6 +797,24 @@ def _compute_center_pan(tree_x: float, tree_y: float, area_ptr: int | None = Non
     return -(tree_x - tree_cx) * scale, -(tree_y - tree_cy) * scale
 
 
+def _get_selected_bounds(nodes: Iterable[bpy.types.Node]) -> tuple[float, float, float, float] | None:
+    """Return the ``(min_x, min_y, max_x, max_y)`` bounds of the selected nodes, or None."""
+    min_x = min_y = float("inf")
+    max_x = max_y = float("-inf")
+    for node in nodes:
+        if not node.select:
+            continue
+        w, h = _get_node_dims(node)
+        x, y = node.location_absolute.x, node.location_absolute.y
+        min_x = min(min_x, x)
+        max_x = max(max_x, x + w)
+        min_y = min(min_y, y - h)
+        max_y = max(max_y, y)
+    if min_x == float("inf"):
+        return None
+    return min_x, min_y, max_x, max_y
+
+
 def _compute_frame_selected_targets(
     space: bpy.types.SpaceNodeEditor | None = None,
     region: bpy.types.Region | None = None,
@@ -819,15 +839,10 @@ def _compute_frame_selected_targets(
     if not selected:
         return None
 
-    min_x = min_y = float("inf")
-    max_x = max_y = float("-inf")
-    for node in selected:
-        w, h = _get_node_dims(node)
-        x, y = node.location_absolute.x, node.location_absolute.y
-        min_x = min(min_x, x)
-        max_x = max(max_x, x + w)
-        min_y = min(min_y, y - h)
-        max_y = max(max_y, y)
+    bounds = _get_selected_bounds(selected)
+    if bounds is None:
+        return None
+    min_x, min_y, max_x, max_y = bounds
 
     rect = st.rect
     _, _, mw, mh = rect
@@ -841,6 +856,59 @@ def _compute_frame_selected_targets(
 
     pan_x, pan_y = _compute_center_pan((min_x + max_x) / 2, (min_y + max_y) / 2, area_ptr)
     return None, pan_x, pan_y
+
+
+def _compute_editor_frame_selected_targets(
+    space: bpy.types.SpaceNodeEditor | None = None,
+    region: bpy.types.Region | None = None,
+) -> tuple[float, float, float, float] | None:
+    """Compute the editor viewport rect that frames the selected nodes.
+
+    Fits multiple selections or a single frame node with a margin; centers a
+    single regular node while keeping the current viewport size. Returns
+    tree-space ``(left, bottom, right, top)`` or ``None`` when unavailable.
+    """
+    if space is None:
+        space = bpy.context.space_data
+    if region is None:
+        region = bpy.context.region
+    if not space or space.type != "NODE_EDITOR" or not region:
+        return None
+    node_tree = space.edit_tree
+    if not node_tree:
+        return None
+
+    visible = _get_visible_rect(space, region)
+    if not visible:
+        return None
+
+    selected = [n for n in node_tree.nodes if n.select]
+    if not selected:
+        return None
+    bounds = _get_selected_bounds(selected)
+    if bounds is None:
+        return None
+    min_x, min_y, max_x, max_y = bounds
+    sel_cx = (min_x + max_x) / 2
+    sel_cy = (min_y + max_y) / 2
+    vw = visible[2] - visible[0]
+    vh = visible[3] - visible[1]
+
+    if len(selected) > 1 or selected[0].type == "FRAME":
+        bw = max(max_x - min_x, 1.0)
+        bh = max(max_y - min_y, 1.0)
+        mx = bw * _EDITOR_FIT_MARGIN
+        my = bh * _EDITOR_FIT_MARGIN
+        left, bottom, right, top = min_x - mx, min_y - my, max_x + mx, max_y + my
+
+        # Limit zoom-in so tiny selections do not magnify excessively.
+        hw = max((right - left) / 2, vw / MAX_FRAME_ZOOM / 2)
+        hh = max((top - bottom) / 2, vh / MAX_FRAME_ZOOM / 2)
+        cx = (left + right) / 2
+        cy = (bottom + top) / 2
+        return cx - hw, cy - hh, cx + hw, cy + hh
+
+    return sel_cx - vw / 2, sel_cy - vh / 2, sel_cx + vw / 2, sel_cy + vh / 2
 
 
 def frame_selected(
