@@ -369,6 +369,10 @@ def _draw_view_fill(
     vh = round(max((visible[3] - visible[1]) * scale, 1.0))
 
     v_left = max(vx, mx)
+    # st_fill = _state()
+    # if st_fill.list_width > 0:
+    #     # Keep the fill out of the type-list zone.
+    #     v_left = max(v_left, _get_map_content_rect(st_fill)[0])
     v_bottom = max(vy, my)
     v_right = min(vx + vw, mx + mw)
     v_top = min(vy + vh, my + mh)
@@ -501,39 +505,6 @@ def _draw_node_count(
 
     _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
 
-
-_NODE_TYPE_LABELS = {
-    "TEX_IMAGE": "Texture Image",
-    "MOVIECLIP": "Clip",
-    "OBJECT_INFO": "Object",
-    "COLLECTION_INFO": "Collection",
-    "GROUP": "Group",
-    "GROUP_INPUT": "Group In",
-    "GROUP_OUTPUT": "Group Out",
-    "MATH": "Math",
-    "MIX": "Mix",
-    "MIX_SHADER": "Mix",
-    "BSDF_PRINCIPLED": "Shader",
-    "BSDF_DIFFUSE": "Diffuse",
-    "BSDF_GLASS": "Glass",
-    "VALTORGB": "Ramp",
-    "NORMAL_MAP": "Normal",
-    "TEX_COORD": "Tex Coord",
-    "GEOMETRY": "Geo",
-    "NEW_GEOMETRY": "Geo",
-    "JOIN_GEOMETRY": "Join",
-    "TRANSFORM_GEOMETRY": "Transform",
-    "SET_POSITION": "Set Pos",
-    "VECTOR_MATH": "Vec Math",
-    "OUTPUT_MATERIAL": "Mat Out",
-    "OUTPUT_WORLD": "World Out",
-    "COMPOSITE": "Composite",
-    "VIEWER": "Viewer",
-    "R_LAYERS": "Render Layers",
-    "BLUR": "Blur",
-}
-
-
 _TYPE_LIST_MIN_WIDTH = 70.0
 _TYPE_LIST_MAX_WIDTH_PCT = 0.35
 _TYPE_LIST_HOVER_ALPHA = 0.12
@@ -636,7 +607,7 @@ def _draw_type_list(
     content_x = zone_x + pad_x
     count_right = zone_x + zone_w - pad_x
     label_x = content_x + (swatch + swatch_gap if show_swatch else 0.0)
-    label_max_w = count_right - widest_count - count_gap - label_x
+    label_max_w = max(0.0, count_right - widest_count - count_gap - label_x)
     text_y_off = (row_h - line_h) / 2
     swatch_y_off = (row_h - swatch) / 2
 
@@ -676,9 +647,18 @@ def _draw_type_list(
                 c = type_colors.get(label) or colors["node"]
                 _draw_pill(content_x, row_bottom + swatch_y_off, swatch, swatch, _alpha_mul(c, master_alpha))
             text_y = row_bottom + text_y_off
-            # Clip overlong labels at the column edge instead of truncating.
+            # Clip overlong labels at the column edge only; BLF discards
+            # glyphs past the clip box instead of clipping them, so vertical
+            # bounds get slack beyond any drawable row and the scissor does
+            # the per-pixel row clipping.
             blf.enable(font_id, blf.CLIPPING)
-            blf.clipping(font_id, int(label_x), int(view_b), int(label_x + label_max_w), int(view_t))
+            blf.clipping(
+                font_id,
+                int(label_x),
+                int(zone_y - row_h),
+                int(label_x + label_max_w),
+                int(zone_y + zone_h + row_h),
+            )
             _draw_text_with_shadow(font_id, label, label_x, text_y, text_col, font_size)
             blf.disable(font_id, blf.CLIPPING)
             count_text = str(count)
@@ -908,7 +888,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     node_color = colors["node"]
 
                 if show_type_stats:
-                    label = _NODE_TYPE_LABELS.get(node.type) or (node.bl_label or node.type.replace("_", " ")).title()
+                    label = node.bl_label or node.type.replace("_", " ").title()
                     if label not in type_counts:
                         type_colors[label] = node_color
                     info["type_label"] = label
