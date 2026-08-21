@@ -40,6 +40,9 @@ A minimap overlay for the Blender Node Editor that provides an interactive overv
 | Minimap                    | `Ctrl + Scroll`      | Pan horizontally             |
 | Minimap                    | `Shift + Scroll`     | Pan vertically               |
 | Minimap                    | `Drag edge / corner` | Resize minimap               |
+| Minimap · Type list        | `Left Click`         | Select all nodes of a type   |
+| Minimap · Type list        | `Right Click`        | Select nodes and frame them  |
+
 
 
 ## Requirements
