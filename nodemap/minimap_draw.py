@@ -1680,6 +1680,7 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
 
     if st.hovered_frame_btn == "ALL":
         _draw_pill(x + 1, y + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
+        ico_color = _alpha_mul(colors["text"], master_alpha)
 
     # Corner brackets icon (four brackets pointing outward)
     i = 5 * ui_scale
@@ -1722,7 +1723,7 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
     y = inner_t - btn_size - margin  # frame-all y
     above = 1 if getattr(settings, "show_frame_all_btn", True) else 0
     fy = y - above * (gap + btn_size)
-    ico_color = _alpha_mul(colors["text"], master_alpha * 0.8)
+    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
     border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
 
     # Topmost visible button owns the shared capsule background
@@ -1737,6 +1738,7 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
         _draw_pill(
             x + 1, fy + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha)
         )
+        ico_color = _alpha_mul(colors["text"], master_alpha)
 
     # Viewport rectangle icon
     inset = 5 * ui_scale
@@ -1776,7 +1778,7 @@ def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, maste
         1 if getattr(settings, "show_frame_view_btn", True) else 0
     )
     fy = y - above * (gap + btn_size)
-    ico_color = _alpha_mul(colors["text"], master_alpha * 0.8)
+    ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
     border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
 
     # Topmost visible button owns the shared capsule background
@@ -1788,6 +1790,7 @@ def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, maste
         _draw_pill(
             x + 1, fy + 1, btn_size - 2, btn_size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha)
         )
+        ico_color = _alpha_mul(colors["text"], master_alpha)
 
     # Frame-all style rails with corner arms around a center box
     i = 5 * ui_scale

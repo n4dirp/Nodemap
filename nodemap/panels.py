@@ -11,7 +11,7 @@ class NODEMAP_PT_popup(Panel):
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
-    bl_ui_units_x = 14
+    bl_ui_units_x = 17
 
     @classmethod
     def poll(cls, context):
@@ -27,7 +27,8 @@ class NODEMAP_PT_popup(Panel):
         row = layout.row()
         row.label(text="Nodemap")
 
-        sub = row.row()
+        sub = row.row(align=True)
+        sub.alignment = "RIGHT"
         NODEMAP_PT_presets.draw_panel_header(sub)
 
         row = layout.row(align=True)
@@ -36,45 +37,57 @@ class NODEMAP_PT_popup(Panel):
         if not settings.follow_view:
             row.operator("nodemap.frame_selected", text="Frame Selected")
 
-        header, sub_body = layout.panel("NODEMAP_PT_layout", default_closed=False)
+        header, body = layout.panel("NODEMAP_PT_layout", default_closed=False)
         header.label(text="Layout")
-        if sub_body:
-            sub_body.prop(settings, "position", text="Position")
+        if body:
+            row = body.row()
+            row.label(text="Placement:")
 
-            sub_body.separator()
-            sub_body.label(text="Show")
-            split = sub_body.split()
+            grid = row.grid_flow(
+                row_major=True,
+                columns=2,
+                even_columns=True,
+                even_rows=True,
+                align=True,
+            )
 
-            col = split.column()
-            col.prop(settings, "show_node_count", text="Count")
-            col.prop(settings, "show_frames", text="Frames")
-            col.prop(settings, "show_node_borders", text="Borders")
+            for item in settings.bl_rna.properties["position"].enum_items:
+                grid.prop_enum(settings, "position", item.identifier)
 
-            col = split.column()
-            col.prop(settings, "show_socket_indicators", text="Sockets")
-            col.prop(settings, "show_wires", text="Wires")
+            col = body.column()
+            col.label(text="Display")
+            grid = body.grid_flow(
+                row_major=True,
+                columns=3,
+                even_columns=True,
+                even_rows=True,
+                align=True,
+            )
 
-            col = split.column()
+            grid.prop(settings, "show_node_borders", text="Borders")
+            grid.prop(settings, "show_node_count", text="Count")
+            grid.prop(settings, "show_frames", text="Frames")
+            grid.prop(settings, "show_socket_indicators", text="Sockets")
+            grid.prop(settings, "show_wires", text="Wires")
+
+            col = body.column()
+            col.label(text="Labels")
+
             row = col.row()
-            row.prop(settings, "show_frame_all_btn", text="Frame All")
-            row.active = settings.interactive
-
-            row = col.row()
-            row.prop(settings, "show_frame_view_btn", text="Frame View")
-            row.active = settings.interactive
-
-            sub_body.separator()
-            col = sub_body.column()
-            split = col.split()
-            row = split.row()
             row.prop(settings, "show_names", text="Node Labels")
-            sub = split.row()
+            sub = row.row()
             sub.active = settings.show_names
             sub.prop(settings, "node_label_mode", expand=True)
+            if settings.show_frames:
+                col.prop(settings, "show_frame_labels", text="Frame Labels")
 
-            sub = col.row(align=True)
-            sub.active = settings.show_frames
-            sub.prop(settings, "show_frame_labels", text="Frame Labels")
+            if settings.interactive:
+                col = body.column()
+                col.label(text="Buttons")
+                row = col.row()
+                row.prop(settings, "show_frame_all_btn", text="Frame All")
+                row.prop(settings, "show_frame_view_btn", text="Frame View")
+                row.prop(settings, "show_frame_selected_btn", text="Frame Selected")
 
         header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
         header.label(text="Theme")
@@ -82,7 +95,6 @@ class NODEMAP_PT_popup(Panel):
             body.prop(settings, "opacity", text="Panel Opacity", slider=True)
 
             col = body.column()
-
             row = col.row(align=True)
             row.prop(settings, "viewport_fill_rect", text="View Highlight")
             sub = row.row(align=True)
