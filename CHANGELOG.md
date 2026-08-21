@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.0] - 2026-08-20
+
+### Added
+- Presets menu in the Nodemap popup
+- Smooth animation for frame actions when Pan Animation is enabled
+- Frame Selected button to the minimap
+
+### Changed
+- Frame Selected now adjusts the zoom to fit multiple nodes or a frame
+
 ## [1.5.0] - 2026-08-14
 
 ### Added
