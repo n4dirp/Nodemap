@@ -3,9 +3,12 @@
 ## [1.6.0] - 2026-08-20
 
 ### Added
-- Presets menu in the Nodemap popup
-- Smooth animation for frame actions when Pan Animation is enabled
-- Frame Selected button to the minimap
+- New node list grouped by type with per-type counts and labels
+- New Presets menu in the Nodemap popup
+- Added group markers beneath group nodes
+- Added Smooth animation for frame actions
+- Added Frame Selected button in the minimap
+- Smooth editor animation when framing selected nodes
 
 ### Changed
 - Frame Selected now adjusts the zoom to fit multiple nodes or a frame
