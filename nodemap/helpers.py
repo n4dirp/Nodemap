@@ -227,6 +227,7 @@ class MinimapState:
     cached_socket_batch: Any = None
     cached_socket_ph: float = 2.0
     cached_socket_shadow: list | None = None
+    cached_group_markers: dict | None = None
     _profiler: Any = field(default=None, repr=False)
     _profiling_active: bool = field(default=False, repr=False)
     _profiling_frame_count: int = field(default=0, repr=False)

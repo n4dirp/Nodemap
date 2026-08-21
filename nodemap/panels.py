@@ -41,7 +41,7 @@ class NODEMAP_PT_popup(Panel):
         header.label(text="Layout")
         if body:
             row = body.row()
-            row.label(text="Placement:")
+            row.label(text="Position")
 
             grid = row.grid_flow(
                 row_major=True,
@@ -69,6 +69,8 @@ class NODEMAP_PT_popup(Panel):
             grid.prop(settings, "show_frames", text="Frames")
             grid.prop(settings, "show_socket_indicators", text="Sockets")
             grid.prop(settings, "show_wires", text="Wires")
+            grid.prop(settings, "show_group_markers", text="Group Marks")
+            grid.prop(settings, "show_type_stats", text="Type Stats")
 
             col = body.column()
             col.label(text="Labels")
@@ -92,9 +94,9 @@ class NODEMAP_PT_popup(Panel):
         header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
         header.label(text="Theme")
         if body:
-            body.prop(settings, "opacity", text="Panel Opacity", slider=True)
-
             col = body.column()
+            col.prop(settings, "opacity", text="Panel Opacity", slider=True)
+
             row = col.row(align=True)
             row.prop(settings, "viewport_fill_rect", text="View Highlight")
             sub = row.row(align=True)
@@ -113,7 +115,7 @@ class NODEMAP_PT_popup(Panel):
             sub.active = settings.custom_bg_color
             sub.prop(settings, "bg_color", text="")
 
-            row = body.row()
+            row = col.row()
             row.prop(settings, "colored_nodes", text="Node Colors")
             sub = row.row()
             sub.active = settings.show_wires | settings.show_socket_indicators

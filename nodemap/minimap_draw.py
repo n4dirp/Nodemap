@@ -20,6 +20,7 @@ except ImportError:
 from .gpu_draw import (
     _batch_draw_pills,
     _draw_filled_rounded_rect,
+    _draw_filled_rounded_rect_clipped,
     _draw_filled_rounded_rect_with_hole,
     _draw_pill,
     _draw_pill_border,
@@ -59,6 +60,8 @@ from .preferences import TRACE_LEVEL
 logger = logging.getLogger(__package__)
 
 FONT_SIZE = 11
+STATS_FONT_ID = 1
+STATS_FONT_SIZE = 8
 FRAME_ALL_BTN_SIZE = 20
 FRAME_ALL_BTN_MARGIN = 1
 FRAME_BTN_GAP = 2
@@ -347,6 +350,7 @@ def _draw_view_fill(
     tree_cx: float,
     tree_cy: float,
     colors: dict,
+    panel_r: float,
     master_alpha: float,
     ui_scale: float,
 ) -> None:
@@ -374,7 +378,7 @@ def _draw_view_fill(
     fill_color = getattr(settings, "viewport_fill_color", (0.28, 0.45, 0.7, 1.0))
     fill = _alpha_mul(fill_color, master_alpha)
     node_r = colors.get("node_roundness", 2.0) * ui_scale
-    _draw_filled_rounded_rect(v_left, v_bottom, hole_w, hole_h, node_r, fill)
+    _draw_filled_rounded_rect_clipped(v_left, v_bottom, hole_w, hole_h, node_r, fill, mx, my, mw, mh, panel_r * 1.2)
 
 
 def _draw_viewport_overlay(
@@ -497,6 +501,101 @@ def _draw_node_count(
     _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
 
 
+_NODE_TYPE_LABELS = {
+    "TEX_IMAGE": "Img",
+    "MOVIECLIP": "Clip",
+    "OBJECT_INFO": "Obj",
+    "COLLECTION_INFO": "Coll",
+    "GROUP": "Grp",
+    "GROUP_INPUT": "Grp In",
+    "GROUP_OUTPUT": "Grp Out",
+    "MATH": "Math",
+    "MIX": "Mix",
+    "MIX_SHADER": "Mix",
+    "BSDF_PRINCIPLED": "Shader",
+    "BSDF_DIFFUSE": "Diffuse",
+    "BSDF_GLASS": "Glass",
+    "VALTORGB": "Ramp",
+    "NORMAL_MAP": "Normal",
+    "TEX_COORD": "Tex Coord",
+    "GEOMETRY": "Geo",
+    "NEW_GEOMETRY": "Geo",
+    "JOIN_GEOMETRY": "Join",
+    "TRANSFORM_GEOMETRY": "Transform",
+    "SET_POSITION": "Set Pos",
+    "VECTOR_MATH": "Vec Math",
+    "OUTPUT_MATERIAL": "Mat Out",
+    "OUTPUT_WORLD": "World Out",
+    "COMPOSITE": "Composite",
+    "VIEWER": "Viewer",
+    "R_LAYERS": "Render Layers",
+    "BLUR": "Blur",
+}
+
+
+def _draw_type_stats(
+    settings,
+    st: MinimapState,
+    mx: float,
+    my: float,
+    mh: float,
+    padding: float,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+) -> None:
+    """Draw per-type node counts as left-aligned columns inside the minimap."""
+    if not getattr(settings, "show_type_stats", False):
+        return
+    tree_data = st.tree_data
+    type_stats = tree_data.get("type_stats") if tree_data else None
+    if not type_stats:
+        return
+
+    font_id = STATS_FONT_ID
+    font_size = int(STATS_FONT_SIZE * ui_scale)
+    blf.size(font_id, font_size)
+    line_h = blf.dimensions(font_id, "Ay")[1] + 2 * ui_scale
+
+    entries = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
+    rows = [(f"{count} {label}", label) for label, count in entries]
+
+    default_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
+    use_type_colors = getattr(settings, "colored_nodes", True)
+    type_colors = (tree_data.get("type_colors") or {}) if tree_data else {}
+    tx = mx + 6 * ui_scale
+    y_start = my + mh - padding - font_size
+    y_min = my + padding
+    max_rows = max(1, int((y_start - y_min) / line_h) + 1)
+
+    # Overflow flows into a second column to the right of the first
+    capacity = max_rows * 2
+    if len(rows) > capacity:
+        rows = rows[: capacity - 1]
+        rows.append(("...", ""))
+    columns = [rows[:max_rows]]
+    if len(rows) > max_rows:
+        columns.append(rows[max_rows:])
+
+    col_x = tx
+    for col_index, col_rows in enumerate(columns):
+        y = y_start
+        for info_text, label in col_rows:
+            if y < y_min:
+                break
+            text_color = default_color
+            if use_type_colors:
+                c = type_colors.get(label)
+                if c:
+                    text_color = _alpha_mul(c, 0.85 * master_alpha)
+            _draw_text_with_shadow(font_id, info_text, col_x + 1, y + 1, text_color, font_size)
+            y -= line_h
+        if col_index == 0 and len(columns) > 1:
+            blf.size(font_id, font_size)
+            widest = max(blf.dimensions(font_id, text)[0] for text, _ in col_rows)
+            col_x += widest + 14 * ui_scale
+
+
 def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
     """Helper to populate triangular indices sequentially for quad batches."""
     indices = []
@@ -554,6 +653,8 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     show_frame_labels = getattr(settings, "show_frame_labels", True)
     colored_nodes = getattr(settings, "colored_nodes", True)
     node_label_mode = getattr(settings, "node_label_mode", "COMPACT")
+    show_group_markers = getattr(settings, "show_group_markers", True)
+    show_type_stats = getattr(settings, "show_type_stats", False)
 
     # Single pre-pass: classify nodes + cache dims/location + compute bounds
     frames = []
@@ -561,6 +662,9 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     selected_nodes = []
     active_node_item = None
     node_data: dict[int, dict] = {}
+    group_markers: dict[tuple, list[tuple[float, float, float]]] = {}
+    type_counts: dict[str, int] = {}
+    type_colors: dict[str, tuple[float, float, float, float]] = {}
 
     bounds_min_x = float("inf")
     bounds_min_y = float("inf")
@@ -681,6 +785,12 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 else:
                     node_color = colors["node"]
 
+                if show_type_stats:
+                    label = _NODE_TYPE_LABELS.get(node.type) or (node.bl_label or node.type.replace("_", " ")).title()
+                    if label not in type_counts:
+                        type_colors[label] = node_color
+                    type_counts[label] = type_counts.get(label, 0) + 1
+
                 if node.mute:
                     bg_color = colors["bg"]
                     info["fill_color"] = _srgb_to_linear(
@@ -704,6 +814,11 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     border_alpha = 0.35 * master_alpha
                 info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, border_alpha))
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT * 2
+
+                if show_group_markers and node.type == "GROUP":
+                    marker_col = node_color if colored_nodes and not node.select else border_col
+                    marker_color = _alpha_mul(marker_col, border_alpha)
+                    group_markers.setdefault(marker_color, []).append((loc_x + w / 2, ty, w))
 
             # Labels (tree-space positions computed in build)
             text_alpha = 0.35 if node.mute else 1.0
@@ -822,6 +937,9 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
         tree_data["node_infos"] = node_infos
         tree_data["socket_items"] = socket_items
         tree_data["socket_ph_base"] = 8.0
+        tree_data["group_markers"] = group_markers
+        tree_data["type_stats"] = type_counts
+        tree_data["type_colors"] = type_colors
 
     # ------------------------------------------------------------------
     # REROUTE wire endpoints (not in sorted_items, handled separately)
@@ -1243,6 +1361,24 @@ def _build_minimap_batches(
     st.cached_wires = wires_by_color
     st.cached_wire_thickness = thickness
 
+    # Group node underline markers
+    markers_by_color: dict[tuple, list[tuple[float, float, float, float]]] = {}
+    group_markers = tree_data.get("group_markers")
+    if group_markers:
+        marker_offset = 3 * ui_scale
+        for marker_color, items in group_markers.items():
+            group = []
+            for x_mid, y_bot, length in items:
+                ln = length * scale
+                if ln < min_dim:
+                    continue
+                sx = cx + (x_mid - tree_cx) * scale
+                sy = cy + (y_bot - tree_cy) * scale - marker_offset
+                group.append((sx, sy, ln, 0.0))
+            if group:
+                markers_by_color[marker_color] = group
+    st.cached_group_markers = markers_by_color
+
 
 def draw_minimap() -> None:
     """Main entry point — orchestrate minimap drawing in the Node Editor."""
@@ -1388,6 +1524,7 @@ def draw_minimap() -> None:
             tree_cx,
             tree_cy,
             colors,
+            panel_r,
             master_alpha,
             ui_scale,
         )
@@ -1444,6 +1581,14 @@ def draw_minimap() -> None:
                 "ModelViewProjectionMatrix", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
             )
             borders_batch.draw(border_shader)
+
+    # Layer 4b: Group node underline markers
+    markers_by_color = st.cached_group_markers or {}
+    if getattr(settings, "show_group_markers", True) and markers_by_color:
+        with _Timer("draw_group_markers"):
+            marker_thick = max(1.0, 1.5 * ui_scale)
+            for marker_color, group in markers_by_color.items():
+                _batch_draw_pills(group, marker_thick, marker_color)
 
     # Layer 5: Socket indicator pills (single batch with per-vertex color)
     socket_batch = st.cached_socket_batch
@@ -1529,6 +1674,10 @@ def draw_minimap() -> None:
         content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
         font_id = 0
         _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
+
+    # Type stats column
+    with _Timer("draw_type_stats"):
+        _draw_type_stats(settings, st, mx, my, mh, padding, colors, master_alpha, ui_scale)
 
     # Restore GPU state
     _teardown_scissor(scissor_state)
@@ -1639,7 +1788,7 @@ def _draw_minimap_scrollbars(
         _draw_pill(thumb_x2, thumb_y2, bar_thick, thumb_h, scroll_color)
 
 
-BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.6)
+BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.5)
 BTN_HOVER_ALPHA = 0.015
 
 

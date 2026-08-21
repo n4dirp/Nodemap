@@ -14,6 +14,7 @@ GPUShaderCreateInfo = gpu.types.GPUShaderCreateInfo
 _FILL_SDF_SHADER: gpu.types.GPUShader | None = None
 _FILL_SDF_VARYING_SHADER: gpu.types.GPUShader | None = None
 _FILL_SDF_HOLE_SHADER: gpu.types.GPUShader | None = None
+_FILL_SDF_CLIP_SHADER: gpu.types.GPUShader | None = None
 _BORDER_SDF_SHADER: gpu.types.GPUShader | None = None
 _PILL_SHADER: gpu.types.GPUShader | None = None
 _PILL_BORDER_SHADER: gpu.types.GPUShader | None = None
@@ -66,6 +67,20 @@ void main() {
     float outerDist = sdRoundRect(vUv, outerData.xy, outerData.z);
     float innerDist = sdRoundRect(vUv - innerOffset, innerHalfSize, outerData.w);
     float dist = max(outerDist, -innerDist);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_FILL_FRAG_CLIP_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float fillDist = sdRoundRect(vUv, halfSize, radius);
+    float clipDist = sdRoundRect(vUv - clipOffset, clipHalfSize, clipRadius);
+    float dist = max(fillDist, clipDist);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
 }
@@ -259,6 +274,30 @@ def _get_sdf_fill_hole_shader() -> gpu.types.GPUShader:
         _FILL_SDF_HOLE_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _FILL_SDF_HOLE_SHADER
+
+
+def _get_sdf_fill_clip_shader() -> gpu.types.GPUShader:
+    global _FILL_SDF_CLIP_SHADER
+    if _FILL_SDF_CLIP_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("fill_clip_iface")
+        vert_out.smooth("VEC2", "vUv")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.push_constant("VEC2", "halfSize")
+        info.push_constant("FLOAT", "radius")
+        info.push_constant("VEC2", "clipOffset")
+        info.push_constant("VEC2", "clipHalfSize")
+        info.push_constant("FLOAT", "clipRadius")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_FILL_VERT_SRC)
+        info.fragment_source(_FILL_FRAG_CLIP_SRC)
+        _FILL_SDF_CLIP_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _FILL_SDF_CLIP_SHADER
 
 
 def _get_sdf_border_shader() -> gpu.types.GPUShader:
@@ -622,6 +661,53 @@ def _draw_filled_rounded_rect_with_hole(
     shader.uniform_float("outerData", (hw, hh, outer_r, inner_r))
     shader.uniform_float("innerOffset", (inner_off_x, inner_off_y))
     shader.uniform_float("innerHalfSize", (inner_hw, inner_hh))
+    batch.draw(shader)
+
+
+def _draw_filled_rounded_rect_clipped(x, y, w, h, r, color, clip_x, clip_y, clip_w, clip_h, clip_r):
+    """Draw a rounded rect fill intersected with a rounded clip region."""
+    if w <= 0 or h <= 0 or clip_w <= 0 or clip_h <= 0:
+        return
+    r = max(0, min(r, w / 2, h / 2))
+    clip_r = max(0, min(clip_r, clip_w / 2, clip_h / 2))
+
+    shader = _get_sdf_fill_clip_shader()
+    hw, hh = w / 2, h / 2
+    cx, cy = x + hw, y + hh
+    clip_hw, clip_hh = clip_w / 2, clip_h / 2
+    off_x = (clip_x + clip_hw) - cx
+    off_y = (clip_y + clip_hh) - cy
+
+    # Pad the quad so the clip arc's AA falloff has room at shared edges
+    pad = 2.0
+    px0, py0 = x - pad, y - pad
+    px1, py1 = x + w + pad, y + h + pad
+
+    vertices = (
+        (px0, py0, 0.0),
+        (px1, py0, 0.0),
+        (px1, py1, 0.0),
+        (px0, py1, 0.0),
+    )
+    uvs = (
+        (px0 - cx, py0 - cy),
+        (px1 - cx, py0 - cy),
+        (px1 - cx, py1 - cy),
+        (px0 - cx, py1 - cy),
+    )
+    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+
+    shader.bind()
+    shader.uniform_float(
+        "ModelViewProjectionMatrix",
+        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+    )
+    shader.uniform_float("color", _srgb_to_linear(color))
+    shader.uniform_float("halfSize", (hw, hh))
+    shader.uniform_float("radius", r)
+    shader.uniform_float("clipOffset", (off_x, off_y))
+    shader.uniform_float("clipHalfSize", (clip_hw, clip_hh))
+    shader.uniform_float("clipRadius", clip_r)
     batch.draw(shader)
 
 

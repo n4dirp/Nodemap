@@ -214,28 +214,28 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_all_btn: BoolProperty(
         name="Frame All Button",
         description="Show a Frame-all button inside the minimap",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
     show_frame_view_btn: BoolProperty(
         name="Frame View Button",
         description="Show a Frame-view button inside the minimap",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
     show_frame_selected_btn: BoolProperty(
         name="Frame Selected Button",
         description="Show a Frame-selected button inside the minimap",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
     show_names: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
@@ -249,7 +249,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_labels: BoolProperty(
         name="Show Frame Labels",
         description="Display labels above frame nodes in the minimap",
-        default=False,
+        default=True,
         update=_update_minimap_cache,
     )
 
@@ -296,6 +296,20 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Node Borders",
         description="Display borders around nodes, highlighting selection and active state",
         default=True,
+        update=_update_minimap_cache,
+    )
+
+    show_group_markers: BoolProperty(
+        name="Show Group Markers",
+        description="Display an underline beneath group nodes in the minimap",
+        default=True,
+        update=_update_minimap_cache,
+    )
+
+    show_type_stats: BoolProperty(
+        name="Show Type Stats",
+        description="Display per-type node counts inside the minimap",
+        default=False,
         update=_update_minimap_cache,
     )
 
