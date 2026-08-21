@@ -72,7 +72,7 @@ class NODEMAP_PT_popup(Panel):
             if settings.show_type_list:
                 body.separator()
                 row = body.row()
-                row.label(text="Type List Sort")
+                row.label(text="Sort List")
                 row.prop(settings, "type_list_sort", text="Sort", expand=True)
 
             body.separator()

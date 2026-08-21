@@ -1810,14 +1810,14 @@ def draw_minimap() -> None:
         win = context.window
         win_ptr = win.as_pointer() if win else 0
         has_modal = win_ptr in _minimap_window_operators if win else False
-        logger.debug(
-            "draw_minimap: area=%d win=%d modal_ops=%s has_modal=%s interactive=%s",
-            context.area.as_pointer() if context.area else 0,
-            win_ptr,
-            list(_minimap_window_operators.keys()),
-            has_modal,
-            getattr(settings, "interactive", True),
-        )
+        # logger.debug(
+        #     "draw_minimap: area=%d win=%d modal_ops=%s has_modal=%s interactive=%s",
+        #     context.area.as_pointer() if context.area else 0,
+        #     win_ptr,
+        #     list(_minimap_window_operators.keys()),
+        #     has_modal,
+        #     getattr(settings, "interactive", True),
+        # )
         if getattr(settings, "interactive", True):
             if win and not has_modal:
                 logger.debug("draw_minimap: invoking nodemap.navigate for window %d", win_ptr)

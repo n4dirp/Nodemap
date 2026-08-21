@@ -108,7 +108,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_width: IntProperty(
         name="Size X",
         description="Minimap width in pixels",
-        default=256,
+        default=300,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_minimap_cache,
@@ -323,7 +323,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("COUNT", "Count", "Order by node count, highest first"),
             ("NAME", "Name", "Order alphabetically by type name"),
         ],
-        default="COUNT",
+        default="NAME",
     )
 
     debounce_interval: FloatProperty(
