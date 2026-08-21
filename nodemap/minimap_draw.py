@@ -32,8 +32,14 @@ from .gpu_draw import (
 from .helpers import (
     _COLOR_TAG_TO_THEME_ATTR,
     _HANDLE_THICKNESS,
+    _LIST_COUNT_GAP,
+    _LIST_PAD_X,
+    _LIST_SWATCH,
+    _LIST_SWATCH_GAP,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
+    STATS_FONT_ID,
+    STATS_FONT_SIZE,
     MinimapState,
     _alpha_mul,
     _clamp_pan_to_viewport,
@@ -48,10 +54,12 @@ from .helpers import (
     _get_node_label_lines,
     _get_node_tree_bounds,
     _get_safe_bounds,
+    _get_type_list_width,
     _get_ui_scale,
     _get_visible_rect,
     _minimap_window_operators,
     _registration_state,
+    _schedule_list_anim_redraw,
     _srgb_to_linear,
     _state,
     _theme_rgba,
@@ -61,13 +69,27 @@ from .preferences import TRACE_LEVEL
 
 logger = logging.getLogger(__package__)
 
+# Variables
 FONT_SIZE = 11
-STATS_FONT_ID = 1
-STATS_FONT_SIZE = 8
 FRAME_ALL_BTN_SIZE = 20
 FRAME_ALL_BTN_MARGIN = 1
 FRAME_BTN_GAP = 2
 _MIN_SOCKET_SCALE = 0.15
+
+BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.5)
+BTN_HOVER_ALPHA = 0.015
+
+_SCROLLBAR_THICKNESS = 3.0
+_SCROLLBAR_INSET = 2.0
+_SCROLLBAR_MIN_THUMB = 6.0
+_SCROLLBAR_ALPHA = 0.65
+
+_TYPE_LIST_ANIM_AWAIT_TIMEOUT = 1.0
+
+_NODE_ROUNDNESS_DEFAULT = 2.0
+
+# Profile for N frames, then dump sorted stats via logger.trace
+_PROFILE_FRAMES = 300
 
 
 class _Timer:
@@ -91,10 +113,6 @@ class _Timer:
         if self._active:
             elapsed = (time.perf_counter() - self._start) * 1000
             logger.trace("TIMER %s: %.3f ms", self._name, elapsed)
-
-
-# Profile for N frames, then dump sorted stats via logger.trace
-_PROFILE_FRAMES = 300
 
 
 def _maybe_start_profiler(st: MinimapState) -> None:
@@ -505,38 +523,41 @@ def _draw_node_count(
 
     _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
 
-_TYPE_LIST_MIN_WIDTH = 70.0
-_TYPE_LIST_MAX_WIDTH_PCT = 0.35
-_TYPE_LIST_HOVER_ALPHA = 0.12
-_LIST_PAD_X = 6.0
-_LIST_SWATCH = 5.0
-_LIST_SWATCH_GAP = 5.0
-_LIST_COUNT_GAP = 8.0
 
+def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> None:
+    """Advance the animated type-list zone width for this frame.
 
-def _get_type_list_width(settings, st: MinimapState, mw: float, ui_scale: float) -> float:
-    """Measure the type-list zone width for the current tree data (0 when disabled).
-
-    Called before the map transform is computed so node framing can reserve
-    the zone; ``st.list_width`` must be assigned from its result.
+    Snaps directly when no animation is running; otherwise eases from the
+    recorded start width toward the locked target. An expansion waits (up to
+    a timeout) for the debounced compile to expose measurable type stats
+    before starting its clock.
     """
-    if not getattr(settings, "show_type_stats", False):
-        return 0.0
-    tree_data = st.tree_data
-    type_stats = tree_data.get("type_stats") if tree_data else None
-    if not type_stats:
-        return 0.0
+    target_now = _get_type_list_width(settings, st, mw, ui_scale)
+    if not st.list_anim_active:
+        st.list_width = target_now
+        return
 
-    font_id = STATS_FONT_ID
-    blf.size(font_id, int(STATS_FONT_SIZE * ui_scale))
-    pad_x = _LIST_PAD_X * ui_scale
-    swatch = _LIST_SWATCH * ui_scale
-    swatch_gap = _LIST_SWATCH_GAP * ui_scale
-    count_gap = _LIST_COUNT_GAP * ui_scale
-    widest_label = max(blf.dimensions(font_id, label)[0] for label in type_stats)
-    widest_count = max(blf.dimensions(font_id, str(count))[0] for count in type_stats.values())
-    content_w = pad_x * 2 + swatch + swatch_gap + widest_label + count_gap + widest_count
-    return min(max(content_w, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
+    if st.list_anim_target < 0:
+        if target_now > 0:
+            st.list_anim_target = target_now
+            st.list_anim_start = time.perf_counter()
+        elif time.perf_counter() - st.list_anim_start > _TYPE_LIST_ANIM_AWAIT_TIMEOUT:
+            st.list_anim_active = False
+            st.list_width = target_now
+            return
+        else:
+            st.list_width = st.list_anim_from
+            _schedule_list_anim_redraw(st)
+            return
+
+    progress = min((time.perf_counter() - st.list_anim_start) / max(st.list_anim_duration, 1e-4), 1.0)
+    eased = 1.0 - (1.0 - progress) ** 3
+    st.list_width = st.list_anim_from + (st.list_anim_target - st.list_anim_from) * eased
+    if progress >= 1.0:
+        st.list_width = st.list_anim_target
+        st.list_anim_active = False
+    else:
+        _schedule_list_anim_redraw(st)
 
 
 def _draw_type_list(
@@ -553,7 +574,9 @@ def _draw_type_list(
     """Draw the interactive node-type list zone along the minimap's left edge."""
     st.list_row_rects = []
     st.list_scroll_max = 0.0
-    if st.list_width <= 0 or not getattr(settings, "show_type_stats", False):
+    # Drawn whenever the zone has width, including while it animates shut,
+    # so the content slides out with the panel instead of vanishing.
+    if st.list_width <= 0:
         st.hovered_type_label = None
         return
     tree_data = st.tree_data
@@ -586,7 +609,7 @@ def _draw_type_list(
     zone_h = mh - 2 * handle_pad
 
     zone_r = colors.get("panel_roundness", 4.0) * 0.6
-    _draw_filled_rounded_rect(zone_x, zone_y, zone_w, zone_h, zone_r, _alpha_mul(colors["bg"], 0.9 * master_alpha))
+    _draw_filled_rounded_rect(zone_x, zone_y, zone_w, zone_h, zone_r, _alpha_mul(colors["bg"], master_alpha))
     _draw_rounded_rect_border(
         zone_x, zone_y, zone_w, zone_h, zone_r, _alpha_mul(colors["bg_border"], master_alpha), 0.5
     )
@@ -681,19 +704,17 @@ def _draw_type_list(
     # Scrollbar thumb when the list overflows (same style as the map scrollbars)
     if scroll_max > 0:
         gpu.state.blend_set("ALPHA")
-        track_h = zone_h - 4 * ui_scale
-        bar_thick = max(2, int(3 * ui_scale))
-        bar_off = int(2 * ui_scale)
-        min_thumb = int(6 * ui_scale)
-        thumb_h = max(min_thumb, int(track_h * view_h / total_h))
+        bar_thick, bar_off = _get_scrollbar_style(ui_scale)
         frac = st.list_scroll / scroll_max
-        thumb_y = zone_y + bar_off + (track_h - thumb_h) * (1.0 - frac)
-        _draw_pill(
+        _draw_scrollbar_thumb(
             zone_x + zone_w - bar_thick - bar_off,
-            thumb_y,
-            bar_thick,
-            thumb_h,
-            _alpha_mul(colors["scroll_item"], master_alpha * 0.65),
+            zone_y + bar_off,
+            zone_h - 2 * bar_off,
+            view_h / total_h,
+            1.0 - frac,
+            colors,
+            master_alpha,
+            ui_scale,
         )
 
 
@@ -705,9 +726,6 @@ def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
         indices.append((base, base + 1, base + 2))
         indices.append((base + 2, base + 3, base))
     return indices
-
-
-_NODE_ROUNDNESS_DEFAULT = 2.0
 
 
 def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
@@ -1502,375 +1520,37 @@ def _build_minimap_batches(
     st.cached_group_markers = markers_by_color
 
 
-def draw_minimap() -> None:
-    """Main entry point — orchestrate minimap drawing in the Node Editor."""
-    context = bpy.context
-    space = context.space_data
-    region = context.region
+def _get_scrollbar_style(ui_scale: float) -> tuple[int, int]:
+    """Return the shared scrollbar (thickness, inset) scaled for the UI."""
+    return max(2, int(_SCROLLBAR_THICKNESS * ui_scale)), int(_SCROLLBAR_INSET * ui_scale)
 
-    # Early exit checks
-    st = _state()
-    if _early_exit(context, space, st):
-        show_overlays = space.overlay.show_overlays if space else "?"
-        enabled = st.enabled
-        logger.debug("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
-        return
 
-    addon = context.preferences.addons.get(__package__)
-    settings = addon.preferences.settings
+def _draw_scrollbar_thumb(
+    x: float,
+    y: float,
+    track_len: float,
+    visible_frac: float,
+    pos_frac: float,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+    horizontal: bool = False,
+) -> None:
+    """Draw a scrollbar thumb pill; the origin is the track's start end.
 
-    # Defer auto-launch until registration is fully complete
-    # to avoid invoking the modal with a stale context.
-    if not _registration_state["done"]:
-        logger.debug("draw_minimap: registration not done, skipping auto-launch")
+    *visible_frac* is the visible/content ratio sizing the thumb;
+    *pos_frac* (0..1) slides it along the track from its start end
+    (left when horizontal, bottom otherwise).
+    """
+    thick, _ = _get_scrollbar_style(ui_scale)
+    min_thumb = int(_SCROLLBAR_MIN_THUMB * ui_scale)
+    thumb_len = max(min_thumb, int(track_len * visible_frac))
+    offset = int((track_len - thumb_len) * min(max(pos_frac, 0.0), 1.0))
+    color = _alpha_mul(colors["scroll_item"], master_alpha * _SCROLLBAR_ALPHA)
+    if horizontal:
+        _draw_pill(x + offset, y, thumb_len, thick, color)
     else:
-        # Auto-start modal operator for pan/zoom interaction (one per window)
-        win = context.window
-        win_ptr = win.as_pointer() if win else 0
-        has_modal = win_ptr in _minimap_window_operators if win else False
-        logger.debug(
-            "draw_minimap: area=%d win=%d modal_ops=%s has_modal=%s interactive=%s",
-            context.area.as_pointer() if context.area else 0,
-            win_ptr,
-            list(_minimap_window_operators.keys()),
-            has_modal,
-            getattr(settings, "interactive", True),
-        )
-        if getattr(settings, "interactive", True):
-            if win and not has_modal:
-                logger.debug("draw_minimap: invoking nodemap.navigate for window %d", win_ptr)
-                try:
-                    bpy.ops.nodemap.navigate("INVOKE_DEFAULT")
-                    logger.debug("draw_minimap: nodemap.navigate invoked successfully")
-                except RuntimeError as e:
-                    logger.debug("draw_minimap: nodemap.navigate failed: %s", e)
-            elif not win:
-                logger.debug("draw_minimap: cannot invoke — context.window is None")
-
-    # Guard: must have a valid node tree with nodes
-    node_tree = space.edit_tree
-    if not node_tree or not node_tree.nodes or len(node_tree.nodes) == 0:
-        return
-    nodes = node_tree.nodes
-    bounds = _get_node_tree_bounds(nodes)
-    if bounds[2] - bounds[0] <= 0 or bounds[3] - bounds[1] <= 0:
-        return
-
-    # Start cProfile for this area (only when TRACE logging is on)
-    _maybe_start_profiler(st)
-
-    # Log active settings every frame at TRACE level
-    logger.trace(
-        "SETTINGS %d nodes | show_wires=%d show_names=%d label_mode=%s"
-        " colored_nodes=%d socket_indicators=%d wire_color=%d frame_labels=%d",
-        len(nodes),
-        getattr(settings, "show_wires", True),
-        getattr(settings, "show_names", True),
-        getattr(settings, "node_label_mode", "COMPACT"),
-        getattr(settings, "colored_nodes", True),
-        getattr(settings, "show_socket_indicators", False),
-        getattr(settings, "show_wire_color", True),
-        getattr(settings, "show_frame_labels", True),
-    )
-
-    # Compute dimensions and layout
-    with _Timer("setup"):
-        ui_scale = _get_ui_scale()
-        colors = _get_node_editor_theme_colors()
-        master_alpha = getattr(settings, "opacity", 0.85)
-        corner = getattr(settings, "position", "TOP_RIGHT")
-
-        rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, st)
-        if rect is None:
-            return
-        mx, my, mw, mh, padding, y_margin = rect
-
-        bounds = _expand_bounds_margin(bounds, ui_scale, mh, padding)
-
-        st.rect = (mx, my, mw, mh)
-        st.tree_bounds = bounds
-        st.margin = y_margin
-        st.padding = padding
-
-        # Reserve the type-list zone before computing the map transform so
-        # node framing and panning never place tree content behind the list.
-        with _Timer("type_list_width"):
-            st.list_width = _get_type_list_width(settings, st, mw, ui_scale)
-
-        _clamp_pan_to_viewport(space, region, st)
-
-    # Debounce: schedule compile after fingerprint settles (via bpy.app.timers)
-    show_borders = getattr(settings, "show_node_borders", True)
-    current_fingerprint = get_tree_fingerprint(node_tree, include_selection=show_borders)
-    if st.cached_fingerprint != current_fingerprint:
-        if st.pending_timer is not None:
-            try:
-                bpy.app.timers.unregister(st.pending_timer)
-            except ValueError:
-                pass
-        delay = getattr(settings, "debounce_interval", 0.15)
-        timer = bpy.app.timers.register(
-            lambda: _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale),
-            first_interval=delay,
-        )
-        st.pending_timer = timer
-
-    # Build screen-space batches every frame (applies current zoom/pan)
-    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
-    with _Timer("build_batches"):
-        highlight_border = colors["node_active"] if st.hovered_type_label else None
-        _build_minimap_batches(
-            st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders, highlight_border
-        )
-
-    # Draw minimap panel
-    try:
-        original_blend = gpu.state.blend_get()
-    except Exception:
-        original_blend = None
-    gpu.state.blend_set("ALPHA")
-
-    with _Timer("draw_background"):
-        bg_color, panel_r = _draw_background(mx, my, mw, mh, colors, master_alpha)
-
-    # Clip node/wire content to the minimap interior
-    with _Timer("setup_scissor"):
-        scissor_state = _setup_scissor(mx, my, mw, mh)
-        scissor_active = scissor_state[0]
-
-    # Fill rect over the background, behind frames/nodes/wires
-    with _Timer("draw_view_fill"):
-        _draw_view_fill(
-            settings,
-            space,
-            region,
-            mx,
-            my,
-            mw,
-            mh,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            colors,
-            panel_r,
-            master_alpha,
-            ui_scale,
-        )
-
-    # Layer 1: Frame nodes (behind wires)
-    frames_fill_batch = st.cached_frames_fill_batch
-    frames_border_batch = st.cached_frames_border_batch
-    if frames_fill_batch or frames_border_batch:
-        with _Timer("draw_frames"):
-            fill_shader = _get_batch_rect_shader()
-            border_shader = _get_batch_rect_border_shader()
-            mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-            if frames_fill_batch:
-                fill_shader.bind()
-                fill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-                frames_fill_batch.draw(fill_shader)
-            if frames_border_batch:
-                border_shader.bind()
-                border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-                frames_border_batch.draw(border_shader)
-
-    # Layer 2: Connection wires
-    wires_by_color = st.cached_wires or {}
-    thickness = st.cached_wire_thickness
-    if getattr(settings, "show_wires", True) and wires_by_color:
-        with _Timer("draw_wires"):
-            shadow_alpha = 0.35 * master_alpha
-            if shadow_alpha > 0:
-                shadow_group = [
-                    (wx, wy, length, angle) for group in wires_by_color.values() for wx, wy, length, angle in group
-                ]
-                _batch_draw_pills(shadow_group, thickness * 2.5, (0.0, 0.0, 0.0, shadow_alpha))
-            for wire_color, group in wires_by_color.items():
-                _batch_draw_pills(group, thickness, wire_color)
-
-    # Layer 3: Node backgrounds
-    backdrops_batch = st.cached_backdrops_batch
-    if backdrops_batch:
-        with _Timer("draw_backdrops"):
-            fill_shader = _get_batch_rect_shader()
-            fill_shader.bind()
-            fill_shader.uniform_float(
-                "ModelViewProjectionMatrix", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-            )
-            backdrops_batch.draw(fill_shader)
-
-    # Layer 4: Node borders
-    borders_batch = st.cached_borders_batch
-    if borders_batch:
-        with _Timer("draw_borders"):
-            border_shader = _get_batch_rect_border_shader()
-            border_shader.bind()
-            border_shader.uniform_float(
-                "ModelViewProjectionMatrix", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-            )
-            borders_batch.draw(border_shader)
-
-    # Layer 4b: Group node underline markers
-    markers_by_color = st.cached_group_markers or {}
-    if getattr(settings, "show_group_markers", True) and markers_by_color:
-        with _Timer("draw_group_markers"):
-            marker_thick = max(1.0, 1.5 * ui_scale)
-            for marker_color, group in markers_by_color.items():
-                _batch_draw_pills(group, marker_thick, marker_color)
-
-    # Layer 5: Socket indicator pills (single batch with per-vertex color)
-    socket_batch = st.cached_socket_batch
-    if getattr(settings, "show_socket_indicators", False) and socket_batch:
-        with _Timer("draw_sockets"):
-            shader = _get_batch_rect_shader()
-            shader.bind()
-            shader.uniform_float(
-                "ModelViewProjectionMatrix",
-                gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-            )
-            socket_batch.draw(shader)
-
-    # Layer 6: Text labels
-    cached_text = st.cached_text or []
-    if cached_text:
-        with _Timer("draw_text"):
-            gpu.state.blend_set("ALPHA")
-            for font_id, text, lx, ly, text_color, font_size in cached_text:
-                _draw_text_with_shadow(font_id, text, lx, ly, text_color, font_size)
-            gpu.state.blend_set("ALPHA")
-
-    # Layer 7: Viewport overlay with cutout hole
-    with _Timer("draw_viewport"):
-        _draw_viewport_overlay(
-            settings,
-            space,
-            region,
-            mx,
-            my,
-            mw,
-            mh,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            colors,
-            master_alpha,
-            panel_r,
-            ui_scale,
-            scissor_active,
-            st,
-        )
-
-    # Layer 8: Scrollbars
-    with _Timer("draw_scrollbars"):
-        _draw_minimap_scrollbars(
-            mx,
-            my,
-            mw,
-            mh,
-            padding,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            bounds,
-            colors,
-            ui_scale,
-            master_alpha,
-        )
-
-    # Top corner frame-all brackets
-    with _Timer("_draw_frame_all_button"):
-        _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha)
-
-    # frame-view button (below frame-all)
-    with _Timer("_draw_frame_view_button"):
-        _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
-
-    # frame-selected button (below frame-view)
-    with _Timer("_draw_frame_selected_button"):
-        _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
-
-    # type-list toggle button (top-left)
-    with _Timer("_draw_list_toggle_button"):
-        _draw_list_toggle_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
-
-    # Edge resize handle pills
-    with _Timer("draw_resize_handles"):
-        _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
-
-    # Node count overlay text
-    with _Timer("draw_node_count"):
-        content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
-        font_id = 0
-        _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
-
-    # Restore GPU state
-    _teardown_scissor(scissor_state)
-    try:
-        gpu.state.blend_set(original_blend if original_blend else "NONE")
-    except Exception:
-        gpu.state.blend_set("NONE")
-
-    # Interactive node-type list zone (drawn unclipped, on top of map content)
-    try:
-        gpu.state.blend_set("ALPHA")
-        with _Timer("draw_type_list"):
-            _draw_type_list(settings, st, mx, my, mh, padding, colors, master_alpha, ui_scale)
-    finally:
-        try:
-            gpu.state.blend_set(original_blend if original_blend else "NONE")
-        except Exception:
-            gpu.state.blend_set("NONE")
-
-    # Stop & dump profile stats after N frames
-    _maybe_stop_profiler(st)
-
-
-def _get_socket_pos(node, socket, is_output):
-    """Return (x, y) in tree coordinates for a socket position."""
-    w, h = _get_node_dims(node)
-
-    if node.type == "REROUTE":
-        return node.location_absolute.x + w / 2, node.location_absolute.y - h / 2
-
-    x = node.location_absolute.x + (w if is_output else 0)
-
-    visible = [
-        s
-        for s in (node.outputs if is_output else node.inputs)
-        if not getattr(s, "hide", False) and getattr(s, "enabled", True)
-    ]
-
-    if not visible:
-        return x, node.location_absolute.y - h * 0.5
-
-    try:
-        idx = visible.index(socket)
-    except (ValueError, AttributeError):
-        idx = 0
-
-    top_y = node.location_absolute.y
-    body_top = top_y
-    body_bot = top_y - h
-
-    num = len(visible)
-    body_range = body_top - body_bot
-    if body_range <= 0 or num <= 1:
-        y = (body_top + body_bot) * 0.5
-    else:
-        y = body_top - body_range * (idx + 1) / (num + 1)
-
-    return x, y
-
-
-def _draw_wires(nodes, tree_cx, tree_cy, scale, cx, cy, colors, master_alpha=1.0, use_socket_color=False):
-    """Fallback wire drawing handler (compiled wires take precedence)."""
-    pass
+        _draw_pill(x, y + offset, thick, thumb_len, color)
 
 
 def _draw_minimap_scrollbars(
@@ -1907,30 +1587,36 @@ def _draw_minimap_scrollbars(
     if visible_w >= bbox_w and visible_h >= bbox_h:
         return
 
-    bar_thick = max(2, int(3 * ui_scale))
-    bar_off = int(2 * ui_scale)
-    min_thumb = int(6 * ui_scale)
-    scroll_color = _alpha_mul(colors["scroll_item"], master_alpha * 0.65)
+    bar_thick, bar_off = _get_scrollbar_style(ui_scale)
 
     # Horizontal scrollbar (bottom edge)
     if visible_w < bbox_w:
-        track_w = inner_w
-        thumb_w = max(min_thumb, int(track_w * visible_w / bbox_w))
-        thumb_x = inner_l + int(track_w * (v_left - bbox_l) / bbox_w)
-        thumb_y = my + bar_off
-        _draw_pill(thumb_x, thumb_y, thumb_w, bar_thick, scroll_color)
+        pos = (v_left - bbox_l) / (bbox_w - visible_w)
+        _draw_scrollbar_thumb(
+            inner_l,
+            my + bar_off,
+            inner_w,
+            visible_w / bbox_w,
+            pos,
+            colors,
+            master_alpha,
+            ui_scale,
+            horizontal=True,
+        )
 
     # Vertical scrollbar (right edge)
     if visible_h < bbox_h:
-        track_h = inner_h
-        thumb_h = max(min_thumb, int(track_h * visible_h / bbox_h))
-        thumb_x2 = mx + mw - bar_off - bar_thick
-        thumb_y2 = inner_b + int(track_h * (v_bottom - bbox_b) / bbox_h)
-        _draw_pill(thumb_x2, thumb_y2, bar_thick, thumb_h, scroll_color)
-
-
-BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.5)
-BTN_HOVER_ALPHA = 0.015
+        pos = (v_bottom - bbox_b) / (bbox_h - visible_h)
+        _draw_scrollbar_thumb(
+            mx + mw - bar_off - bar_thick,
+            inner_b,
+            inner_h,
+            visible_h / bbox_h,
+            pos,
+            colors,
+            master_alpha,
+            ui_scale,
+        )
 
 
 def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):
@@ -2100,7 +1786,6 @@ def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, maste
     bw = bh = 2 * ui_scale
     bx = x + (btn_size - bw) / 2
     by = fy + (btn_size - bh) / 2
-    # _draw_rounded_rect_border(bx, by, bw, bh, 1.5 * ui_scale, ico_color, t)
     _draw_filled_rounded_rect(bx, by, bw, bh, 1.5 * ui_scale, ico_color)
 
     st.frame_selected_btn = (x, fy, btn_size, btn_size)
@@ -2151,3 +1836,333 @@ def _draw_list_toggle_button(mx, my, mw, mh, padding, colors, ui_scale, master_a
         _draw_filled_rounded_rect(bx, by0 + i * (t + bar_gap), bar_w, t, t * 0.5, ico_color)
 
     st.list_toggle_btn = (x, y, btn_size, btn_size)
+
+
+def draw_minimap() -> None:
+    """Main entry point — orchestrate minimap drawing in the Node Editor."""
+    context = bpy.context
+    space = context.space_data
+    region = context.region
+
+    # Early exit checks
+    st = _state()
+    if _early_exit(context, space, st):
+        show_overlays = space.overlay.show_overlays if space else "?"
+        enabled = st.enabled
+        logger.debug("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
+        return
+
+    addon = context.preferences.addons.get(__package__)
+    settings = addon.preferences.settings
+
+    # Defer auto-launch until registration is fully complete
+    # to avoid invoking the modal with a stale context.
+    if not _registration_state["done"]:
+        logger.debug("draw_minimap: registration not done, skipping auto-launch")
+    else:
+        # Auto-start modal operator for pan/zoom interaction (one per window)
+        win = context.window
+        win_ptr = win.as_pointer() if win else 0
+        has_modal = win_ptr in _minimap_window_operators if win else False
+        logger.debug(
+            "draw_minimap: area=%d win=%d modal_ops=%s has_modal=%s interactive=%s",
+            context.area.as_pointer() if context.area else 0,
+            win_ptr,
+            list(_minimap_window_operators.keys()),
+            has_modal,
+            getattr(settings, "interactive", True),
+        )
+        if getattr(settings, "interactive", True):
+            if win and not has_modal:
+                logger.debug("draw_minimap: invoking nodemap.navigate for window %d", win_ptr)
+                try:
+                    bpy.ops.nodemap.navigate("INVOKE_DEFAULT")
+                    logger.debug("draw_minimap: nodemap.navigate invoked successfully")
+                except RuntimeError as e:
+                    logger.debug("draw_minimap: nodemap.navigate failed: %s", e)
+            elif not win:
+                logger.debug("draw_minimap: cannot invoke — context.window is None")
+
+    # Guard: must have a valid node tree with nodes
+    node_tree = space.edit_tree
+    if not node_tree or not node_tree.nodes or len(node_tree.nodes) == 0:
+        return
+    nodes = node_tree.nodes
+    bounds = _get_node_tree_bounds(nodes)
+    if bounds[2] - bounds[0] <= 0 or bounds[3] - bounds[1] <= 0:
+        return
+
+    # Start cProfile for this area (only when TRACE logging is on)
+    _maybe_start_profiler(st)
+
+    # Log active settings every frame at TRACE level
+    logger.trace(
+        "SETTINGS %d nodes | show_wires=%d show_names=%d label_mode=%s"
+        " colored_nodes=%d socket_indicators=%d wire_color=%d frame_labels=%d",
+        len(nodes),
+        getattr(settings, "show_wires", True),
+        getattr(settings, "show_names", True),
+        getattr(settings, "node_label_mode", "COMPACT"),
+        getattr(settings, "colored_nodes", True),
+        getattr(settings, "show_socket_indicators", False),
+        getattr(settings, "show_wire_color", True),
+        getattr(settings, "show_frame_labels", True),
+    )
+
+    # Compute dimensions and layout
+    with _Timer("setup"):
+        ui_scale = _get_ui_scale()
+        colors = _get_node_editor_theme_colors()
+        master_alpha = getattr(settings, "opacity", 0.85)
+        corner = getattr(settings, "position", "TOP_RIGHT")
+
+        rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, st)
+        if rect is None:
+            return
+        mx, my, mw, mh, padding, y_margin = rect
+
+        bounds = _expand_bounds_margin(bounds, ui_scale, mh, padding)
+
+        st.rect = (mx, my, mw, mh)
+        st.tree_bounds = bounds
+        st.margin = y_margin
+        st.padding = padding
+
+        # Reserve the type-list zone before computing the map transform so
+        # node framing and panning never place tree content behind the list.
+        with _Timer("type_list_width"):
+            _step_list_width(st, settings, mw, ui_scale)
+
+        _clamp_pan_to_viewport(space, region, st)
+
+    # Debounce: schedule compile after fingerprint settles (via bpy.app.timers)
+    show_borders = getattr(settings, "show_node_borders", True)
+    current_fingerprint = get_tree_fingerprint(node_tree, include_selection=show_borders)
+    if st.cached_fingerprint != current_fingerprint:
+        if st.pending_timer is not None:
+            try:
+                bpy.app.timers.unregister(st.pending_timer)
+            except ValueError:
+                pass
+        delay = getattr(settings, "debounce_interval", 0.15)
+        timer = bpy.app.timers.register(
+            lambda: _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale),
+            first_interval=delay,
+        )
+        st.pending_timer = timer
+
+    # Build screen-space batches every frame (applies current zoom/pan)
+    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
+    with _Timer("build_batches"):
+        highlight_border = colors["node_active"] if st.hovered_type_label else None
+        _build_minimap_batches(
+            st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders, highlight_border
+        )
+
+    # Draw minimap panel
+    try:
+        original_blend = gpu.state.blend_get()
+    except Exception:
+        original_blend = None
+    gpu.state.blend_set("ALPHA")
+
+    with _Timer("draw_background"):
+        bg_color, panel_r = _draw_background(mx, my, mw, mh, colors, master_alpha)
+
+    # Clip node/wire content to the minimap interior
+    with _Timer("setup_scissor"):
+        scissor_state = _setup_scissor(mx, my, mw, mh)
+        scissor_active = scissor_state[0]
+
+    # Editor View fill
+    with _Timer("draw_view_fill"):
+        _draw_view_fill(
+            settings,
+            space,
+            region,
+            mx,
+            my,
+            mw,
+            mh,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            colors,
+            panel_r,
+            master_alpha,
+            ui_scale,
+        )
+
+    # Frame nodes
+    frames_fill_batch = st.cached_frames_fill_batch
+    frames_border_batch = st.cached_frames_border_batch
+    if frames_fill_batch or frames_border_batch:
+        with _Timer("draw_frames"):
+            fill_shader = _get_batch_rect_shader()
+            border_shader = _get_batch_rect_border_shader()
+            mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+            if frames_fill_batch:
+                fill_shader.bind()
+                fill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                frames_fill_batch.draw(fill_shader)
+            if frames_border_batch:
+                border_shader.bind()
+                border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                frames_border_batch.draw(border_shader)
+
+    # Link wires
+    wires_by_color = st.cached_wires or {}
+    thickness = st.cached_wire_thickness
+    if getattr(settings, "show_wires", True) and wires_by_color:
+        with _Timer("draw_wires"):
+            shadow_alpha = 0.35 * master_alpha
+            if shadow_alpha > 0:
+                shadow_group = [
+                    (wx, wy, length, angle) for group in wires_by_color.values() for wx, wy, length, angle in group
+                ]
+                _batch_draw_pills(shadow_group, thickness * 2.5, (0.0, 0.0, 0.0, shadow_alpha))
+            for wire_color, group in wires_by_color.items():
+                _batch_draw_pills(group, thickness, wire_color)
+
+    # Node fill backgrounds
+    backdrops_batch = st.cached_backdrops_batch
+    if backdrops_batch:
+        with _Timer("draw_backdrops"):
+            fill_shader = _get_batch_rect_shader()
+            fill_shader.bind()
+            fill_shader.uniform_float(
+                "ModelViewProjectionMatrix", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+            )
+            backdrops_batch.draw(fill_shader)
+
+    # Node borders
+    borders_batch = st.cached_borders_batch
+    if borders_batch:
+        with _Timer("draw_borders"):
+            border_shader = _get_batch_rect_border_shader()
+            border_shader.bind()
+            border_shader.uniform_float(
+                "ModelViewProjectionMatrix", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+            )
+            borders_batch.draw(border_shader)
+
+    # Group node underline markers
+    markers_by_color = st.cached_group_markers or {}
+    if getattr(settings, "show_group_markers", True) and markers_by_color:
+        with _Timer("draw_group_markers"):
+            marker_thick = max(1.0, 1.5 * ui_scale)
+            for marker_color, group in markers_by_color.items():
+                _batch_draw_pills(group, marker_thick, marker_color)
+
+    # Socket indicator pills (single batch with per-vertex color)
+    socket_batch = st.cached_socket_batch
+    if getattr(settings, "show_socket_indicators", False) and socket_batch:
+        with _Timer("draw_sockets"):
+            shader = _get_batch_rect_shader()
+            shader.bind()
+            shader.uniform_float(
+                "ModelViewProjectionMatrix",
+                gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+            )
+            socket_batch.draw(shader)
+
+    # Text labels
+    cached_text = st.cached_text or []
+    if cached_text:
+        with _Timer("draw_text"):
+            gpu.state.blend_set("ALPHA")
+            for font_id, text, lx, ly, text_color, font_size in cached_text:
+                _draw_text_with_shadow(font_id, text, lx, ly, text_color, font_size)
+            gpu.state.blend_set("ALPHA")
+
+    # Viewport overlay with cutout hole
+    with _Timer("draw_viewport"):
+        _draw_viewport_overlay(
+            settings,
+            space,
+            region,
+            mx,
+            my,
+            mw,
+            mh,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            colors,
+            master_alpha,
+            panel_r,
+            ui_scale,
+            scissor_active,
+            st,
+        )
+
+    # Minimap Scrollbars
+    with _Timer("draw_scrollbars"):
+        _draw_minimap_scrollbars(
+            mx,
+            my,
+            mw,
+            mh,
+            padding,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            bounds,
+            colors,
+            ui_scale,
+            master_alpha,
+        )
+
+    # Minimap Buttons
+    # Frame-all button
+    with _Timer("_draw_frame_all_button"):
+        _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha)
+
+    # Frame-view button
+    with _Timer("_draw_frame_view_button"):
+        _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
+
+    # Frame-selected button
+    with _Timer("_draw_frame_selected_button"):
+        _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
+
+    # Type-list toggle button
+    with _Timer("_draw_list_toggle_button"):
+        _draw_list_toggle_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
+
+    # Node count overlay text
+    with _Timer("draw_node_count"):
+        content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
+        font_id = 0
+        _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
+
+    # Edge resize handle pills
+    with _Timer("draw_resize_handles"):
+        _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
+
+    # Restore GPU state
+    _teardown_scissor(scissor_state)
+    try:
+        gpu.state.blend_set(original_blend if original_blend else "NONE")
+    except Exception:
+        gpu.state.blend_set("NONE")
+
+    # Interactive node-type list zone (drawn unclipped, on top of map content)
+    try:
+        gpu.state.blend_set("ALPHA")
+        with _Timer("draw_type_list"):
+            _draw_type_list(settings, st, mx, my, mh, padding, colors, master_alpha, ui_scale)
+    finally:
+        try:
+            gpu.state.blend_set(original_blend if original_blend else "NONE")
+        except Exception:
+            gpu.state.blend_set("NONE")
+
+    # Stop & dump profile stats after N frames
+    _maybe_stop_profiler(st)

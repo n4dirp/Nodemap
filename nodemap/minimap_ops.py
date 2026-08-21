@@ -30,6 +30,7 @@ from .helpers import (
     frame_selected,
     frame_view,
     redraw_ui,
+    start_list_width_animation,
 )
 
 logger = logging.getLogger(__package__)
@@ -447,6 +448,8 @@ class NODEMAP_OT_navigate(Operator):
                                 addon = context.preferences.addons.get(__package__)
                                 if addon:
                                     settings.show_type_stats = not settings.show_type_stats
+                                    start_list_width_animation(st, settings)
+                                    redraw_ui("NODE_EDITOR")
                         return {"RUNNING_MODAL"}
                     if self._list_row_pressed:
                         label = self._list_row_pressed
@@ -1260,7 +1263,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         speed = getattr(settings, "pan_speed", "MEDIUM")
-        frames = {"FAST": 12, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
+        frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
         self._anim_progress += 1 / frames
         if self._anim_progress >= 1.0:
             remaining_x = self._anim_target[0] - self._anim_applied[0]
@@ -1320,7 +1323,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         speed = getattr(settings, "pan_speed", "MEDIUM")
-        frames = {"FAST": 12, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
+        frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
         progress = self._frame_anim_progress + 1 / frames
         self._frame_anim_progress = progress
         if progress >= 1.0:

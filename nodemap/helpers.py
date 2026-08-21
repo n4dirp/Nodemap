@@ -1,6 +1,7 @@
 """Shared helper utilities for node minimap."""
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -222,6 +223,12 @@ class MinimapState:
     list_row_h: float = 16.0
     hovered_type_label: str | None = None
     list_row_rects: list = field(default_factory=list)
+    list_anim_active: bool = False
+    list_anim_from: float = 0.0
+    list_anim_target: float = -1.0
+    list_anim_start: float = 0.0
+    list_anim_duration: float = 0.33
+    list_anim_timer: Any = None
     cached_fingerprint: Any = None
     pending_timer: Any = None
     tree_data: dict | None = None
@@ -330,11 +337,11 @@ def _expand_bounds_margin(
     bounds: tuple[float, float, float, float], ui_scale: float, mh: float, padding: float
 ) -> tuple[float, float, float, float]:
     """Expand tree bounds by a small margin so frame labels stay inside the minimap."""
-    LABEL_MARGIN_PX = 3 * ui_scale
+    LABEL_MARGIN_PX = 12 * ui_scale
     bbox_h = max(bounds[3] - bounds[1], 1.0)
     inner_h = max(mh - 2 * padding, 1.0)
     margin = LABEL_MARGIN_PX * bbox_h / inner_h
-    return (bounds[0] - margin, bounds[1] - margin, bounds[2] + margin, bounds[3] + margin)
+    return (bounds[0] - margin - 50, bounds[1] - margin, bounds[2] + margin + 100, bounds[3] + margin)
 
 
 def _get_area_and_region_under_mouse(context, event) -> tuple:
@@ -370,6 +377,81 @@ def _get_map_content_rect(st: MinimapState) -> tuple[float, float, float, float]
     if st.list_width > 0:
         left_inset += _LIST_CONTENT_GAP * _get_ui_scale()
     return mx + left_inset, my + pad, max(mw - pad - left_inset, 1.0), max(mh - 2 * pad, 1.0)
+
+
+STATS_FONT_ID = 1
+STATS_FONT_SIZE = 8
+_TYPE_LIST_MIN_WIDTH = 70.0
+_TYPE_LIST_MAX_WIDTH_PCT = 0.35
+_LIST_PAD_X = 6.0
+_LIST_SWATCH = 5.0
+_LIST_SWATCH_GAP = 5.0
+_LIST_COUNT_GAP = 8.0
+
+
+def _get_type_list_width(settings, st: MinimapState, mw: float, ui_scale: float) -> float:
+    """Measure the type-list zone width for the current tree data (0 when disabled).
+
+    Called before the map transform is computed so node framing can reserve
+    the zone; ``st.list_width`` must be assigned from its result.
+    """
+    if not getattr(settings, "show_type_stats", False):
+        return 0.0
+    tree_data = st.tree_data
+    type_stats = tree_data.get("type_stats") if tree_data else None
+    if not type_stats:
+        return 0.0
+
+    font_id = STATS_FONT_ID
+    blf.size(font_id, int(STATS_FONT_SIZE * ui_scale))
+    pad_x = _LIST_PAD_X * ui_scale
+    swatch = _LIST_SWATCH * ui_scale
+    swatch_gap = _LIST_SWATCH_GAP * ui_scale
+    count_gap = _LIST_COUNT_GAP * ui_scale
+    widest_label = max(blf.dimensions(font_id, label)[0] for label in type_stats)
+    widest_count = max(blf.dimensions(font_id, str(count))[0] for count in type_stats.values())
+    content_w = pad_x * 2 + swatch + swatch_gap + widest_label + count_gap + widest_count
+    return min(max(content_w, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
+
+
+_LIST_ANIM_FRAMES: dict[str, int] = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}
+
+
+def start_list_width_animation(st: MinimapState, settings) -> None:
+    """Begin animating the type-list zone width after a toggle-button click.
+
+    An expansion defers the target measurement to the draw step because the
+    compiled type stats only land after the preference-change debounce.
+    Skipped when Reduce Motion is enabled so the zone snaps instantly.
+    """
+    try:
+        if bpy.context.preferences.view.use_reduce_motion:
+            return
+    except AttributeError:
+        pass
+    st.list_anim_active = True
+    st.list_anim_from = st.list_width
+    st.list_anim_target = 0.0 if not getattr(settings, "show_type_stats", False) else -1.0
+    frames = _LIST_ANIM_FRAMES.get(getattr(settings, "pan_speed", "MEDIUM"), 24)
+    st.list_anim_duration = frames / 60.0
+    st.list_anim_start = time.perf_counter()
+
+
+def _list_anim_tick(st: MinimapState) -> None:
+    st.list_anim_timer = None
+    if st.list_anim_active:
+        redraw_ui("NODE_EDITOR")
+
+
+def _schedule_list_anim_redraw(st: MinimapState) -> None:
+    """Schedule a one-shot timer tick that forces a redraw while the list animates."""
+    if st.list_anim_timer is not None:
+        return
+    try:
+        bpy.app.timers.register(lambda: _list_anim_tick(st), first_interval=1 / 60)
+        st.list_anim_timer = True
+    except (RuntimeError, ValueError):
+        pass
 
 
 def _get_minimap_transform(
