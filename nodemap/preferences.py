@@ -197,7 +197,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     viewport_fill_color: FloatVectorProperty(
         name="Active View Fill Color",
         description="Color of the active view fill rect",
-        default=(1.0, 1.0, 1.0, 0.05),
+        default=(0.7, 0.7, 0.7, 0.05),
         size=4,
         min=0.0,
         max=1.0,
@@ -221,6 +221,13 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_view_btn: BoolProperty(
         name="Frame View Button",
         description="Show a Frame-view button inside the minimap",
+        default=False,
+        update=_update_minimap_cache,
+    )
+
+    show_frame_selected_btn: BoolProperty(
+        name="Frame Selected Button",
+        description="Show a Frame-selected button inside the minimap",
         default=False,
         update=_update_minimap_cache,
     )

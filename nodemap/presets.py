@@ -32,6 +32,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_wires",
         "settings.show_frame_all_btn",
         "settings.show_frame_view_btn",
+        "settings.show_frame_selected_btn",
         "settings.show_names",
         "settings.node_label_mode",
         "settings.show_frame_labels",

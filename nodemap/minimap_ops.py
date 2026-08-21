@@ -190,6 +190,32 @@ class NODEMAP_OT_frame_all(Operator):
         return {"FINISHED"}
 
 
+class NODEMAP_OT_frame_selected(Operator):
+    """Focus the minimap view on selected nodes."""
+
+    bl_idname = "nodemap.frame_selected"
+    bl_label = "Frame Selected"
+    bl_description = "Focus the minimap view on selected nodes.\nShortcut: Numpad ."
+    bl_options = {"INTERNAL"}
+
+    def execute(self, context: Context) -> set[str]:
+        frame_selected()
+        return {"FINISHED"}
+
+
+class NODEMAP_OT_frame_view(Operator):
+    """Focus the minimap view on the current editor viewport."""
+
+    bl_idname = "nodemap.frame_view"
+    bl_label = "Frame View"
+    bl_description = "Focus the minimap view on the current editor viewport.\nShortcut: Shift+Home"
+    bl_options = {"INTERNAL"}
+
+    def execute(self, context: Context) -> set[str]:
+        frame_view()
+        return {"FINISHED"}
+
+
 class NODEMAP_OT_navigate(Operator):
     """Navigate the Node Editor view via the minimap."""
 
@@ -220,6 +246,7 @@ class NODEMAP_OT_navigate(Operator):
     _redirect_acc: list[float]
     _frame_all_armed: bool = False
     _frame_view_armed: bool = False
+    _frame_selected_armed: bool = False
 
     _smooth_timer: str | None = None
     _inertia_active: bool = False
@@ -358,6 +385,24 @@ class NODEMAP_OT_navigate(Operator):
                                 else:
                                     frame_view(self._space, self._region, self._area.as_pointer())
                         return {"RUNNING_MODAL"}
+                    if self._frame_selected_armed:
+                        self._frame_selected_armed = False
+                        btn = st.frame_selected_btn
+                        if btn:
+                            bx, by, bw, bh = btn
+                            mx = self._mx
+                            my = self._my
+                            if bx <= mx <= bx + bw and by <= my <= by + bh:
+                                if settings and self._is_smooth_pan(settings, context):
+                                    targets = _compute_frame_selected_targets(
+                                        self._space, self._region, self._area.as_pointer()
+                                    )
+                                    if targets:
+                                        target_zoom = targets[0] if targets[0] is not None else st.zoom
+                                        self._start_frame_animation(context, target_zoom, [targets[1], targets[2]])
+                                else:
+                                    frame_selected(self._space, self._region, self._area.as_pointer())
+                        return {"RUNNING_MODAL"}
                     if self._resize_handle:
                         self._resize_handle = None
                         self._resize_start_mouse = None
@@ -426,6 +471,14 @@ class NODEMAP_OT_navigate(Operator):
                         my = self._my
                         if bx <= mx <= bx + bw and by <= my <= by + bh:
                             self._frame_view_armed = True
+                            return {"RUNNING_MODAL"}
+                    btn = st.frame_selected_btn
+                    if btn:
+                        bx, by, bw, bh = btn
+                        mx = self._mx
+                        my = self._my
+                        if bx <= mx <= bx + bw and by <= my <= by + bh:
+                            self._frame_selected_armed = True
                             return {"RUNNING_MODAL"}
                     if addon:
                         handle = self._get_handle_at(context, event)
@@ -980,6 +1033,7 @@ class NODEMAP_OT_navigate(Operator):
         self._last_cursor = ""
         self._frame_all_armed = False
         self._frame_view_armed = False
+        self._frame_selected_armed = False
         st = self._st
         if st and st.pressed:
             st.pressed = False
@@ -1263,6 +1317,7 @@ class NODEMAP_OT_navigate(Operator):
         self._redirect_acc = [0.0, 0.0]
         self._frame_all_armed = False
         self._frame_view_armed = False
+        self._frame_selected_armed = False
         self._smooth_timer = None
         self._inertia_active = False
         self._inertia_mode = None
@@ -1297,32 +1352,6 @@ class NODEMAP_OT_navigate(Operator):
             self._st.height_clamped = False
             self._st.hovered_handle = None
             self._st.resize_active = None
-
-
-class NODEMAP_OT_frame_selected(Operator):
-    """Focus the minimap view on selected nodes."""
-
-    bl_idname = "nodemap.frame_selected"
-    bl_label = "Frame Selected"
-    bl_description = "Focus the minimap view on selected nodes"
-    bl_options = {"INTERNAL"}
-
-    def execute(self, context: Context) -> set[str]:
-        frame_selected()
-        return {"FINISHED"}
-
-
-class NODEMAP_OT_frame_view(Operator):
-    """Focus the minimap view on the current editor viewport."""
-
-    bl_idname = "nodemap.frame_view"
-    bl_label = "Frame View"
-    bl_description = "Focus the minimap view on the current editor viewport"
-    bl_options = {"INTERNAL"}
-
-    def execute(self, context: Context) -> set[str]:
-        frame_view()
-        return {"FINISHED"}
 
 
 classes = (

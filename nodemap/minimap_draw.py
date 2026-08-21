@@ -30,6 +30,8 @@ from .gpu_draw import (
 )
 from .helpers import (
     _COLOR_TAG_TO_THEME_ATTR,
+    MIN_MAP_HEIGHT,
+    MIN_MAP_WIDTH,
     MinimapState,
     _alpha_mul,
     _clamp_pan_to_viewport,
@@ -59,6 +61,7 @@ logger = logging.getLogger(__package__)
 FONT_SIZE = 11
 FRAME_ALL_BTN_SIZE = 20
 FRAME_ALL_BTN_MARGIN = 1
+FRAME_BTN_GAP = 2
 _MIN_SOCKET_SCALE = 0.15
 
 
@@ -214,8 +217,9 @@ def _compute_minimap_rect(
         mh = min(mh, float(ey) - my - margin)
 
     # Only bail if the minimap would be too small to be useful
-    MIN_DIM = 50 * ui_scale
-    if mw < MIN_DIM or mh < MIN_DIM:
+    min_dim_w = MIN_MAP_WIDTH * ui_scale
+    min_dim_h = MIN_MAP_HEIGHT * ui_scale
+    if mw < min_dim_w or mh < min_dim_h:
         st.rect = (0.0, 0.0, 0.0, 0.0)
         return None
 
@@ -484,12 +488,8 @@ def _draw_node_count(
     ty = my + (FONT_SIZE * ui_scale) - 3
 
     st = _state()
-    btn_bottom = None
-    if st.frame_view_btn:
-        btn_bottom = st.frame_view_btn[1]
-    elif st.frame_all_btn:
-        btn_bottom = st.frame_all_btn[1]
-    if btn_bottom is not None and btn_bottom <= ty + font_size:
+    btn_bottoms = [btn[1] for btn in (st.frame_all_btn, st.frame_view_btn, st.frame_selected_btn) if btn]
+    if btn_bottoms and min(btn_bottoms) <= ty + font_size:
         return
 
     text_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
@@ -1516,6 +1516,10 @@ def draw_minimap() -> None:
     with _Timer("_draw_frame_view_button"):
         _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
 
+    # frame-selected button (below frame-view)
+    with _Timer("_draw_frame_selected_button"):
+        _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
+
     # Edge resize handle pills
     with _Timer("draw_resize_handles"):
         _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
@@ -1635,7 +1639,7 @@ def _draw_minimap_scrollbars(
         _draw_pill(thumb_x2, thumb_y2, bar_thick, thumb_h, scroll_color)
 
 
-BTN_BG_COLOR = (0, 0, 0, 0.35)
+BTN_BG_COLOR = (0.1, 0.1, 0.1, 0.7)
 
 
 def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, master_alpha):
@@ -1658,20 +1662,20 @@ def _draw_frame_all_button(mx, my, mw, mh, padding, bounds, colors, ui_scale, ma
 
     btn_size = FRAME_ALL_BTN_SIZE * ui_scale
     margin = FRAME_ALL_BTN_MARGIN * ui_scale
+    gap = FRAME_BTN_GAP * ui_scale
     x = round(inner_l + mw - btn_size - margin - padding)
     y = inner_t - btn_size - margin
     ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
     border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
 
-    show_frame_view = getattr(settings, "show_frame_view_btn", True) and getattr(settings, "interactive", True)
-    if show_frame_view:
-        gap = 3 * ui_scale
-        fy = round(y - gap - btn_size)
-        _draw_pill(x, fy, btn_size, btn_size * 2 + gap, _alpha_mul(BTN_BG_COLOR, master_alpha))
-        _draw_pill_border(x, fy, btn_size, btn_size * 2 + gap, border_color, 0.5)
-    else:
-        _draw_pill(x, y, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
-        _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)
+    # Shared capsule spans every visible button in the stack below this one
+    extra = (1 if getattr(settings, "show_frame_view_btn", True) else 0) + (
+        1 if getattr(settings, "show_frame_selected_btn", True) else 0
+    )
+    total_h = btn_size * (extra + 1) + gap * extra
+    py = round(y - extra * (gap + btn_size))
+    _draw_pill(x, py, btn_size, total_h, _alpha_mul(BTN_BG_COLOR, master_alpha))
+    _draw_pill_border(x, py, btn_size, total_h, border_color, 0.5)
 
     # Corner brackets icon (four brackets pointing outward)
     i = 5 * ui_scale
@@ -1709,13 +1713,21 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
 
     btn_size = FRAME_ALL_BTN_SIZE * ui_scale
     margin = FRAME_ALL_BTN_MARGIN * ui_scale
-    gap = 2 * ui_scale
+    gap = FRAME_BTN_GAP * ui_scale
     x = inner_l + mw - btn_size - margin - padding
     y = inner_t - btn_size - margin  # frame-all y
-    has_frame_all = getattr(settings, "show_frame_all_btn", True) and getattr(settings, "interactive", True)
-    fy = y - gap - btn_size if has_frame_all else y
+    above = 1 if getattr(settings, "show_frame_all_btn", True) else 0
+    fy = y - above * (gap + btn_size)
     ico_color = _alpha_mul(colors["text"], master_alpha * 0.8)
     border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
+
+    # Topmost visible button owns the shared capsule background
+    if not above:
+        below = 1 if getattr(settings, "show_frame_selected_btn", True) else 0
+        total_h = btn_size * (below + 1) + gap * below
+        py = fy - below * (gap + btn_size)
+        _draw_pill(x, py, btn_size, total_h, _alpha_mul(BTN_BG_COLOR, master_alpha))
+        _draw_pill_border(x, py, btn_size, total_h, border_color, 0.5)
 
     # Viewport rectangle icon
     inset = 5 * ui_scale
@@ -1723,12 +1735,65 @@ def _draw_frame_view_button(mx, my, mw, mh, padding, colors, ui_scale, master_al
     ry = round(fy + inset)
     rw = btn_size - 2 * inset
     rh = btn_size - 2 * inset
-    t = max(1, int(1.5 * ui_scale))
-
-    if not _state().frame_all_btn:
-        _draw_pill(x, fy, btn_size, btn_size, BTN_BG_COLOR)
-        _draw_pill_border(x, y, btn_size, btn_size, border_color, 0.5)
+    t = max(4, int(4.0 * ui_scale))
 
     _draw_rounded_rect_border(rx, ry, rw, rh, t, ico_color, 0.1)
 
     st.frame_view_btn = (x, fy, btn_size, btn_size)
+
+
+def _draw_frame_selected_button(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
+    """Draw a frame-selected button below the other frame buttons."""
+    addon = bpy.context.preferences.addons.get(__package__)
+    settings = getattr(addon.preferences, "settings", None) if addon else None
+    if (
+        not settings
+        or not getattr(settings, "show_frame_selected_btn", True)
+        or not getattr(settings, "interactive", True)
+    ):
+        _state().frame_selected_btn = None
+        return
+
+    inner_l = mx
+    inner_t = my + mh - padding
+
+    st = _state()
+
+    btn_size = FRAME_ALL_BTN_SIZE * ui_scale
+    margin = FRAME_ALL_BTN_MARGIN * ui_scale
+    gap = FRAME_BTN_GAP * ui_scale
+    x = inner_l + mw - btn_size - margin - padding
+    y = inner_t - btn_size - margin  # frame-all y
+    above = (1 if getattr(settings, "show_frame_all_btn", True) else 0) + (
+        1 if getattr(settings, "show_frame_view_btn", True) else 0
+    )
+    fy = y - above * (gap + btn_size)
+    ico_color = _alpha_mul(colors["text"], master_alpha * 0.8)
+    border_color = _alpha_mul(BTN_BG_COLOR, master_alpha * 0.25)
+
+    # Topmost visible button owns the shared capsule background
+    if not above:
+        _draw_pill(x, fy, btn_size, btn_size, _alpha_mul(BTN_BG_COLOR, master_alpha))
+        _draw_pill_border(x, fy, btn_size, btn_size, border_color, 0.5)
+
+    # Frame-all style rails with corner arms around a center box
+    i = 5 * ui_scale
+    t = max(1, int(1.5 * ui_scale))
+    arm = btn_size * 0.15
+
+    # Left/right rails connecting top and bottom corners
+    _draw_filled_rounded_rect(x + i, fy + i, t, btn_size - 2 * i, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + btn_size - i - t, fy + i, t, btn_size - 2 * i, t * 0.5, ico_color)
+    # Corner arms
+    _draw_filled_rounded_rect(x + i, fy + i, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + btn_size - i - arm, fy + i, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + i, fy + btn_size - i - t, arm, t, t * 0.5, ico_color)
+    _draw_filled_rounded_rect(x + btn_size - i - arm, fy + btn_size - i - t, arm, t, t * 0.5, ico_color)
+
+    # Center box
+    bw = bh = 6 * ui_scale
+    bx = x + (btn_size - bw) / 2
+    by = fy + (btn_size - bh) / 2
+    _draw_rounded_rect_border(bx, by, bw, bh, 1.5 * ui_scale, ico_color, t)
+
+    st.frame_selected_btn = (x, fy, btn_size, btn_size)

@@ -14,8 +14,8 @@ LUMINANCE_G: float = 0.587
 LUMINANCE_B: float = 0.114
 OUTLINE_ALPHA: float = 0.8
 MAP_PADDING: float = 12.0
-MIN_MAP_WIDTH: int = 64
-MIN_MAP_HEIGHT: int = 64
+MIN_MAP_WIDTH: int = 120
+MIN_MAP_HEIGHT: int = 80
 MAX_FRAME_ZOOM: float = 20.0
 
 
@@ -207,6 +207,7 @@ class MinimapState:
     enabled: bool = True
     frame_all_btn: tuple[float, float, float, float] | None = None
     frame_view_btn: tuple[float, float, float, float] | None = None
+    frame_selected_btn: tuple[float, float, float, float] | None = None
     width_clamped: bool = False
     height_clamped: bool = False
     hovered_handle: str | None = None
