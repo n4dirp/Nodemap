@@ -450,6 +450,34 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.prop(settings, "show_by_default", text="Show in New Editors")
 
         layout.separator()
+        sub_body = layout.column()
+        sub_body.active = settings.interactive
+        col = sub_body.column()
+        col.label(text="Navigation")
+
+        col = sub_body.column(heading="Animations")
+        _reduce_motion = context.preferences.view.use_reduce_motion
+        col.active = not _reduce_motion
+        row = col.row(align=True, heading="")
+        row.prop(settings, "smooth_pan", text="")
+        sub = row.row(align=True)
+        sub.active = settings.smooth_pan
+        sub.row().prop(settings, "pan_speed", expand=True)
+
+        col.separator()
+        col.row().prop(settings, "left_click_action", text="Left Click")
+        col.row().prop(settings, "right_click_action", text="Right Click")
+
+        if {"SELECT", "PAN_SELECT"} & {
+            settings.left_click_action,
+            settings.right_click_action,
+        }:
+            col.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
+
+        col.separator()
+        col.row().prop(settings, "scroll_wheel_mode", expand=True)
+
+        layout.separator()
         layout.label(text="Keymap")
         wm = context.window_manager
         kc = wm.keyconfigs.user
@@ -470,32 +498,6 @@ class NODEMAP_AddonPreferences(AddonPreferences):
                 layout.operator("nodemap.restore_keymap", text="Restore")
 
         layout.separator()
-        sub_body = layout.column()
-        sub_body.active = settings.interactive
-        col = sub_body.column()
-        col.label(text="Navigation")
-        col.row().prop(settings, "left_click_action", text="Left Click")
-        col.row().prop(settings, "right_click_action", text="Right Click")
-        col.row().prop(settings, "scroll_wheel_mode", expand=True)
-
-        if {"SELECT", "PAN_SELECT"} & {
-            settings.left_click_action,
-            settings.right_click_action,
-        }:
-            col.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
-
-        col.separator()
-
-        col = sub_body.column(heading="Pan Animation")
-        _reduce_motion = context.preferences.view.use_reduce_motion
-        col.active = not _reduce_motion
-        row = col.row(align=True, heading="")
-        row.prop(settings, "smooth_pan", text="")
-        sub = row.row(align=True)
-        sub.active = settings.smooth_pan
-        sub.row().prop(settings, "pan_speed", expand=True)
-
-        layout.separator()
         layout.label(text="Layout")
         col = layout.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
@@ -504,10 +506,6 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = layout.column(align=True)
         col.prop(settings, "max_width_pct", text="Max Region X")
         col.prop(settings, "max_height_pct", text="Y")
-
-        layout.separator()
-        layout.label(text="Buttons")
-        layout.prop(settings, "show_list_toggle_btn")
 
         layout.separator()
         layout.label(text="Performance")
