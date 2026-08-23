@@ -1,6 +1,7 @@
 """GPU drawing helpers for nodes minimap overlay."""
 
 import math
+from typing import Any
 
 import blf
 import gpu
@@ -434,14 +435,17 @@ def _get_batch_rect_border_shader() -> gpu.types.GPUShader:
     return _BATCH_RECT_BORDER_SHADER
 
 
-def _batch_draw_pills(
+def _build_pill_batch(
     wires: list[tuple[float, float, float, float]],
     thickness: float,
-    color: tuple[float, float, float, float],
-) -> None:
-    """Draw multiple pill-shaped wires in a single GPU batch."""
+) -> tuple[Any, Any]:
+    """Bake pill-shaped wires into a GPU batch; returns ``(shader, batch)``.
+
+    Both are None when *wires* is empty. The color is left as a draw-time
+    uniform so one batch per distinct color suffices.
+    """
     if not wires:
-        return
+        return None, None
 
     shader = _get_batch_pill_shader()
     pad = 2.0
@@ -496,14 +500,7 @@ def _batch_draw_pills(
         {"pos": all_pos, "uv": all_uv, "halfSize": all_half_size},
         indices=indices,
     )
-
-    shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
-    shader.uniform_float("color", _srgb_to_linear(color))
-    batch.draw(shader)
+    return shader, batch
 
 
 def _theme_rgba(path: str, default: tuple[float, ...]):

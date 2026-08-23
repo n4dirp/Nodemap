@@ -233,18 +233,33 @@ class MinimapState:
     list_anim_timer: Any = None
     cached_fingerprint: Any = None
     pending_timer: Any = None
+    pending_timer_deadline: float = 0.0
+    pending_fingerprint: Any = None
     tree_data: dict | None = None
     cached_backdrops_batch: Any = None
     cached_borders_batch: Any = None
     cached_frames_fill_batch: Any = None
     cached_frames_border_batch: Any = None
     cached_text: list | None = None
-    cached_wires: dict | None = None
-    cached_wire_thickness: float = 1.0
+    cached_wire_batches: list | None = None
+    cached_wire_shadow_batch: Any = None
+    cached_marker_batches: list | None = None
     cached_socket_batch: Any = None
     cached_socket_ph: float = 2.0
     cached_socket_shadow: list | None = None
-    cached_group_markers: dict | None = None
+    list_cache_key: Any = None
+    cached_list_entries: list | None = None
+    cached_list_layout: dict | None = None
+    cached_list_swatches_batch: Any = None
+    tree_data_version: int = 0
+    pos_data_version: int = 0
+    batch_cache_key: Any = None
+    batch_scale: float = 1.0
+    batch_anchor: tuple[float, float] = (0.0, 0.0)
+    wire_cache_key: Any = None
+    wire_scale: float = 1.0
+    pending_settle_flush: bool = False
+    last_move_refresh: float = 0.0
     _profiler: Any = field(default=None, repr=False)
     _profiling_active: bool = field(default=False, repr=False)
     _profiling_frame_count: int = field(default=0, repr=False)
@@ -303,8 +318,10 @@ def _ensure_area_states() -> None:
     logger.debug("_ensure_area_states: %d NODE_EDITOR areas processed", count)
 
 
-def _get_node_dims(node: bpy.types.Node) -> tuple[float, float]:
+def _get_node_dims(node: bpy.types.Node, ui_scale: float | None = None) -> tuple[float, float]:
     """Robust extraction of width and height ensuring positive float values."""
+    if ui_scale is None:
+        ui_scale = _get_ui_scale()
     if getattr(node, "hide", False):
         return 100.0, 30.0
     try:
@@ -323,7 +340,6 @@ def _get_node_dims(node: bpy.types.Node) -> tuple[float, float]:
     except (AttributeError, TypeError, IndexError):
         h = abs(getattr(node, "height", 30.0))
 
-    ui_scale = _get_ui_scale()
     return max(w / ui_scale, 5.0), max(h / ui_scale, 5.0)
 
 
@@ -331,8 +347,9 @@ def _get_node_tree_bounds(nodes: bpy.types.Nodes) -> tuple[float, float, float, 
     """Compute the bounding box of all nodes in a node tree as (min_x, min_y, max_x, max_y)."""
     min_x = min_y = float("inf")
     max_x = max_y = float("-inf")
+    ui = _get_ui_scale()
     for node in nodes:
-        w, h = _get_node_dims(node)
+        w, h = _get_node_dims(node, ui)
         x, y = node.location_absolute.x, node.location_absolute.y
         min_x = min(min_x, x)
         max_x = max(max_x, x + w)
@@ -431,8 +448,8 @@ _LIST_ANIM_FRAMES: dict[str, int] = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}
 def start_list_width_animation(st: MinimapState, settings) -> None:
     """Begin animating the type-list zone width after a toggle-button click.
 
-    An expansion defers the target measurement to the draw step because the
-    compiled type stats only land after the preference-change debounce.
+    An expansion defers the target measurement to the draw step because
+    measurable type stats only exist once the pending tree compile lands.
     Skipped when Reduce Motion is enabled so the zone snaps instantly.
     """
     try:
@@ -998,24 +1015,104 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     }
 
 
+_EMPTY_FINGERPRINT = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
+
+
+def _get_tree_snapshot(
+    node_tree, include_selection: bool = True
+) -> tuple[tuple, tuple[float, float, float, float], int]:
+    """Return ``(fingerprint, raw bounds, drawable node count)`` in a single RNA pass.
+
+    The fingerprint matches :func:`get_tree_fingerprint`; bounds use the same
+    clamped dims as :func:`_get_node_tree_bounds`; the count excludes FRAME
+    and REROUTE nodes.
+    """
+    if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
+        return _EMPTY_FINGERPRINT, (0.0, 0.0, 200.0, 200.0), 0
+    nodes = node_tree.nodes
+    ui = _get_ui_scale()
+
+    loc_sum = 0.0
+    width_sum = 0.0
+    height_sum = 0.0
+    mute_sum = 0
+    hide_sum = 0
+    select_sum = 0
+    content_count = 0
+
+    min_x = min_y = float("inf")
+    max_x = max_y = float("-inf")
+
+    for node in nodes:
+        loc = node.location_absolute
+        x = loc.x
+        y = loc.y
+        loc_sum += x + y
+
+        w_rna = abs(node.width)
+        width_sum += node.width
+
+        try:
+            dims = node.dimensions
+            h_abs = abs(dims[1])
+            w_dim = abs(dims[0])
+        except (AttributeError, TypeError, IndexError):
+            h_abs = abs(getattr(node, "height", 30.0))
+            w_dim = w_rna
+        height_sum += h_abs
+
+        if node.mute:
+            mute_sum += 1
+        if node.hide:
+            hide_sum += 1
+            bw, bh = 100.0, 30.0
+        else:
+            bw = w_dim if w_dim > 0 else w_rna
+            bh = h_abs if h_abs > 0 else abs(getattr(node, "height", 30.0))
+            bw = max(bw / ui, 5.0)
+            bh = max(bh / ui, 5.0)
+
+        if include_selection and node.select:
+            select_sum += 1
+        if node.type not in ("FRAME", "REROUTE"):
+            content_count += 1
+
+        rx = x + bw
+        by = y - bh
+        if x < min_x:
+            min_x = x
+        if rx > max_x:
+            max_x = rx
+        if by < min_y:
+            min_y = by
+        if y > max_y:
+            max_y = y
+
+    links_count = len(node_tree.links) if hasattr(node_tree, "links") else 0
+    active_name = ""
+    if include_selection:
+        active = nodes.active
+        if active:
+            active_name = active.name
+
+    fingerprint = (
+        len(nodes),
+        loc_sum,
+        active_name,
+        select_sum,
+        mute_sum,
+        hide_sum,
+        width_sum,
+        height_sum,
+        links_count,
+    )
+    bounds = (min_x, min_y, max_x, max_y) if min_x != float("inf") else (0.0, 0.0, 200.0, 200.0)
+    return fingerprint, bounds, content_count
+
+
 def get_tree_fingerprint(node_tree, include_selection: bool = True) -> tuple:
     """Generate a lightweight fingerprint of the node tree structure and selection states."""
-    if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
-        return (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
-    nodes = node_tree.nodes
-    loc_sum = sum(n.location_absolute.x + n.location_absolute.y for n in nodes)
-    mute_sum = sum(1 for n in nodes if n.mute)
-    hide_sum = sum(1 for n in nodes if n.hide)
-    width_sum = sum(n.width for n in nodes)
-    height_sum = sum(abs(n.dimensions[1]) for n in nodes)
-    links_count = len(node_tree.links) if hasattr(node_tree, "links") else 0
-    if include_selection:
-        select_sum = sum(1 for n in nodes if n.select)
-        active_name = nodes.active.name if nodes.active else ""
-    else:
-        select_sum = 0
-        active_name = ""
-    return (len(nodes), loc_sum, active_name, select_sum, mute_sum, hide_sum, width_sum, height_sum, links_count)
+    return _get_tree_snapshot(node_tree, include_selection)[0]
 
 
 def _get_node_initials(name: str) -> str:

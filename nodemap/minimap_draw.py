@@ -9,6 +9,7 @@ import blf
 import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
+from mathutils import Matrix
 
 try:
     import cProfile
@@ -18,7 +19,7 @@ except ImportError:
     _HAS_C_PROFILE = False
 
 from .gpu_draw import (
-    _batch_draw_pills,
+    _build_pill_batch,
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_clipped,
     _draw_filled_rounded_rect_with_hole,
@@ -26,6 +27,7 @@ from .gpu_draw import (
     _draw_pill_border,
     _draw_rounded_rect_border,
     _draw_text_with_shadow,
+    _get_batch_pill_shader,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
@@ -53,8 +55,8 @@ from .helpers import (
     _get_node_editor_theme_colors,
     _get_node_initials,
     _get_node_label_lines,
-    _get_node_tree_bounds,
     _get_safe_bounds,
+    _get_tree_snapshot,
     _get_type_list_width,
     _get_ui_scale,
     _get_visible_rect,
@@ -87,6 +89,20 @@ _SCROLLBAR_ALPHA = 0.65
 _TYPE_LIST_ANIM_AWAIT_TIMEOUT = 1.0
 
 _NODE_ROUNDNESS_DEFAULT = 2.0
+
+# Rebuild cached batches when the map scale drifts this far from the baked
+# scale (relative); only radius/thickness/font buckets depend on it.
+_SCALE_REBUILD_REL = 0.002
+# Force a batch rebuild when the per-frame anchor drifts this far from the
+# bake-time anchor; bounds how stale rect culling may become (px).
+_BATCH_DRIFT_PX = 256.0
+_CULL_MARGIN_PX = _BATCH_DRIFT_PX + 32.0
+# Skip node borders below this on-screen size (sub-pixel lines are invisible).
+_MIN_BORDER_PX = 1.5
+# Minimum interval between live position-only refreshes during drags (seconds).
+# Skipped frames fall through to the debounced compile, which flushes the
+# final position once movement settles.
+_MOVE_REFRESH_MIN_INTERVAL = 0.016
 
 # Profile for N frames, then dump sorted stats via logger.trace
 _PROFILE_FRAMES = 300
@@ -492,20 +508,20 @@ def _draw_viewport_overlay(
 
 def _draw_node_count(
     settings,
-    nodes,
+    node_count: int,
     mx: float,
     my: float,
     mw: float,
     colors: dict,
     master_alpha: float,
     ui_scale: float,
-    font_id: int,
 ) -> None:
     """Draw the node count text centered below the minimap."""
     if not getattr(settings, "show_node_count", True):
         return
 
-    info_text = f"{len(nodes)}"
+    info_text = str(node_count)
+    font_id = 0
     font_size = int(FONT_SIZE * ui_scale)
     blf.size(font_id, font_size)
     text_w, _ = blf.dimensions(font_id, info_text)
@@ -529,7 +545,7 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
 
     Snaps directly when no animation is running; otherwise eases from the
     recorded start width toward the locked target. An expansion waits (up to
-    a timeout) for the debounced compile to expose measurable type stats
+    a timeout) for the pending compile to expose measurable type stats
     before starting its clock.
     """
     target_now = _get_type_list_width(settings, st, mw, ui_scale)
@@ -560,6 +576,96 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
         _schedule_list_anim_redraw(st)
 
 
+def _type_list_cache_key(st: MinimapState, settings, colors: dict, master_alpha: float, ui_scale: float) -> tuple:
+    """Return the invalidation key for the cached type-list layout and swatch batch."""
+    # The color-tag palette feeds type swatch colors at compile time, so track
+    # it here to catch theme edits that do not change the tree fingerprint.
+    palette = tuple(
+        _theme_rgba(f"node_editor.{attr}", colors["node"])[:3] for attr in _COLOR_TAG_TO_THEME_ATTR.values()
+    )
+    return (
+        st.tree_data_version,
+        getattr(settings, "type_list_sort", "COUNT"),
+        getattr(settings, "colored_nodes", True),
+        ui_scale,
+        master_alpha,
+        tuple(colors["node"]),
+        palette,
+    )
+
+
+def _build_type_list_cache(
+    st: MinimapState, settings, key: tuple, colors: dict, master_alpha: float, ui_scale: float
+) -> None:
+    """Sort type entries once and bake layout metrics plus all swatch pills.
+
+    Swatch vertices are stored in list-local space — x relative to the content
+    origin, y downward from the top row at scroll=0 — so scrolling and width
+    animation only move the matrix translate, never rebuild the batch.
+    """
+    tree_data = st.tree_data or {}
+    type_stats = tree_data.get("type_stats") or {}
+    type_colors = tree_data.get("type_colors") or {}
+
+    font_id = STATS_FONT_ID
+    font_size = int(STATS_FONT_SIZE * ui_scale)
+    blf.size(font_id, font_size)
+
+    if getattr(settings, "type_list_sort", "COUNT") == "NAME":
+        items = sorted(type_stats.items(), key=lambda kv: kv[0].lower())
+    else:
+        items = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    entries: list[tuple[str, str, float]] = []
+    widest_count = 0.0
+    for label, count in items:
+        count_text = str(count)
+        count_w = blf.dimensions(font_id, count_text)[0]
+        widest_count = max(widest_count, count_w)
+        entries.append((label, count_text, count_w))
+
+    _, line_h = blf.dimensions(font_id, "Ay")
+    row_h = line_h + 4 * ui_scale
+
+    batch = None
+    if getattr(settings, "colored_nodes", True):
+        swatch = _LIST_SWATCH * ui_scale
+        swatch_y_off = (row_h - swatch) / 2
+        half = swatch / 2
+        pad = 2.0
+        uv_half = half + pad
+        pos = []
+        uvs = []
+        half_sizes = []
+        radii = []
+        cols = []
+        for i, (label, _count_text, _count_w) in enumerate(entries):
+            c = type_colors.get(label) or colors["node"]
+            rgba = _srgb_to_linear(_alpha_mul(c, master_alpha))
+            ly = -(i + 1) * row_h + swatch_y_off
+            x0, y0 = -pad, ly - pad
+            x1, y1 = swatch + pad, ly + swatch + pad
+            pos.extend(((x0, y0, 0.0), (x1, y0, 0.0), (x1, y1, 0.0), (x0, y1, 0.0)))
+            uvs.extend(((-uv_half, -uv_half), (uv_half, -uv_half), (uv_half, uv_half), (-uv_half, uv_half)))
+            half_sizes.extend([(half, half)] * 4)
+            radii.extend([half] * 4)
+            cols.extend([rgba] * 4)
+        n = len(pos) // 4
+        if n > 0:
+            shader = _get_batch_rect_shader()
+            batch = batch_for_shader(
+                shader,
+                "TRIS",
+                {"pos": pos, "uv": uvs, "halfSize": half_sizes, "radius": radii, "color": cols},
+                indices=_create_quad_indices(n),
+            )
+
+    st.list_cache_key = key
+    st.cached_list_entries = entries
+    st.cached_list_layout = {"font_size": font_size, "line_h": line_h, "row_h": row_h, "widest_count": widest_count}
+    st.cached_list_swatches_batch = batch
+
+
 def _draw_type_list(
     settings,
     st: MinimapState,
@@ -585,18 +691,17 @@ def _draw_type_list(
         st.hovered_type_label = None
         return
 
-    font_id = STATS_FONT_ID
-    font_size = int(STATS_FONT_SIZE * ui_scale)
-    blf.size(font_id, font_size)
-    _, line_h = blf.dimensions(font_id, "Ay")
-    row_h = line_h + 4 * ui_scale
+    key = _type_list_cache_key(st, settings, colors, master_alpha, ui_scale)
+    if key != st.list_cache_key or not st.cached_list_layout:
+        with _Timer("type_list_cache_build"):
+            _build_type_list_cache(st, settings, key, colors, master_alpha, ui_scale)
+    entries = st.cached_list_entries or []
+    layout = st.cached_list_layout or {}
+    font_size = layout.get("font_size", int(STATS_FONT_SIZE * ui_scale))
+    row_h = layout.get("row_h", 16.0)
+    line_h = layout.get("line_h", 12.0)
+    widest_count = layout.get("widest_count", 0.0)
     st.list_row_h = row_h
-
-    if getattr(settings, "type_list_sort", "COUNT") == "NAME":
-        entries = sorted(type_stats.items(), key=lambda kv: kv[0].lower())
-    else:
-        entries = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
-    type_colors = (tree_data.get("type_colors") or {}) if tree_data else {}
 
     pad_x = _LIST_PAD_X * ui_scale
     swatch = _LIST_SWATCH * ui_scale
@@ -629,13 +734,11 @@ def _draw_type_list(
 
     show_swatch = getattr(settings, "colored_nodes", True)
 
-    widest_count = max(blf.dimensions(font_id, str(count))[0] for _, count in entries)
     content_x = zone_x + pad_x
     count_right = zone_x + zone_w - pad_x
     label_x = content_x + (swatch + swatch_gap if show_swatch else 0.0)
     label_max_w = max(0.0, count_right - widest_count - count_gap - label_x)
     text_y_off = (row_h - line_h) / 2
-    swatch_y_off = (row_h - swatch) / 2
 
     text_col = _alpha_mul(colors["text"], 0.9 * master_alpha)
     count_col = _alpha_mul(colors["text"], 0.55 * master_alpha)
@@ -657,41 +760,72 @@ def _draw_type_list(
     try:
         gpu.state.scissor_set(int(zone_x + 1), int(zone_y + 1), max(0, int(zone_w - 2)), max(0, int(zone_h - 2)))
         gpu.state.scissor_test_set(True)
+        gpu.state.blend_set("ALPHA")
 
         row_rects = []
+        hovered = st.hovered_type_label
         for i in range(first, last):
-            label, count = entries[i]
+            label, _count_text, _count_w = entries[i]
             row_top = view_t - i * row_h + st.list_scroll
             row_bottom = row_top - row_h
             if row_top <= view_b or row_bottom >= view_t:
                 continue
-            # Text drawing disables blending; restore it before the pill draws.
-            gpu.state.blend_set("ALPHA")
-            if st.hovered_type_label == label:
+            if hovered == label:
                 _draw_filled_rounded_rect(pill_x, row_bottom, pill_w, row_h, 4.0 * ui_scale, hover_col)
-            if show_swatch:
-                c = type_colors.get(label) or colors["node"]
-                _draw_pill(content_x, row_bottom + swatch_y_off, swatch, swatch, _alpha_mul(c, master_alpha))
-            text_y = row_bottom + text_y_off
-            # Clip overlong labels at the column edge only; BLF discards
-            # glyphs past the clip box instead of clipping them, so vertical
-            # bounds get slack beyond any drawable row and the scissor does
-            # the per-pixel row clipping.
-            blf.enable(font_id, blf.CLIPPING)
-            blf.clipping(
-                font_id,
-                int(label_x),
-                int(zone_y - row_h),
-                int(label_x + label_max_w),
-                int(zone_y + zone_h + row_h),
-            )
-            _draw_text_with_shadow(font_id, label, label_x, text_y, text_col, font_size)
-            blf.disable(font_id, blf.CLIPPING)
-            count_text = str(count)
-            cw = blf.dimensions(font_id, count_text)[0]
-            _draw_text_with_shadow(font_id, count_text, count_right - cw, text_y, count_col, font_size)
             row_rects.append((pill_x, row_bottom, pill_w, row_h, label))
         st.list_row_rects = row_rects
+
+        # Cached swatch pills in one draw call; the translation matrix applies
+        # the anchor and scroll offset to the list-local baked coordinates.
+        swatch_batch = st.cached_list_swatches_batch
+        if show_swatch and swatch_batch is not None:
+            rect_shader = _get_batch_rect_shader()
+            rect_shader.bind()
+            rect_shader.uniform_float(
+                "ModelViewProjectionMatrix",
+                gpu.matrix.get_projection_matrix()
+                @ (gpu.matrix.get_model_view_matrix() @ Matrix.Translation((content_x, view_t + st.list_scroll, 0.0))),
+            )
+            swatch_batch.draw(rect_shader)
+
+        # Hoisted BLF state (size, shadow, clip box); calling the shared text
+        # helper per row would redo this setup twice per visible row.
+        font_id = STATS_FONT_ID
+        blf.size(font_id, font_size)
+        # Clip overlong labels at the column edge only; BLF discards
+        # glyphs past the clip box instead of clipping them, so vertical
+        # bounds get slack beyond any drawable row and the scissor does
+        # the per-pixel row clipping.
+        blf.enable(font_id, blf.CLIPPING)
+        blf.clipping(
+            font_id,
+            int(label_x),
+            int(zone_y - row_h),
+            int(label_x + label_max_w),
+            int(zone_y + zone_h + row_h),
+        )
+        blf.enable(font_id, blf.SHADOW)
+        blf.shadow(font_id, 3, 0, 0, 0, 255)
+        blf.shadow_offset(font_id, 0, -1)
+        for i in range(first, last):
+            label, count_text, count_w = entries[i]
+            row_top = view_t - i * row_h + st.list_scroll
+            row_bottom = row_top - row_h
+            if row_top <= view_b or row_bottom >= view_t:
+                continue
+            text_y = row_bottom + text_y_off
+            blf.position(font_id, label_x, text_y, 0)
+            blf.color(font_id, *text_col)
+            blf.draw(font_id, label)
+            # Counts sit right of the label clip box; BLF discards glyphs
+            # past the box instead of clipping them.
+            blf.disable(font_id, blf.CLIPPING)
+            blf.position(font_id, count_right - count_w, text_y, 0)
+            blf.color(font_id, *count_col)
+            blf.draw(font_id, count_text)
+            blf.enable(font_id, blf.CLIPPING)
+        blf.disable(font_id, blf.CLIPPING)
+        blf.disable(font_id, blf.SHADOW)
     finally:
         try:
             was_active, old_rect = saved_scissor or (False, None)
@@ -731,17 +865,58 @@ def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
     return indices
 
 
+def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
+    """True when two fingerprints differ only in the position-sum slot."""
+    return old is not None and len(old) == len(current) and old[:1] == current[:1] and old[2:] == current[2:]
+
+
 def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
-    """Timer callback: compile tree data after fingerprint settles, then force redraw."""
+    """Timer callback: compile tree data after fingerprint settles, then force redraw.
+
+    When ``st.pending_settle_flush`` is set (drag position refreshes happened),
+    an unchanged fingerprint only needs the tree-data generation bumped so
+    frozen wire/marker batches snap to the already-patched positions. A
+    position-only diff is patched incrementally; anything else recompiles.
+    """
     include_selection = getattr(settings, "show_node_borders", True)
     current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
-    if st.cached_fingerprint == current_fingerprint:
+    old_fingerprint = st.cached_fingerprint
+    unchanged = old_fingerprint == current_fingerprint
+    trace = logger.isEnabledFor(TRACE_LEVEL)
+    if unchanged and not st.pending_settle_flush:
         st.pending_timer = None
+        st.pending_timer_deadline = 0.0
+        st.pending_fingerprint = None
+        if trace:
+            logger.trace("SETTLE skip: fingerprint unchanged, nothing pending")
         return None
-    with _Timer("compile_tree"):
-        _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale)
-        st.cached_fingerprint = current_fingerprint
+    applied = False
+    path = "compile"
+    if unchanged and st.tree_data:
+        # Positions were fully patched by _apply_move_updates; rebaking the
+        # frozen wire/marker generation skips the full recompile.
+        st.tree_data_version += 1
+        applied = True
+        path = "settle_bump"
+    elif _is_move_only_diff(old_fingerprint, current_fingerprint) and st.tree_data:
+        with _Timer("move_update"):
+            applied = _apply_move_updates(st, node_tree)
+        if applied:
+            st.cached_fingerprint = current_fingerprint
+            # Movement settled: unfreeze wire/marker batches so they snap to
+            # the patched positions without a full recompile.
+            st.tree_data_version += 1
+            path = "move_patch"
+    if not applied:
+        with _Timer("compile_tree"):
+            _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale)
+            st.cached_fingerprint = current_fingerprint
     st.pending_timer = None
+    st.pending_timer_deadline = 0.0
+    st.pending_fingerprint = None
+    st.pending_settle_flush = False
+    if trace:
+        logger.trace("SETTLE %s", path)
     screen = bpy.context.screen
     if screen:
         for area in screen.areas:
@@ -755,8 +930,8 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
 
     Called only when the node tree fingerprint changes (tree topology,
     selection, mute, active node).  Screen-space transforms (zoom/pan)
-    are NOT applied here — they are handled each frame by
-    ``_build_minimap_batches()``.
+    are NOT applied here — content batches are baked in map-local space
+    by ``_ensure_minimap_batches()`` and placed with a matrix transform.
 
     Stores result in ``st.tree_data``.
     """
@@ -796,7 +971,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     with _Timer("compile_tree.pre_pass"):
         for node in nodes:
             ptr = node.as_pointer()
-            w, h = _get_node_dims(node)
+            w, h = _get_node_dims(node, ui_scale)
             loc = node.location_absolute
             loc_x, loc_y = loc.x, loc.y
 
@@ -832,6 +1007,12 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
             tree_data["bounds"] = (0.0, 0.0, 200.0, 200.0)
         else:
             tree_data["bounds"] = (bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y)
+        # Stable local-space origin for batch baking (independent of later
+        # bound drift so screen transforms stay exact between rebuilds).
+        tree_data["origin"] = (
+            (bounds_min_x + bounds_max_x) / 2,
+            (bounds_min_y + bounds_max_y) / 2,
+        )
 
         # Build sorted Z-order (frames first, then unselected, selected, active)
         sorted_items = []
@@ -855,11 +1036,16 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
             color_tag_cache[tag] = _theme_rgba(f"node_editor.{theme_attr}", colors["node"])
 
         node_infos: list[dict] = []
-        socket_items: dict[tuple, list[tuple[float, float]]] = {}
         default_socket_color = (*colors["wire"][:3], master_alpha)
         default_wire_color = _alpha_mul(colors["wire"], master_alpha)
         out_pos: dict[str, dict] = {}
         in_pos: dict[str, dict] = {}
+        # Socket draw colors keyed by socket pointer, shared across nodes and
+        # persisted so position-only refreshes skip draw_color() calls.
+        sock_color_cache: dict[int, tuple[float, float, float, float]] = {}
+        # Per-node socket dots so drag refreshes rebuild only the moved nodes;
+        # grouped by color afterwards via _group_socket_dots().
+        socket_items_by_node: dict[int, list[tuple[tuple, float, float]]] = {}
 
         for node, is_frame in sorted_items:
             ptr = node.as_pointer()
@@ -868,6 +1054,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
             ty = loc_y_top - h
 
             info: dict = {
+                "ptr": ptr,
                 "tree_x": loc_x,
                 "tree_y": ty,
                 "tree_w": w,
@@ -943,6 +1130,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     marker_col = node_color if colored_nodes and not node.select else border_col
                     marker_color = _alpha_mul(marker_col, border_alpha)
                     group_markers.setdefault(marker_color, []).append((loc_x + w / 2, ty, w))
+                    info["group_marker_col"] = marker_color
 
             # Labels (tree-space positions computed in build)
             text_alpha = 0.35 if node.mute else 1.0
@@ -984,9 +1172,8 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
             body_bot = body_top - h
             body_range = body_top - body_bot
 
-            sock_color_cache: dict[int, tuple[float, float, float, float]] = {}
-
             if show_socket_indicators:
+                dots: list[tuple[tuple, float, float]] = []
                 for is_output, sock_list in [(False, node.inputs), (True, node.outputs)]:
                     try:
                         visible = [s for s in sock_list if not s.hide and s.enabled]
@@ -994,8 +1181,6 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                         visible = [
                             s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)
                         ]
-                    if not visible:
-                        continue
 
                     x_base = loc_x + (w if is_output else 0)
                     num = len(visible)
@@ -1015,8 +1200,8 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                                     sock_color_cache[sptr] = default_socket_color
                             else:
                                 sock_color_cache[sptr] = default_socket_color
-                        color = sock_color_cache[sptr]
-                        socket_items.setdefault(color, []).append((x_base, sy_tree))
+                        dots.append((sock_color_cache[sptr], x_base, sy_tree))
+                socket_items_by_node[ptr] = dots
 
             if show_wires:
                 visible_outs = [
@@ -1059,16 +1244,25 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     in_pos[node.name] = in_dict
 
         tree_data["node_infos"] = node_infos
-        tree_data["socket_items"] = socket_items
+        tree_data["socket_items"] = _group_socket_dots(socket_items_by_node)
         tree_data["socket_ph_base"] = 8.0
         tree_data["group_markers"] = group_markers
         tree_data["type_stats"] = type_counts
         tree_data["type_colors"] = type_colors
         tree_data["type_nodes"] = type_nodes
+        # Position-refresh support (see _apply_move_updates)
+        tree_data["out_pos"] = out_pos
+        tree_data["in_pos"] = in_pos
+        tree_data["socket_draw_colors"] = sock_color_cache
+        tree_data["default_socket_color"] = default_socket_color
+        tree_data["default_wire_color"] = default_wire_color
+        tree_data["socket_indicators_on"] = show_socket_indicators
+        tree_data["socket_items_by_node"] = socket_items_by_node
 
     # ------------------------------------------------------------------
     # REROUTE wire endpoints (not in sorted_items, handled separately)
     # ------------------------------------------------------------------
+    reroute_meta: dict[str, tuple[float, float, tuple[float, float, float, float]]] = {}
     with _Timer("compile_tree.reroute"):
         if show_wires:
             for node in nodes:
@@ -1089,54 +1283,270 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     except Exception:
                         pass
 
+                reroute_meta[node.name] = (w / 2, h / 2, wire_color)
                 out_pos[node.name] = {s.identifier: (cx_n, cy_n, wire_color) for s in node.outputs}
                 in_pos[node.name] = {s.identifier: (cx_n, cy_n, wire_color) for s in node.inputs}
+
+    tree_data["reroute_meta"] = reroute_meta
 
     # ------------------------------------------------------------------
     # Wire connections (using wire endpoints)
     # ------------------------------------------------------------------
-    wire_items: dict[tuple, list[tuple[float, float, float, float]]] = {}
     with _Timer("compile_tree.wire_links"):
-        if show_wires:
-            # Phase 1: extract all link data once (Blender API calls)
-            raw_links: list[tuple[str, str, str, str]] = []
-            for link in node_tree.links:
-                from_node = link.from_node
-                if from_node and from_node.type != "FRAME":
-                    raw_links.append(
-                        (
-                            from_node.name,
-                            link.from_socket.identifier,
-                            link.to_node.name,
-                            link.to_socket.identifier,
-                        )
-                    )
+        raw_links = _extract_raw_links(node_tree) if show_wires else []
+        wire_items = _resolve_wire_items(raw_links, out_pos, in_pos)
 
-            # Phase 2: resolve to wire endpoints (pure Python dict ops)
-            for from_name, from_id, to_name, to_id in raw_links:
-                out_pos_node = out_pos.get(from_name)
-                if not out_pos_node:
-                    continue
-                out_tuple = out_pos_node.get(from_id)
-                if not out_tuple:
-                    continue
-                in_pos_node = in_pos.get(to_name)
-                if not in_pos_node:
-                    continue
-                in_tuple = in_pos_node.get(to_id)
-                if not in_tuple:
-                    continue
-                out_x, out_y, wire_color = out_tuple
-                in_x, in_y, _ = in_tuple
-                wire_items.setdefault(wire_color, []).append((out_x, out_y, in_x, in_y))
-
+    # Persisted so position-only refreshes skip the links RNA pass entirely
+    tree_data["raw_links"] = raw_links
     tree_data["wire_items"] = wire_items
     st.tree_data = tree_data
+    st.tree_data_version += 1
+    st.pos_data_version += 1
 
 
-def _build_minimap_batches(
+def _extract_raw_links(node_tree) -> list[tuple[str, str, str, str]]:
+    """Extract ``(from_name, from_id, to_name, to_id)`` tuples for all links.
+
+    Pure RNA pass; only needed when topology changes since results are
+    persisted on ``tree_data["raw_links"]``.
+    """
+    raw_links: list[tuple[str, str, str, str]] = []
+    for link in node_tree.links:
+        from_node = link.from_node
+        if from_node and from_node.type != "FRAME":
+            raw_links.append(
+                (
+                    from_node.name,
+                    link.from_socket.identifier,
+                    link.to_node.name,
+                    link.to_socket.identifier,
+                )
+            )
+    return raw_links
+
+
+def _resolve_wire_items(
+    raw_links: list[tuple[str, str, str, str]],
+    out_pos: dict[str, dict],
+    in_pos: dict[str, dict],
+) -> dict[tuple, list[tuple[float, float, float, float]]]:
+    """Resolve persisted links to per-color wire segment lists (pure dict ops)."""
+    wire_items: dict[tuple, list[tuple[float, float, float, float]]] = {}
+    for from_name, from_id, to_name, to_id in raw_links:
+        out_pos_node = out_pos.get(from_name)
+        if not out_pos_node:
+            continue
+        out_tuple = out_pos_node.get(from_id)
+        if not out_tuple:
+            continue
+        in_pos_node = in_pos.get(to_name)
+        if not in_pos_node:
+            continue
+        in_tuple = in_pos_node.get(to_id)
+        if not in_tuple:
+            continue
+        out_x, out_y, wire_color = out_tuple
+        in_x, in_y, _ = in_tuple
+        wire_items.setdefault(wire_color, []).append((out_x, out_y, in_x, in_y))
+    return wire_items
+
+
+def _group_socket_dots(by_node: dict[int, list[tuple[tuple, float, float]]]) -> dict[tuple, list[tuple[float, float]]]:
+    """Group per-node socket dots into color-keyed position lists (pure dict ops)."""
+    grouped: dict[tuple, list[tuple[float, float]]] = {}
+    for dots in by_node.values():
+        for color, x, y in dots:
+            grouped.setdefault(color, []).append((x, y))
+    return grouped
+
+
+def _apply_move_updates(st: MinimapState, node_tree) -> bool:
+    """Patch cached tree data in place after pure position changes (drag).
+
+    Refreshes node positions, socket/wire endpoints, and group markers
+    without recomputing colors, labels, or type stats. Socket indicator
+    dots are rebuilt only for the moved nodes and regrouped by color.
+    Returns True when applied; False when cached tables are missing and a
+    full recompile is required.
+    """
+    tree_data = st.tree_data
+    if not tree_data:
+        return False
+    infos = tree_data.get("node_infos")
+    out_pos = tree_data.get("out_pos")
+    in_pos = tree_data.get("in_pos")
+    reroute_meta = tree_data.get("reroute_meta")
+    default_socket_color = tree_data.get("default_socket_color")
+    default_wire_color = tree_data.get("default_wire_color")
+    if infos is None or out_pos is None or in_pos is None:
+        return False
+    if reroute_meta is None or default_socket_color is None or default_wire_color is None:
+        return False
+
+    info_by_ptr: dict[int, dict] = {}
+    for info in infos:
+        ptr = info.get("ptr")
+        if ptr:
+            info_by_ptr[ptr] = info
+
+    show_indicators = bool(tree_data.get("socket_indicators_on"))
+    by_node = tree_data.get("socket_items_by_node")
+    sock_colors = tree_data.get("socket_draw_colors") or {}
+    if show_indicators and by_node is None:
+        return False
+
+    moved_any = False
+    # TRACE-only sub-timers split RNA-heavy socket patching from wire re-resolution.
+    trace = logger.isEnabledFor(TRACE_LEVEL)
+    sockets_t = 0.0
+
+    with _Timer("move_update"):
+        for node in node_tree.nodes:
+            ptr = node.as_pointer()
+            loc = node.location_absolute
+            lx = loc.x
+            ly = loc.y
+
+            ntype = node.type
+            if ntype == "REROUTE":
+                meta = reroute_meta.get(node.name)
+                if meta:
+                    hw_off, hh_off, wire_color = meta
+                    cx_n = lx + hw_off
+                    cy_n = ly - hh_off
+                    o_entry = out_pos.get(node.name)
+                    i_entry = in_pos.get(node.name)
+                    # Flag movement so the tail re-resolves wire_items and
+                    # bumps the position generation; reroutes have no info
+                    # entry, so nothing else would mark them as moved.
+                    entry = o_entry or i_entry
+                    if entry:
+                        old_x, old_y, _old_col = next(iter(entry.values()))
+                        if old_x != cx_n or old_y != cy_n:
+                            moved_any = True
+                    if o_entry is not None:
+                        for sid in o_entry:
+                            o_entry[sid] = (cx_n, cy_n, wire_color)
+                    if i_entry is not None:
+                        for sid in i_entry:
+                            i_entry[sid] = (cx_n, cy_n, wire_color)
+                continue
+
+            info = info_by_ptr.get(ptr)
+            if info is None:
+                continue
+
+            w = info["tree_w"]
+            body_top = ly
+            body_range = info["tree_h"]
+            new_y = body_top - body_range
+            # Endpoint and dot geometry only depends on position (dims are
+            # unchanged on move-only diffs), so untouched nodes skip all
+            # socket RNA; only the moved nodes' dots get rebuilt per node.
+            moved = lx != info["tree_x"] or new_y != info["tree_y"]
+            info["tree_x"] = lx
+            info["tree_y"] = new_y
+
+            if not moved:
+                continue
+            moved_any = True
+
+            if ntype == "FRAME":
+                continue
+
+            if trace:
+                t0 = time.perf_counter()
+
+            name = node.name
+            o_entry = out_pos.get(name)
+            if o_entry:
+                visible_outs = [
+                    s for s in node.outputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)
+                ]
+                x_base = lx + w
+                num = len(visible_outs)
+                for idx, sock in enumerate(visible_outs):
+                    if body_range <= 0 or num <= 1:
+                        sy = body_top - body_range * 0.5
+                    else:
+                        sy = body_top - body_range * (idx + 1) / (num + 1)
+                    sid = sock.identifier
+                    old = o_entry.get(sid)
+                    color = old[2] if old else default_wire_color
+                    o_entry[sid] = (x_base, sy, color)
+
+            i_entry = in_pos.get(name)
+            if i_entry:
+                visible_ins = [s for s in node.inputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
+                num = len(visible_ins)
+                for idx, sock in enumerate(visible_ins):
+                    if body_range <= 0 or num <= 1:
+                        sy = body_top - body_range * 0.5
+                    else:
+                        sy = body_top - body_range * (idx + 1) / (num + 1)
+                    sid = sock.identifier
+                    old = i_entry.get(sid)
+                    color = old[2] if old else default_wire_color
+                    i_entry[sid] = (lx, sy, color)
+
+            if show_indicators:
+                dots: list[tuple[tuple, float, float]] = []
+                for is_output, sock_list in ((False, node.inputs), (True, node.outputs)):
+                    try:
+                        visible = [s for s in sock_list if not s.hide and s.enabled]
+                    except AttributeError:
+                        visible = [
+                            s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)
+                        ]
+                    x_base = lx + (w if is_output else 0.0)
+                    num = len(visible)
+                    for idx, socket in enumerate(visible):
+                        if body_range <= 0 or num <= 1:
+                            sy_tree = (body_top + new_y) * 0.5
+                        else:
+                            sy_tree = body_top - body_range * (idx + 1) / (num + 1)
+                        color = sock_colors.get(socket.as_pointer(), default_socket_color)
+                        dots.append((color, x_base, sy_tree))
+                by_node[ptr] = dots
+
+            if trace:
+                sockets_t += time.perf_counter() - t0
+
+        # Group underline markers follow their nodes
+        markers: dict[tuple, list[tuple[float, float, float]]] = {}
+        for info in infos:
+            marker_col = info.get("group_marker_col")
+            if marker_col:
+                markers.setdefault(marker_col, []).append(
+                    (info["tree_x"] + info["tree_w"] / 2, info["tree_y"], info["tree_w"])
+                )
+        tree_data["group_markers"] = markers
+        wires_t = 0.0
+        if moved_any:
+            if show_indicators:
+                tree_data["socket_items"] = _group_socket_dots(by_node)
+            raw_links = tree_data.get("raw_links")
+            if raw_links is None:
+                raw_links = _extract_raw_links(node_tree)
+            if trace:
+                t1 = time.perf_counter()
+            tree_data["wire_items"] = _resolve_wire_items(raw_links, out_pos, in_pos)
+            st.pos_data_version += 1
+            if trace:
+                wires_t = time.perf_counter() - t1
+        if trace:
+            logger.trace("TIMER move_update.sockets: %.3f ms", sockets_t * 1000)
+            if moved_any:
+                logger.trace("TIMER move_update.wires: %.3f ms", wires_t * 1000)
+    return True
+
+
+def _ensure_minimap_batches(
     st: MinimapState,
-    rect,
+    mx,
+    my,
+    mw,
+    mh,
     cx,
     cy,
     scale,
@@ -1147,26 +1557,73 @@ def _build_minimap_batches(
     show_borders,
     highlight_border=None,
 ):
-    """Transform tree-space data to screen-space and compile GPU draw batches.
+    """Bake content batches in map-local space, rebuilding only when stale.
 
-    Must be called every frame after ``_compile_tree_data()`` has stored
-    ``st.tree_data``. When *highlight_border* is an RGBA color, nodes whose
-    type matches ``st.hovered_type_label`` get a highlighted border.
+    Vertex data is stored relative to ``tree_data["origin"]`` at the bake-time
+    scale, so pan/drag frames only need the matrix transform applied by the
+    caller (see draw_minimap). Rebuilds happen when tree positions change,
+    the scale drifts past the bucket width (radius/thickness/font buckets),
+    styling keys change, or the anchor drifts too far for culling to stay
+    conservative. When *highlight_border* is an RGBA color, nodes whose type
+    matches ``st.hovered_type_label`` get a highlighted border.
     """
     tree_data = st.tree_data
     if tree_data is None:
         return
+    origin = tree_data.get("origin")
+    if not origin:
+        return
 
-    mx, my, mw, mh, padding, y_margin = rect
-    st.rect = (mx, my, mw, mh)
-    st.margin = y_margin
-    st.padding = padding
-    st.scale = scale
+    key = (
+        st.pos_data_version,
+        round(ui_scale, 3),
+        show_borders,
+        st.hovered_type_label,
+        bool(highlight_border),
+    )
+    sb = st.batch_scale
+    anchor_x, anchor_y = st.batch_anchor
+    # A settle bump changes only tree_data_version, so wire/marker freshness
+    # must gate the early return too — otherwise wires stay frozen at their
+    # pre-drag positions until an unrelated rebuild trigger fires.
+    wire_key = (st.tree_data_version, round(ui_scale, 3))
+    wires_fresh = wire_key == st.wire_cache_key and st.wire_scale == sb
+    if (
+        key == st.batch_cache_key
+        and wires_fresh
+        and sb > 0.0
+        and abs(scale - sb) <= _SCALE_REBUILD_REL * max(sb, 1e-6)
+        and abs(cx - anchor_x) <= _BATCH_DRIFT_PX
+        and abs(cy - anchor_y) <= _BATCH_DRIFT_PX
+    ):
+        return
+
+    ocx, ocy = origin
+    # Sticky bake scale: adopt the live scale only when the drift budget is
+    # exceeded, so fill and wire generations always share one bake scale
+    # (and thus one content-matrix factor) between bucket crossings.
+    prev_sb = st.batch_scale
+    if prev_sb > 0.0 and abs(scale - prev_sb) <= _SCALE_REBUILD_REL * max(prev_sb, 1e-6):
+        sb = prev_sb
+    else:
+        sb = scale
 
     font_id = 0
     min_dim = 3.0 * ui_scale
     node_infos = tree_data["node_infos"]
     hovered_type = st.hovered_type_label
+    hl_color = None
+    if hovered_type and highlight_border is not None:
+        hl_color = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
+
+    # Cull window in baked space: the map interior plus slack for anchor
+    # drift between rebuilds (nodes outside never reach the GPU batches).
+    piv_bx = (tree_cx - ocx) * sb
+    piv_by = (tree_cy - ocy) * sb
+    cul_l = mx - _CULL_MARGIN_PX - cx + piv_bx
+    cul_r = mx + mw + _CULL_MARGIN_PX - cx + piv_bx
+    cul_b = my - _CULL_MARGIN_PX - cy + piv_by
+    cul_t = my + mh + _CULL_MARGIN_PX - cy + piv_by
 
     all_pos_fill = []
     all_uv_fill = []
@@ -1197,36 +1654,45 @@ def _build_minimap_batches(
     cached_text = []
 
     for info in node_infos:
-        nx = round(cx + (info["tree_x"] - tree_cx) * scale)
-        ny = round(cy + (info["tree_y"] - tree_cy) * scale)
-        nw_s = max(info["tree_w"] * scale, 1.0)
-        nh_s = max(info["tree_h"] * scale, 1.0)
+        bw_raw = info["tree_w"] * sb
+        bh_raw = info["tree_h"] * sb
+        bx = (info["tree_x"] - ocx) * sb
+        by = (info["tree_y"] - ocy) * sb
+        bw = max(bw_raw, 1.0)
+        bh = max(bh_raw, 1.0)
         is_frame = info["is_frame"]
+
+        # Cull nodes whose quads cannot intersect the minimap interior
+        if bx >= cul_r or bx + bw <= cul_l or by >= cul_t or by + bh <= cul_b:
+            continue
 
         if is_frame:
             node_r = info["node_r_base"] * ui_scale * 1.6
         else:
-            node_r = info["node_r_base"] * ui_scale * (scale * 2)
+            node_r = info["node_r_base"] * ui_scale * (sb * 2)
 
-        is_tiny = (nw_s < min_dim or nh_s < min_dim) and not is_frame
+        is_tiny = (bw < min_dim or bh < min_dim) and not is_frame
 
         border_color = info["border_color"]
         border_w = info["border_w"]
-        if not is_frame and hovered_type and highlight_border is not None and info.get("type_label") == hovered_type:
-            border_color = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
+        if hl_color and not is_frame and info.get("type_label") == hovered_type:
+            border_color = hl_color
             border_w = 1.25
 
+        # Sub-pixel borders are invisible; skip their vertex work entirely
+        draw_border = show_borders and (is_frame or (bw_raw >= _MIN_BORDER_PX and bh_raw >= _MIN_BORDER_PX))
+
         if is_tiny:
-            nw_s_final = max(nw_s, min_dim)
-            nh_s_final = max(nh_s, min_dim)
-            hw = nw_s_final / 2
-            hh = nh_s_final / 2
+            bw_final = max(bw, min_dim)
+            bh_final = max(bh, min_dim)
+            hw = bw_final / 2
+            hh = bh_final / 2
             all_pos_fill.extend(
                 [
-                    (nx, ny, 0.0),
-                    (nx + nw_s_final, ny, 0.0),
-                    (nx + nw_s_final, ny + nh_s_final, 0.0),
-                    (nx, ny + nh_s_final, 0.0),
+                    (bx, by, 0.0),
+                    (bx + bw_final, by, 0.0),
+                    (bx + bw_final, by + bh_final, 0.0),
+                    (bx, by + bh_final, 0.0),
                 ]
             )
             all_uv_fill.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
@@ -1234,13 +1700,13 @@ def _build_minimap_batches(
             all_radius_fill.extend([node_r] * 4)
             all_color_fill.extend([info["fill_color"]] * 4)
 
-            if show_borders:
+            if draw_border:
                 all_pos_border.extend(
                     [
-                        (nx, ny, 0.0),
-                        (nx + nw_s_final, ny, 0.0),
-                        (nx + nw_s_final, ny + nh_s_final, 0.0),
-                        (nx, ny + nh_s_final, 0.0),
+                        (bx, by, 0.0),
+                        (bx + bw_final, by, 0.0),
+                        (bx + bw_final, by + bh_final, 0.0),
+                        (bx, by + bh_final, 0.0),
                     ]
                 )
                 all_uv_border.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
@@ -1249,8 +1715,8 @@ def _build_minimap_batches(
                 all_color_border.extend([border_color] * 4)
                 all_line_width_border.extend([border_w] * 4)
         else:
-            hw = nw_s / 2
-            hh = nh_s / 2
+            hw = bw / 2
+            hh = bh / 2
 
             pos_fill = frame_pos_fill if is_frame else all_pos_fill
             uv_fill = frame_uv_fill if is_frame else all_uv_fill
@@ -1259,10 +1725,10 @@ def _build_minimap_batches(
             col_fill = frame_color_fill if is_frame else all_color_fill
             pos_fill.extend(
                 [
-                    (nx, ny, 0.0),
-                    (nx + nw_s, ny, 0.0),
-                    (nx + nw_s, ny + nh_s, 0.0),
-                    (nx, ny + nh_s, 0.0),
+                    (bx, by, 0.0),
+                    (bx + bw, by, 0.0),
+                    (bx + bw, by + bh, 0.0),
+                    (bx, by + bh, 0.0),
                 ]
             )
             uv_fill.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
@@ -1270,7 +1736,7 @@ def _build_minimap_batches(
             rad_fill.extend([node_r] * 4)
             col_fill.extend([info["fill_color"]] * 4)
 
-            if show_borders:
+            if draw_border:
                 pb = frame_pos_border if is_frame else all_pos_border
                 ub = frame_uv_border if is_frame else all_uv_border
                 hsb = frame_half_size_border if is_frame else all_half_size_border
@@ -1279,10 +1745,10 @@ def _build_minimap_batches(
                 lwb = frame_line_width_border if is_frame else all_line_width_border
                 pb.extend(
                     [
-                        (nx, ny, 0.0),
-                        (nx + nw_s, ny, 0.0),
-                        (nx + nw_s, ny + nh_s, 0.0),
-                        (nx, ny + nh_s, 0.0),
+                        (bx, by, 0.0),
+                        (bx + bw, by, 0.0),
+                        (bx + bw, by + bh, 0.0),
+                        (bx, by + bh, 0.0),
                     ]
                 )
                 ub.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
@@ -1296,11 +1762,11 @@ def _build_minimap_batches(
                 frame_lbl = info.get("frame_label")
                 if frame_lbl:
                     text, text_color, bg_color_lbl = frame_lbl
-                    label_font_size = max(6, min(11, int(11 * ui_scale * scale * 8)))
+                    label_font_size = max(6, min(11, int(11 * ui_scale * sb * 8)))
                     blf.size(font_id, label_font_size)
                     tw, th = blf.dimensions(font_id, text)
-                    lx = nx + (nw_s - tw) / 2
-                    ly = ny + nh_s + 3 * ui_scale
+                    lx = bx + (bw - tw) / 2
+                    ly = by + bh + 3 * ui_scale
                     label_pad = 2 * ui_scale
 
                     frame_pos_fill.extend(
@@ -1321,28 +1787,28 @@ def _build_minimap_batches(
             else:
                 lbl_type = info.get("node_label_type")
                 lbl_text = info.get("node_label_text")
-                if lbl_type and lbl_text and nw_s > 6 * ui_scale and nh_s > 6 * ui_scale:
+                if lbl_type and lbl_text and bw > 6 * ui_scale and bh > 6 * ui_scale:
                     text_color = info["node_label_color"]
                     if lbl_type == "full":
-                        font_size = max(6, min(int(11 * ui_scale), int(min(nw_s, nh_s) * 0.35)))
-                        lines = _get_node_label_lines(lbl_text, font_id, font_size, nw_s - 4 * ui_scale, 3)
+                        font_size = max(6, min(int(11 * ui_scale), int(min(bw, bh) * 0.35)))
+                        lines = _get_node_label_lines(lbl_text, font_id, font_size, bw - 4 * ui_scale, 3)
                         if lines:
                             blf.size(font_id, font_size)
                             line_h = blf.dimensions(font_id, "Ay")[1] + 1
                             asc_h = blf.dimensions(font_id, "A")[1]
                             vis_h = (len(lines) - 1) * line_h + asc_h
-                            start_y = ny + (nh_s - vis_h) / 2
+                            start_y = by + (bh - vis_h) / 2
                             for i, line in enumerate(lines):
                                 lw, _ = blf.dimensions(font_id, line)
-                                lx = nx + (nw_s - lw) / 2
+                                lx = bx + (bw - lw) / 2
                                 ly = start_y + (len(lines) - 1 - i) * line_h
                                 cached_text.append((font_id, line, lx, ly, text_color, font_size))
                     else:
-                        font_size = max(6, min(int(11 * ui_scale), int(min(nw_s, nh_s) * 0.45)))
+                        font_size = max(6, min(int(11 * ui_scale), int(min(bw, bh) * 0.45)))
                         blf.size(font_id, font_size)
                         tw, th = blf.dimensions(font_id, lbl_text)
-                        tx = nx + (nw_s - tw) / 2
-                        ty = ny + (nh_s - th) / 2
+                        tx = bx + (bw - tw) / 2
+                        ty = by + (bh - th) / 2
                         cached_text.append((font_id, lbl_text, tx, ty, text_color, font_size))
 
     # Compile GPU batches
@@ -1423,7 +1889,7 @@ def _build_minimap_batches(
     st.cached_text = cached_text
 
     # Sockets — unified batch with per-vertex color + auto-hide by zoom
-    ph = max(1, tree_data["socket_ph_base"] * scale * ui_scale)
+    ph = max(1, tree_data["socket_ph_base"] * sb * ui_scale)
     pw = ph
     st.cached_socket_ph = ph
     if tree_data["socket_items"] and scale >= _MIN_SOCKET_SCALE:
@@ -1436,16 +1902,17 @@ def _build_minimap_batches(
         socket_all_r = []
         socket_all_c = []
         for color, positions in tree_data["socket_items"].items():
+            linear_color = _srgb_to_linear(color)
             for sx_tree, sy_tree in positions:
-                sx = cx + (sx_tree - tree_cx) * scale
-                sy = cy + (sy_tree - tree_cy) * scale
+                sxb = (sx_tree - ocx) * sb
+                syb = (sy_tree - ocy) * sb
                 _pad = 1.5
                 socket_all_pos.extend(
                     [
-                        (sx - half_w - _pad, sy - half_h - _pad, 0.0),
-                        (sx + half_w + _pad, sy - half_h - _pad, 0.0),
-                        (sx + half_w + _pad, sy + half_h + _pad, 0.0),
-                        (sx - half_w - _pad, sy + half_h + _pad, 0.0),
+                        (sxb - half_w - _pad, syb - half_h - _pad, 0.0),
+                        (sxb + half_w + _pad, syb - half_h - _pad, 0.0),
+                        (sxb + half_w + _pad, syb + half_h + _pad, 0.0),
+                        (sxb - half_w - _pad, syb + half_h + _pad, 0.0),
                     ]
                 )
                 socket_all_uv.extend(
@@ -1458,7 +1925,7 @@ def _build_minimap_batches(
                 )
                 socket_all_hs.extend([(half_w, half_h)] * 4)
                 socket_all_r.extend([r] * 4)
-                socket_all_c.extend([_srgb_to_linear(color)] * 4)
+                socket_all_c.extend([linear_color] * 4)
         num_s = len(socket_all_pos) // 4
         if num_s > 0:
             shader = _get_batch_rect_shader()
@@ -1479,47 +1946,85 @@ def _build_minimap_batches(
     else:
         st.cached_socket_batch = None
 
-    # Wires
-    wires_by_color = {}
-    thickness = max(1.0, 2.0 * scale)
+    # Wires and markers get their own cache generation so position-only
+    # refreshes (drags) skip the O(links) pill rebake entirely. Rebuilds
+    # track the sticky bake scale exactly, keeping the shared matrix factor
+    # consistent.
+    if wire_key != st.wire_cache_key or st.wire_scale != sb:
+        _rebuild_wire_marker_batches(st, tree_data, ocx, ocy, sb, ui_scale, min_dim)
+        st.wire_cache_key = wire_key
+        st.wire_scale = sb
+
+    st.batch_cache_key = key
+    st.batch_scale = sb
+    st.batch_anchor = (cx, cy)
+
+
+def _rebuild_wire_marker_batches(
+    st: MinimapState,
+    tree_data: dict,
+    ocx: float,
+    ocy: float,
+    sb: float,
+    ui_scale: float,
+    min_dim: float,
+) -> None:
+    """Bake wire pill batches (per color + shadow underlay) and group markers.
+
+    Called only when tree structure, UI scale, or the scale bucket changed —
+    never on position-only drag refreshes.
+    """
+    # Wires — baked pill batches per color plus a merged thicker shadow underlay
+    thickness = max(1.0, 2.0 * sb)
+    wire_batches = []
+    shadow_points = []
     for color, items in tree_data["wire_items"].items():
         group = []
         for out_x, out_y, in_x, in_y in items:
-            x1 = cx + (out_x - tree_cx) * scale
-            y1 = cy + (out_y - tree_cy) * scale
-            x2 = cx + (in_x - tree_cx) * scale
-            y2 = cy + (in_y - tree_cy) * scale
+            x1 = (out_x - ocx) * sb
+            y1 = (out_y - ocy) * sb
+            x2 = (in_x - ocx) * sb
+            y2 = (in_y - ocy) * sb
             dx = x2 - x1
             dy = y2 - y1
             length = math.hypot(dx, dy)
             if length < 0.5:
                 continue
             angle = math.atan2(dy, dx)
-            mx_w = (x1 + x2) / 2
-            my_w = (y1 + y2) / 2
-            group.append((mx_w, my_w, length, angle))
+            mid_x = (x1 + x2) / 2
+            mid_y = (y1 + y2) / 2
+            group.append((mid_x, mid_y, length, angle))
         if group:
-            wires_by_color[color] = group
-    st.cached_wires = wires_by_color
-    st.cached_wire_thickness = thickness
+            _shader, batch = _build_pill_batch(group, thickness)
+            if batch is not None:
+                wire_batches.append((color, batch))
+                shadow_points.extend(group)
+    shadow_batch = None
+    if shadow_points:
+        _shadow_shader, shadow_batch = _build_pill_batch(shadow_points, thickness * 2.5)
+    st.cached_wire_batches = wire_batches
+    st.cached_wire_shadow_batch = shadow_batch
 
-    # Group node underline markers
-    markers_by_color: dict[tuple, list[tuple[float, float, float, float]]] = {}
+    # Group node underline markers — baked like wires
+    marker_batches = []
     group_markers = tree_data.get("group_markers")
     if group_markers:
         marker_offset = 3 * ui_scale
+        marker_thick = max(1.0, 1.5 * ui_scale)
         for marker_color, items in group_markers.items():
             group = []
             for x_mid, y_bot, length in items:
-                ln = length * scale
+                ln = length * sb
                 if ln < min_dim:
                     continue
-                sx = cx + (x_mid - tree_cx) * scale
-                sy = cy + (y_bot - tree_cy) * scale - marker_offset
-                group.append((sx, sy, ln, 0.0))
+                mxb = (x_mid - ocx) * sb
+                myb = (y_bot - ocy) * sb - marker_offset
+                group.append((mxb, myb, ln, 0.0))
             if group:
-                markers_by_color[marker_color] = group
-    st.cached_group_markers = markers_by_color
+                _mshader, mbatch = _build_pill_batch(group, marker_thick)
+                if mbatch is not None:
+                    marker_batches.append((marker_color, mbatch))
+    st.cached_marker_batches = marker_batches
 
 
 def _get_scrollbar_style(ui_scale: float) -> tuple[int, int]:
@@ -1833,9 +2338,12 @@ def draw_minimap() -> None:
     node_tree = space.edit_tree
     if not node_tree or not node_tree.nodes or len(node_tree.nodes) == 0:
         return
-    nodes = node_tree.nodes
-    bounds = _get_node_tree_bounds(nodes)
-    if bounds[2] - bounds[0] <= 0 or bounds[3] - bounds[1] <= 0:
+
+    # Single RNA pass: fingerprint, raw tree bounds, and drawable node count.
+    show_borders = getattr(settings, "show_node_borders", True)
+    with _Timer("tree_snapshot"):
+        current_fingerprint, raw_bounds, content_count = _get_tree_snapshot(node_tree, show_borders)
+    if raw_bounds[2] - raw_bounds[0] <= 0 or raw_bounds[3] - raw_bounds[1] <= 0:
         return
 
     # Start cProfile for this area (only when TRACE logging is on)
@@ -1845,7 +2353,7 @@ def draw_minimap() -> None:
     logger.trace(
         "SETTINGS %d nodes | show_wires=%d show_names=%d label_mode=%s"
         " colored_nodes=%d socket_indicators=%d wire_color=%d frame_labels=%d",
-        len(nodes),
+        current_fingerprint[0],
         getattr(settings, "show_wires", True),
         getattr(settings, "show_names", True),
         getattr(settings, "node_label_mode", "COMPACT"),
@@ -1867,7 +2375,7 @@ def draw_minimap() -> None:
             return
         mx, my, mw, mh, padding, y_margin = rect
 
-        bounds = _expand_bounds_margin(bounds, ui_scale, mh, padding)
+        bounds = _expand_bounds_margin(raw_bounds, ui_scale, mh, padding)
 
         st.rect = (mx, my, mw, mh)
         st.tree_bounds = bounds
@@ -1881,28 +2389,68 @@ def draw_minimap() -> None:
 
         _clamp_pan_to_viewport(space, region, st)
 
-    # Debounce: schedule compile after fingerprint settles (via bpy.app.timers)
-    show_borders = getattr(settings, "show_node_borders", True)
-    current_fingerprint = get_tree_fingerprint(node_tree, include_selection=show_borders)
-    if st.cached_fingerprint != current_fingerprint:
-        if st.pending_timer is not None:
-            try:
-                bpy.app.timers.unregister(st.pending_timer)
-            except ValueError:
-                pass
+    # Refresh tree data: pure position changes (node drags) patch the cached
+    # tables immediately; anything else schedules a debounced full compile.
+    old_fingerprint = st.cached_fingerprint
+    if old_fingerprint != current_fingerprint:
+        move_only = _is_move_only_diff(old_fingerprint, current_fingerprint)
+        applied = False
+        if move_only and (time.perf_counter() - st.last_move_refresh) >= _MOVE_REFRESH_MIN_INTERVAL:
+            with _Timer("apply_move_updates"):
+                applied = _apply_move_updates(st, node_tree)
+            if applied:
+                st.last_move_refresh = time.perf_counter()
+                st.pending_settle_flush = True
+        if applied:
+            st.cached_fingerprint = current_fingerprint
+        # Always keep a settle timer armed: it flushes frozen wire/marker
+        # batches (forced via pending_settle_flush) or runs the pending full
+        # compile. Re-arm (push back) only when the fingerprint changed again
+        # since arming; identical-fingerprint redraw streams (list animation,
+        # hover) must leave the live timer alone so the settle event cannot be
+        # starved by continuous redraws.
         delay = getattr(settings, "debounce_interval", 0.15)
-        timer = bpy.app.timers.register(
-            lambda: _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale),
-            first_interval=delay,
-        )
-        st.pending_timer = timer
+        now = time.perf_counter()
+        if st.pending_timer is not None and st.pending_fingerprint != current_fingerprint:
+            if now < st.pending_timer_deadline:
+                try:
+                    bpy.app.timers.unregister(st.pending_timer)
+                except ValueError:
+                    pass
+                st.pending_timer = None
+        if st.pending_timer is None:
 
-    # Build screen-space batches every frame (applies current zoom/pan)
+            def _settle_fire():
+                return _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale)
+
+            # An expanding type list needs compiled type stats to measure its
+            # target width; compile immediately instead of after the debounce.
+            interval = 0.0 if st.list_anim_active and st.list_anim_target < 0 else delay
+            bpy.app.timers.register(_settle_fire, first_interval=interval)
+            st.pending_timer = _settle_fire
+            st.pending_timer_deadline = now + delay
+            st.pending_fingerprint = current_fingerprint
+
+    # Build screen-space batches (cached; applies current zoom/pan via matrix)
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
-    with _Timer("build_batches"):
+    st.scale = scale
+    with _Timer("ensure_batches"):
         highlight_border = colors["node_active"] if st.hovered_type_label else None
-        _build_minimap_batches(
-            st, rect, cx, cy, scale, tree_cx, tree_cy, ui_scale, master_alpha, show_borders, highlight_border
+        _ensure_minimap_batches(
+            st,
+            mx,
+            my,
+            mw,
+            mh,
+            cx,
+            cy,
+            scale,
+            tree_cx,
+            tree_cy,
+            ui_scale,
+            master_alpha,
+            show_borders,
+            highlight_border,
         )
 
     # Draw minimap panel
@@ -1941,86 +2489,130 @@ def draw_minimap() -> None:
             ui_scale,
         )
 
-    # Frame nodes
-    frames_fill_batch = st.cached_frames_fill_batch
-    frames_border_batch = st.cached_frames_border_batch
-    if frames_fill_batch or frames_border_batch:
-        with _Timer("draw_frames"):
-            fill_shader = _get_batch_rect_shader()
-            border_shader = _get_batch_rect_border_shader()
-            mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-            if frames_fill_batch:
-                fill_shader.bind()
-                fill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-                frames_fill_batch.draw(fill_shader)
-            if frames_border_batch:
-                border_shader.bind()
-                border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-                frames_border_batch.draw(border_shader)
+    # Content batches are baked in map-local space; place them with one
+    # matrix transform (translate -> scale about the view pivot) instead of
+    # rebuilding vertex data on pan/drag frames.
+    origin = st.tree_data.get("origin") if st.tree_data else None
+    content_k = 1.0
+    piv_x = 0.0
+    piv_y = 0.0
+    if origin:
+        batch_sb = st.batch_scale if st.batch_scale > 0.0 else scale
+        content_k = scale / batch_sb
+        piv_x = (tree_cx - origin[0]) * batch_sb
+        piv_y = (tree_cy - origin[1]) * batch_sb
+        content_mat = (
+            Matrix.Translation((cx, cy, 0.0)) @ Matrix.Scale(content_k, 4) @ Matrix.Translation((-piv_x, -piv_y, 0.0))
+        )
 
-    # Link wires
-    wires_by_color = st.cached_wires or {}
-    thickness = st.cached_wire_thickness
-    if getattr(settings, "show_wires", True) and wires_by_color:
-        with _Timer("draw_wires"):
-            shadow_alpha = 0.35 * master_alpha
-            if shadow_alpha > 0:
-                shadow_group = [
-                    (wx, wy, length, angle) for group in wires_by_color.values() for wx, wy, length, angle in group
-                ]
-                _batch_draw_pills(shadow_group, thickness * 2.5, (0.0, 0.0, 0.0, shadow_alpha))
-            for wire_color, group in wires_by_color.items():
-                _batch_draw_pills(group, thickness, wire_color)
+        gpu.matrix.push()
+        try:
+            gpu.matrix.multiply_matrix(content_mat)
 
-    # Node fill backgrounds
-    backdrops_batch = st.cached_backdrops_batch
-    if backdrops_batch:
-        with _Timer("draw_backdrops"):
-            fill_shader = _get_batch_rect_shader()
-            fill_shader.bind()
-            fill_shader.uniform_float(
-                "ModelViewProjectionMatrix", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-            )
-            backdrops_batch.draw(fill_shader)
+            # Frame nodes
+            frames_fill_batch = st.cached_frames_fill_batch
+            frames_border_batch = st.cached_frames_border_batch
+            if frames_fill_batch or frames_border_batch:
+                with _Timer("draw_frames"):
+                    fill_shader = _get_batch_rect_shader()
+                    border_shader = _get_batch_rect_border_shader()
+                    mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+                    if frames_fill_batch:
+                        fill_shader.bind()
+                        fill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                        frames_fill_batch.draw(fill_shader)
+                    if frames_border_batch:
+                        border_shader.bind()
+                        border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                        frames_border_batch.draw(border_shader)
 
-    # Node borders
-    borders_batch = st.cached_borders_batch
-    if borders_batch:
-        with _Timer("draw_borders"):
-            border_shader = _get_batch_rect_border_shader()
-            border_shader.bind()
-            border_shader.uniform_float(
-                "ModelViewProjectionMatrix", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-            )
-            borders_batch.draw(border_shader)
+            # Link wires (baked batches; shadow underlay first, then colors)
+            wire_batches = st.cached_wire_batches or []
+            wire_shadow_batch = st.cached_wire_shadow_batch
+            if getattr(settings, "show_wires", True) and (wire_shadow_batch or wire_batches):
+                with _Timer("draw_wires"):
+                    pill_shader = _get_batch_pill_shader()
+                    pill_shader.bind()
+                    pill_shader.uniform_float(
+                        "ModelViewProjectionMatrix",
+                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                    )
+                    shadow_alpha = 0.35 * master_alpha
+                    if wire_shadow_batch is not None and shadow_alpha > 0:
+                        pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
+                        wire_shadow_batch.draw(pill_shader)
+                    for wire_color, batch in wire_batches:
+                        pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
+                        batch.draw(pill_shader)
 
-    # Group node underline markers
-    markers_by_color = st.cached_group_markers or {}
-    if markers_by_color:
-        with _Timer("draw_group_markers"):
-            marker_thick = max(1.0, 1.5 * ui_scale)
-            for marker_color, group in markers_by_color.items():
-                _batch_draw_pills(group, marker_thick, marker_color)
+            # Node fill backgrounds
+            backdrops_batch = st.cached_backdrops_batch
+            if backdrops_batch:
+                with _Timer("draw_backdrops"):
+                    fill_shader = _get_batch_rect_shader()
+                    fill_shader.bind()
+                    fill_shader.uniform_float(
+                        "ModelViewProjectionMatrix",
+                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                    )
+                    backdrops_batch.draw(fill_shader)
 
-    # Socket indicator pills (single batch with per-vertex color)
-    socket_batch = st.cached_socket_batch
-    if getattr(settings, "show_socket_indicators", False) and socket_batch:
-        with _Timer("draw_sockets"):
-            shader = _get_batch_rect_shader()
-            shader.bind()
-            shader.uniform_float(
-                "ModelViewProjectionMatrix",
-                gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-            )
-            socket_batch.draw(shader)
+            # Node borders
+            borders_batch = st.cached_borders_batch
+            if borders_batch:
+                with _Timer("draw_borders"):
+                    border_shader = _get_batch_rect_border_shader()
+                    border_shader.bind()
+                    border_shader.uniform_float(
+                        "ModelViewProjectionMatrix",
+                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                    )
+                    borders_batch.draw(border_shader)
 
-    # Text labels
+            # Group node underline markers (baked batches)
+            marker_batches = st.cached_marker_batches or []
+            if marker_batches:
+                with _Timer("draw_group_markers"):
+                    pill_shader = _get_batch_pill_shader()
+                    pill_shader.bind()
+                    pill_shader.uniform_float(
+                        "ModelViewProjectionMatrix",
+                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                    )
+                    for marker_color, batch in marker_batches:
+                        pill_shader.uniform_float("color", _srgb_to_linear(marker_color))
+                        batch.draw(pill_shader)
+
+            # Socket indicator pills (single batch with per-vertex color)
+            socket_batch = st.cached_socket_batch
+            if getattr(settings, "show_socket_indicators", False) and socket_batch:
+                with _Timer("draw_sockets"):
+                    shader = _get_batch_rect_shader()
+                    shader.bind()
+                    shader.uniform_float(
+                        "ModelViewProjectionMatrix",
+                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                    )
+                    socket_batch.draw(shader)
+        finally:
+            gpu.matrix.pop()
+
+    # Text labels — mapped manually so BLF never sees the content matrix
     cached_text = st.cached_text or []
-    if cached_text:
+    if cached_text and origin:
         with _Timer("draw_text"):
             gpu.state.blend_set("ALPHA")
+            off_x = cx - content_k * piv_x
+            off_y = cy - content_k * piv_y
             for font_id, text, lx, ly, text_color, font_size in cached_text:
-                _draw_text_with_shadow(font_id, text, lx, ly, text_color, font_size)
+                _draw_text_with_shadow(
+                    font_id,
+                    text,
+                    round(content_k * lx + off_x),
+                    round(content_k * ly + off_y),
+                    text_color,
+                    font_size,
+                )
             gpu.state.blend_set("ALPHA")
 
     # Viewport overlay with cutout hole
@@ -2069,15 +2661,13 @@ def draw_minimap() -> None:
     with _Timer("draw_buttons"):
         _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
 
-    # Node count overlay text
-    with _Timer("draw_node_count"):
-        content_nodes = [n for n in nodes if n.type not in ("FRAME", "REROUTE")]
-        font_id = 0
-        _draw_node_count(settings, content_nodes, mx, my, mw, colors, master_alpha, ui_scale, font_id)
-
     # Edge resize handle pills
     with _Timer("draw_resize_handles"):
         _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
+
+    # Node count overlay text
+    with _Timer("draw_node_count"):
+        _draw_node_count(settings, content_count, mx, my, mw, colors, master_alpha, ui_scale)
 
     # Restore GPU state
     _teardown_scissor(scissor_state)
