@@ -234,6 +234,7 @@ class MinimapState:
     list_scroll_dragging: bool = False
     list_scrollbar_thumb: tuple[float, float, float, float] | None = None
     list_scrollbar_track: tuple[float, float, float, float] | None = None
+    list_zone_rect: tuple[float, float, float, float] | None = None
     list_anim_active: bool = False
     list_anim_from: float = 0.0
     list_anim_target: float = -1.0
@@ -430,7 +431,9 @@ _LIST_COUNT_GAP = 8.0
 _SCROLLBAR_HIT_PAD = 6.0
 
 
-def _get_type_list_width(settings, st: MinimapState, mw: float, ui_scale: float) -> float:
+def _get_type_list_width(
+    settings, st: MinimapState, mw: float, ui_scale: float, font_size: int = STATS_FONT_SIZE
+) -> float:
     """Measure the type-list zone width for the current tree data (0 when disabled).
 
     Called before the map transform is computed so node framing can reserve
@@ -444,7 +447,7 @@ def _get_type_list_width(settings, st: MinimapState, mw: float, ui_scale: float)
         return 0.0
 
     font_id = STATS_FONT_ID
-    blf.size(font_id, int(STATS_FONT_SIZE * ui_scale))
+    blf.size(font_id, int(font_size * ui_scale))
     pad_x = _LIST_PAD_X * ui_scale
     swatch = _LIST_SWATCH * ui_scale
     swatch_gap = _LIST_SWATCH_GAP * ui_scale

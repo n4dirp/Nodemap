@@ -551,7 +551,8 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
     a timeout) for the pending compile to expose measurable type stats
     before starting its clock.
     """
-    target_now = _get_type_list_width(settings, st, mw, ui_scale)
+    list_font_size = getattr(settings, "type_list_font_size", STATS_FONT_SIZE)
+    target_now = _get_type_list_width(settings, st, mw, ui_scale, list_font_size)
     if not st.list_anim_active:
         st.list_width = target_now
         return
@@ -611,7 +612,7 @@ def _build_type_list_cache(
     type_stats = tree_data.get("type_stats") or {}
 
     font_id = STATS_FONT_ID
-    font_size = int(STATS_FONT_SIZE * ui_scale)
+    font_size = int(getattr(settings, "type_list_font_size", STATS_FONT_SIZE) * ui_scale)
     blf.size(font_id, font_size)
 
     if getattr(settings, "type_list_sort", "COUNT") == "NAME":
@@ -687,6 +688,7 @@ def _draw_type_list(
         st.hovered_list_scrollbar = False
         st.list_scrollbar_thumb = None
         st.list_scrollbar_track = None
+        st.list_zone_rect = None
         return
     tree_data = st.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
@@ -696,6 +698,7 @@ def _draw_type_list(
         st.hovered_list_scrollbar = False
         st.list_scrollbar_thumb = None
         st.list_scrollbar_track = None
+        st.list_zone_rect = None
         return
 
     key = _type_list_cache_key(st, settings, colors, master_alpha, ui_scale)
@@ -704,7 +707,7 @@ def _draw_type_list(
             _build_type_list_cache(st, settings, key, colors, master_alpha, ui_scale)
     entries = st.cached_list_entries or []
     layout = st.cached_list_layout or {}
-    font_size = layout.get("font_size", int(STATS_FONT_SIZE * ui_scale))
+    font_size = layout.get("font_size", int(getattr(settings, "type_list_font_size", STATS_FONT_SIZE) * ui_scale))
     row_h = layout.get("row_h", 16.0)
     line_h = layout.get("line_h", 12.0)
     widest_count = layout.get("widest_count", 0.0)
@@ -715,13 +718,22 @@ def _draw_type_list(
     swatch_gap = _LIST_SWATCH_GAP * ui_scale
     count_gap = _LIST_COUNT_GAP * ui_scale
 
+    # Compute total rows height so the background can shrink-wrap when the
+    # list is shorter than the minimap.
+    row_pad_v = 3 * ui_scale
+    _children = st.cached_list_children or {}
+    total_h = 0.0
+    for _ in _iter_type_list_layout(entries, _children, st.list_expanded, row_h):
+        total_h += row_h
+
     # Zone geometry: inset by the resize-handle thickness so edge resize
     # borders stay reachable around the list
     handle_pad = _HANDLE_THICKNESS * ui_scale
     zone_x = mx + handle_pad
     zone_w = mx + padding + st.list_width - 2 * ui_scale - zone_x
-    zone_y = my + handle_pad
-    zone_h = mh - 2 * handle_pad
+    zone_h = min(mh - 2 * handle_pad, total_h + 2 * row_pad_v)
+    zone_y = my + mh - zone_h - handle_pad
+    st.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
 
     zone_r = colors.get("panel_roundness", 4.0) * 0.6
     _draw_filled_rounded_rect(zone_x, zone_y, zone_w, zone_h, zone_r, _alpha_mul(colors["bg"], master_alpha))
@@ -730,14 +742,9 @@ def _draw_type_list(
     )
 
     # Scrollable rows viewport inside the zone
-    row_pad_v = 3 * ui_scale
     view_t = zone_y + zone_h - row_pad_v
     view_b = zone_y + row_pad_v
     view_h = max(view_t - view_b, row_h)
-    _children = st.cached_list_children or {}
-    total_h = 0.0
-    for _ in _iter_type_list_layout(entries, _children, st.list_expanded, row_h):
-        total_h += row_h
     scroll_max = max(0.0, total_h - view_h)
     st.list_scroll = min(max(st.list_scroll, 0.0), scroll_max)
     st.list_scroll_max = scroll_max

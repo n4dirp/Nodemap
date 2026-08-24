@@ -101,7 +101,13 @@ def _in_list_zone(region_x: int, region_y: int, st: MinimapState) -> bool:
     pad = _HANDLE_THICKNESS * _get_ui_scale()
     zone_left = mx + pad
     zone_right = mx + st.padding + st.list_width
-    return zone_left <= region_x <= zone_right and my + pad <= region_y <= my + mh - pad
+    zone_rect = st.list_zone_rect
+    if zone_rect:
+        _, zone_y, _, zone_h = zone_rect
+    else:
+        zone_y = my + pad
+        zone_h = mh - 2 * pad
+    return zone_left <= region_x <= zone_right and zone_y <= region_y <= zone_y + zone_h
 
 
 def _list_row_at(region_x: int, region_y: int, st: MinimapState) -> str | None:
@@ -331,6 +337,8 @@ class NODEMAP_OT_navigate(Operator):
     _list_toggle_pressed: str | None = None
     _list_scroll_pressed: bool = False
     _list_scroll_grab: float = 0.0
+    _list_mmb_dragging: bool = False
+    _list_mmb_drag_start: tuple[int, int] | None = None
 
     _smooth_timer: str | None = None
     _inertia_active: bool = False
@@ -376,6 +384,7 @@ class NODEMAP_OT_navigate(Operator):
         _is_interacting = (
             self._dragging
             or self._mmb_dragging
+            or self._list_mmb_dragging
             or self._resize_handle is not None
             or self._drag_start is not None
             or self._list_scroll_pressed
@@ -708,8 +717,18 @@ class NODEMAP_OT_navigate(Operator):
                 if event.value == "PRESS" and in_minimap:
                     st.pressed = True
                     self._cancel_smooth(context)
-                    self._mmb_dragging = True
-                    self._mmb_drag_start = (self._mx, self._my)
+                    if _in_list_zone(self._mx, self._my, st):
+                        self._list_mmb_dragging = True
+                        self._list_mmb_drag_start = (self._mx, self._my)
+                    else:
+                        self._mmb_dragging = True
+                        self._mmb_drag_start = (self._mx, self._my)
+                    return {"RUNNING_MODAL"}
+                if event.value == "RELEASE" and self._list_mmb_dragging:
+                    st.pressed = False
+                    redraw_ui("NODE_EDITOR")
+                    self._list_mmb_dragging = False
+                    self._list_mmb_drag_start = None
                     return {"RUNNING_MODAL"}
                 if event.value == "RELEASE" and self._mmb_dragging:
                     st.pressed = False
@@ -778,6 +797,16 @@ class NODEMAP_OT_navigate(Operator):
                     if old_btn != new_btn:
                         st.hovered_frame_btn = new_btn
                         redraw_ui("NODE_EDITOR")
+                if self._list_mmb_dragging and self._list_mmb_drag_start:
+                    dy = self._my - self._list_mmb_drag_start[1]
+                    if abs(dy) > 0:
+                        st.list_scroll = min(
+                            max(st.list_scroll - dy, 0.0),
+                            st.list_scroll_max,
+                        )
+                        self._list_mmb_drag_start = (self._mx, self._my)
+                        redraw_ui("NODE_EDITOR")
+                    return {"RUNNING_MODAL"}
                 if self._mmb_dragging and self._mmb_drag_start:
                     dx = self._mx - self._mmb_drag_start[0]
                     dy = self._my - self._mmb_drag_start[1]
@@ -1236,6 +1265,9 @@ class NODEMAP_OT_navigate(Operator):
         if self._mmb_dragging:
             self._mmb_dragging = False
             self._mmb_drag_start = None
+        if self._list_mmb_dragging:
+            self._list_mmb_dragging = False
+            self._list_mmb_drag_start = None
         if self._resize_handle:
             self._resize_handle = None
             self._resize_start_mouse = None

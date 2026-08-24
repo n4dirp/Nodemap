@@ -326,6 +326,15 @@ class NODEMAP_PG_settings(PropertyGroup):
         default="NAME",
     )
 
+    type_list_font_size: IntProperty(
+        name="Type List Font Size",
+        description="Font size for the node-type list entries (pixels)",
+        default=8,
+        min=6,
+        max=20,
+        update=_update_minimap_cache,
+    )
+
     debounce_interval: FloatProperty(
         name="Update Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",
@@ -506,6 +515,11 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = layout.column(align=True)
         col.prop(settings, "max_width_pct", text="Max Region X")
         col.prop(settings, "max_height_pct", text="Y")
+
+        layout.separator()
+        layout.label(text="Type List")
+        col = layout.column(align=True)
+        col.prop(settings, "type_list_font_size", text="Font Size")
 
         layout.separator()
         layout.label(text="Performance")
