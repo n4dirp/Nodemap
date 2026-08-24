@@ -82,6 +82,7 @@ _MIN_SOCKET_SCALE = 0.15
 BTN_HOVER_ALPHA = 0.015
 
 _SCROLLBAR_THICKNESS = 3.0
+_SCROLLBAR_THICKNESS_HOVER = 6.0
 _SCROLLBAR_INSET = 2.0
 _SCROLLBAR_MIN_THUMB = 6.0
 _SCROLLBAR_ALPHA = 0.65
@@ -97,8 +98,6 @@ _SCALE_REBUILD_REL = 0.002
 # bake-time anchor; bounds how stale rect culling may become (px).
 _BATCH_DRIFT_PX = 256.0
 _CULL_MARGIN_PX = _BATCH_DRIFT_PX + 32.0
-# Skip node borders below this on-screen size (sub-pixel lines are invisible).
-_MIN_BORDER_PX = 1.5
 # Minimum interval between live position-only refreshes during drags (seconds).
 # Skipped frames fall through to the debounced compile, which flushes the
 # final position once movement settles.
@@ -389,11 +388,13 @@ def _draw_view_fill(
     panel_r: float,
     master_alpha: float,
     ui_scale: float,
+    visible: tuple[float, float, float, float] | None = None,
 ) -> None:
     """Draw a filled rect over the active view region, behind nodes and wires."""
     if not getattr(settings, "viewport_fill_rect", False):
         return
-    visible = _get_visible_rect(space, region)
+    if visible is None:
+        visible = _get_visible_rect(space, region)
     if not visible:
         return
 
@@ -440,9 +441,11 @@ def _draw_viewport_overlay(
     ui_scale: float,
     scissor_active: bool,
     st: MinimapState | None = None,
+    visible: tuple[float, float, float, float] | None = None,
 ) -> None:
     """Draw the viewport rect outline and optional darkened overlay."""
-    visible = _get_visible_rect(space, region)
+    if visible is None:
+        visible = _get_visible_rect(space, region)
     if not visible:
         return
 
@@ -587,6 +590,7 @@ def _type_list_cache_key(st: MinimapState, settings, colors: dict, master_alpha:
         st.tree_data_version,
         getattr(settings, "type_list_sort", "COUNT"),
         getattr(settings, "colored_nodes", True),
+        frozenset(st.list_expanded),
         ui_scale,
         master_alpha,
         tuple(colors["node"]),
@@ -605,7 +609,6 @@ def _build_type_list_cache(
     """
     tree_data = st.tree_data or {}
     type_stats = tree_data.get("type_stats") or {}
-    type_colors = tree_data.get("type_colors") or {}
 
     font_id = STATS_FONT_ID
     font_size = int(STATS_FONT_SIZE * ui_scale)
@@ -616,54 +619,48 @@ def _build_type_list_cache(
     else:
         items = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
 
-    entries: list[tuple[str, str, float]] = []
+    entries: list[tuple[str, str, float, int]] = []
     widest_count = 0.0
     for label, count in items:
         count_text = str(count)
         count_w = blf.dimensions(font_id, count_text)[0]
         widest_count = max(widest_count, count_w)
-        entries.append((label, count_text, count_w))
+        entries.append((label, count_text, count_w, count))
 
     _, line_h = blf.dimensions(font_id, "Ay")
     row_h = line_h + 4 * ui_scale
 
-    batch = None
-    if getattr(settings, "colored_nodes", True):
-        swatch = _LIST_SWATCH * ui_scale
-        swatch_y_off = (row_h - swatch) / 2
-        half = swatch / 2
-        pad = 2.0
-        uv_half = half + pad
-        pos = []
-        uvs = []
-        half_sizes = []
-        radii = []
-        cols = []
-        for i, (label, _count_text, _count_w) in enumerate(entries):
-            c = type_colors.get(label) or colors["node"]
-            rgba = _srgb_to_linear(_alpha_mul(c, master_alpha))
-            ly = -(i + 1) * row_h + swatch_y_off
-            x0, y0 = -pad, ly - pad
-            x1, y1 = swatch + pad, ly + swatch + pad
-            pos.extend(((x0, y0, 0.0), (x1, y0, 0.0), (x1, y1, 0.0), (x0, y1, 0.0)))
-            uvs.extend(((-uv_half, -uv_half), (uv_half, -uv_half), (uv_half, uv_half), (-uv_half, uv_half)))
-            half_sizes.extend([(half, half)] * 4)
-            radii.extend([half] * 4)
-            cols.extend([rgba] * 4)
-        n = len(pos) // 4
-        if n > 0:
-            shader = _get_batch_rect_shader()
-            batch = batch_for_shader(
-                shader,
-                "TRIS",
-                {"pos": pos, "uv": uvs, "halfSize": half_sizes, "radius": radii, "color": cols},
-                indices=_create_quad_indices(n),
-            )
-
+    # Icons (swatch / +/− / child circle) are drawn live in _draw_type_list so
+    # selection and active state can recolor them per frame; no baked batch.
     st.list_cache_key = key
     st.cached_list_entries = entries
+    st.cached_list_children = tree_data.get("type_nodes") or {}
     st.cached_list_layout = {"font_size": font_size, "line_h": line_h, "row_h": row_h, "widest_count": widest_count}
-    st.cached_list_swatches_batch = batch
+    st.cached_list_swatches_batch = None
+
+
+def _iter_type_list_layout(
+    entries: list[tuple[str, str, float, int]],
+    children: dict[str, list[str]],
+    expanded: set,
+    row_h: float,
+):
+    """Yield ``(kind, label, node_name, local_y_top)`` for each visible list row.
+
+    ``kind`` is ``"header"`` for a type row or ``"child"`` for an individual
+    node row. ``local_y_top`` is the list-local top coordinate (0 at the top,
+    negative downward) so the same model drives the baked swatch batch and the
+    per-frame text/hit-test layout. Only type groups with count > 1 that are
+    present in *expanded* emit child rows.
+    """
+    y = 0.0
+    for label, _count_text, _count_w, count in entries:
+        yield ("header", label, None, y)
+        y -= row_h
+        if count > 1 and label in expanded:
+            for node_name in children.get(label, ()):
+                yield ("child", label, node_name, y)
+                y -= row_h
 
 
 def _draw_type_list(
@@ -679,16 +676,26 @@ def _draw_type_list(
 ) -> None:
     """Draw the interactive node-type list zone along the minimap's left edge."""
     st.list_row_rects = []
+    st.list_node_rects = []
+    st.list_toggle_rects = {}
     st.list_scroll_max = 0.0
     # Drawn whenever the zone has width, including while it animates shut,
     # so the content slides out with the panel instead of vanishing.
     if st.list_width <= 0:
         st.hovered_type_label = None
+        st.hovered_list_node = None
+        st.hovered_list_scrollbar = False
+        st.list_scrollbar_thumb = None
+        st.list_scrollbar_track = None
         return
     tree_data = st.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
         st.hovered_type_label = None
+        st.hovered_list_node = None
+        st.hovered_list_scrollbar = False
+        st.list_scrollbar_thumb = None
+        st.list_scrollbar_track = None
         return
 
     key = _type_list_cache_key(st, settings, colors, master_alpha, ui_scale)
@@ -727,7 +734,10 @@ def _draw_type_list(
     view_t = zone_y + zone_h - row_pad_v
     view_b = zone_y + row_pad_v
     view_h = max(view_t - view_b, row_h)
-    total_h = row_h * len(entries)
+    _children = st.cached_list_children or {}
+    total_h = 0.0
+    for _ in _iter_type_list_layout(entries, _children, st.list_expanded, row_h):
+        total_h += row_h
     scroll_max = max(0.0, total_h - view_h)
     st.list_scroll = min(max(st.list_scroll, 0.0), scroll_max)
     st.list_scroll_max = scroll_max
@@ -735,20 +745,27 @@ def _draw_type_list(
     show_swatch = getattr(settings, "colored_nodes", True)
 
     content_x = zone_x + pad_x
-    count_right = zone_x + zone_w - pad_x
-    label_x = content_x + (swatch + swatch_gap if show_swatch else 0.0)
+    # Static extra margin so counts stay clear of the expanded scrollbar.
+    count_right = zone_x + zone_w - pad_x - 4 * ui_scale
+    # Always reserve the swatch/toggle column so multi-node + icons never
+    # overlap the type label, even when colored nodes are disabled.
+    label_x = content_x + (swatch + swatch_gap)
     label_max_w = max(0.0, count_right - widest_count - count_gap - label_x)
     text_y_off = (row_h - line_h) / 2
 
-    text_col = _alpha_mul(colors["text"], 0.9 * master_alpha)
-    count_col = _alpha_mul(colors["text"], 0.55 * master_alpha)
+    text_col = _alpha_mul(colors["text"], 0.65 * master_alpha)
+    count_col = _alpha_mul(colors["text"], 0.3 * master_alpha)
+    sel_col = _alpha_mul(colors["node_selected"], 0.95 * master_alpha)
+    active_col = _alpha_mul(colors["node_active"], master_alpha)
+
+    # Per-type selection state (compiled) drives font (not icon) recoloring.
+    type_colors = tree_data.get("type_colors") or {}
+    type_selected = tree_data.get("type_selected_counts") or {}
+    type_active = tree_data.get("type_active_label")
     hover_col = _alpha_mul(colors["text"], 0.02 * master_alpha)
 
     pill_x = zone_x + 2 * ui_scale
     pill_w = zone_w - 4 * ui_scale
-
-    first = int(st.list_scroll // row_h)
-    last = min(len(entries), first + int(view_h / row_h) + 2)
 
     # Clip rows to the zone interior so partial rows never bleed onto the map
     saved_scissor = None
@@ -762,68 +779,167 @@ def _draw_type_list(
         gpu.state.scissor_test_set(True)
         gpu.state.blend_set("ALPHA")
 
-        row_rects = []
+        entry_map = {lbl: (ct, cw, cnt) for (lbl, ct, cw, cnt) in entries}
+        expanded = st.list_expanded
         hovered = st.hovered_type_label
-        for i in range(first, last):
-            label, _count_text, _count_w = entries[i]
-            row_top = view_t - i * row_h + st.list_scroll
-            row_bottom = row_top - row_h
-            if row_top <= view_b or row_bottom >= view_t:
+        hovered_child = st.hovered_list_node
+
+        # Walk the shared layout model; cull rows outside the viewport.
+        visible_rows = []
+        for row_idx, (kind, label, node_name, local_y) in enumerate(
+            _iter_type_list_layout(entries, _children, expanded, row_h)
+        ):
+            s_top = view_t + st.list_scroll + local_y
+            s_bottom = s_top - row_h
+            if s_top <= view_b or s_bottom >= view_t:
+                continue
+            visible_rows.append((kind, label, node_name, s_top, s_bottom, row_idx))
+
+        # Zebra bands keyed on the absolute layout index so they stay attached
+        # to rows while scrolling; drawn beneath pills, text, and icons.
+        band_col = (0.0, 0.0, 0.0, 0.15 * master_alpha)
+        for _kind, _label, _node_name, s_top, s_bottom, row_idx in visible_rows:
+            if row_idx % 2 == 1:
+                _draw_filled_rounded_rect(pill_x, s_bottom, pill_w, row_h, 0.0, band_col)
+
+        # Header hover pills + hit rects (rows + expand toggle slots)
+        header_rects = []
+        toggle_rects = {}
+        for kind, label, _node_name, _s_top, s_bottom, _row_idx in visible_rows:
+            if kind != "header":
                 continue
             if hovered == label:
-                _draw_filled_rounded_rect(pill_x, row_bottom, pill_w, row_h, 4.0 * ui_scale, hover_col)
-            row_rects.append((pill_x, row_bottom, pill_w, row_h, label))
-        st.list_row_rects = row_rects
+                _draw_filled_rounded_rect(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, hover_col)
+            if label == type_active:
+                # Active outline drawn here (pre-text) so BLF cannot clobber the
+                # alpha blend state the SDF fill relies on.
+                _draw_rounded_rect_border(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, sel_col, 0.5 * ui_scale)
+            header_rects.append((pill_x, s_bottom, pill_w, row_h, label))
+            if entry_map.get(label, ("", 0.0, 1))[2] > 1:
+                toggle_rects[label] = (content_x, s_bottom, swatch + swatch_gap, row_h)
+        st.list_row_rects = header_rects
+        st.list_toggle_rects = toggle_rects
 
-        # Cached swatch pills in one draw call; the translation matrix applies
-        # the anchor and scroll offset to the list-local baked coordinates.
-        swatch_batch = st.cached_list_swatches_batch
-        if show_swatch and swatch_batch is not None:
-            rect_shader = _get_batch_rect_shader()
-            rect_shader.bind()
-            rect_shader.uniform_float(
-                "ModelViewProjectionMatrix",
-                gpu.matrix.get_projection_matrix()
-                @ (gpu.matrix.get_model_view_matrix() @ Matrix.Translation((content_x, view_t + st.list_scroll, 0.0))),
-            )
-            swatch_batch.draw(rect_shader)
+        # Active child hit-test lookups run up here so the outline can be drawn
+        # in this pre-text pass (BLF disables alpha blending after glyph draws).
+        node_tree = bpy.context.space_data.edit_tree if bpy.context.space_data else None
+        active_node = node_tree.nodes.active if node_tree else None
+
+        # Child hover pills + hit rects
+        child_rects = []
+        for kind, label, node_name, _s_top, s_bottom, _row_idx in visible_rows:
+            if kind != "child":
+                continue
+            if hovered_child == (label, node_name):
+                _draw_filled_rounded_rect(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, hover_col)
+            # else:
+            child_active = False
+            try:
+                node = node_tree.nodes.get(node_name) if node_tree else None
+                child_active = bool(active_node and node == active_node)
+            except Exception:
+                node = None
+            if child_active:
+                _draw_rounded_rect_border(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, sel_col, 0.5 * ui_scale)
+            child_rects.append((pill_x, s_bottom, pill_w, row_h, label, node_name))
+        st.list_node_rects = child_rects
 
         # Hoisted BLF state (size, shadow, clip box); calling the shared text
         # helper per row would redo this setup twice per visible row.
         font_id = STATS_FONT_ID
         blf.size(font_id, font_size)
-        # Clip overlong labels at the column edge only; BLF discards
-        # glyphs past the clip box instead of clipping them, so vertical
-        # bounds get slack beyond any drawable row and the scissor does
-        # the per-pixel row clipping.
-        blf.enable(font_id, blf.CLIPPING)
-        blf.clipping(
-            font_id,
-            int(label_x),
-            int(zone_y - row_h),
-            int(label_x + label_max_w),
-            int(zone_y + zone_h + row_h),
-        )
         blf.enable(font_id, blf.SHADOW)
         blf.shadow(font_id, 3, 0, 0, 0, 255)
         blf.shadow_offset(font_id, 0, -1)
-        for i in range(first, last):
-            label, count_text, count_w = entries[i]
-            row_top = view_t - i * row_h + st.list_scroll
-            row_bottom = row_top - row_h
-            if row_top <= view_b or row_bottom >= view_t:
-                continue
-            text_y = row_bottom + text_y_off
-            blf.position(font_id, label_x, text_y, 0)
-            blf.color(font_id, *text_col)
-            blf.draw(font_id, label)
-            # Counts sit right of the label clip box; BLF discards glyphs
-            # past the box instead of clipping them.
-            blf.disable(font_id, blf.CLIPPING)
-            blf.position(font_id, count_right - count_w, text_y, 0)
-            blf.color(font_id, *count_col)
-            blf.draw(font_id, count_text)
-            blf.enable(font_id, blf.CLIPPING)
+
+        child_indent = swatch + swatch_gap
+        child_label_x = label_x + child_indent
+        child_label_max_w = max(0.0, label_max_w - child_indent)
+        child_clip_l = int(child_label_x)
+        child_clip_r = int(child_label_x + child_label_max_w)
+        clip_t = int(zone_y - row_h)
+        clip_b = int(zone_y + zone_h + row_h)
+
+        child_swatch_x = content_x + child_indent
+
+        for kind, label, node_name, _s_top, s_bottom, _row_idx in visible_rows:
+            text_y = s_bottom + text_y_off
+            if kind == "header":
+                # Icons keep the type color; selection/active state shows in the
+                # row text color instead (active brightest, then selected).
+                is_active = label == type_active
+                is_sel = type_selected.get(label, 0) > 0
+                if is_active:
+                    label_col = active_col
+                elif is_sel:
+                    label_col = sel_col
+                else:
+                    label_col = text_col
+
+                blf.clipping(font_id, int(label_x), clip_t, int(label_x + label_max_w), clip_b)
+                blf.enable(font_id, blf.CLIPPING)
+                blf.position(font_id, label_x, text_y, 0)
+                blf.color(font_id, *label_col)
+                blf.draw(font_id, label)
+                # Counts sit right of the label clip box; BLF discards glyphs
+                # past the box instead of clipping them.
+                blf.disable(font_id, blf.CLIPPING)
+                count_text, count_w, _cnt = entry_map.get(label, ("", 0.0, 1))
+                blf.position(font_id, count_right - count_w, text_y, 0)
+                blf.color(font_id, *count_col)
+                blf.draw(font_id, count_text)
+                blf.enable(font_id, blf.CLIPPING)
+
+                # Icon sits over the text; restore alpha blending after BLF.
+                gpu.state.blend_set("ALPHA")
+
+                # Icon in the swatch slot stays the type color for every state:
+                # +/− toggle for multi-node types, colored swatch for single-node.
+                icon_color = type_colors.get(label, colors["node"])
+                icon_rgba = _alpha_mul(icon_color, master_alpha)
+                if entry_map.get(label, ("", 0.0, 1))[2] > 1:
+                    _paint_expand_icon(
+                        content_x + swatch / 2, s_bottom + row_h / 2, swatch, icon_rgba, ui_scale, label in expanded
+                    )
+                elif show_swatch:
+                    _draw_filled_rounded_rect(
+                        content_x, s_bottom + (row_h - swatch) / 2, swatch, swatch, swatch / 2, icon_rgba
+                    )
+            else:
+                # Child row: icon is the type color; text shows selection state.
+                is_active = False
+                is_sel = False
+                try:
+                    node = node_tree.nodes.get(node_name) if node_tree else None
+                    is_active = bool(active_node and node == active_node)
+                    is_sel = bool(node and node.select)
+                except Exception:
+                    node = None
+                if is_active:
+                    label_col = active_col
+                elif is_sel:
+                    label_col = sel_col
+                else:
+                    label_col = text_col
+
+                blf.clipping(font_id, child_clip_l, clip_t, child_clip_r, clip_b)
+                blf.enable(font_id, blf.CLIPPING)
+                # Child icon matches the normal item's swatch (same size/shape).
+                # Restore alpha blending after the row's text draw.
+                gpu.state.blend_set("ALPHA")
+                if show_swatch:
+                    _draw_filled_rounded_rect(
+                        child_swatch_x,
+                        s_bottom + (row_h - swatch) / 2,
+                        swatch,
+                        swatch,
+                        swatch / 2,
+                        _alpha_mul(type_colors.get(label, colors["node"]), master_alpha),
+                    )
+                blf.position(font_id, child_label_x, text_y, 0)
+                blf.color(font_id, *label_col)
+                blf.draw(font_id, node_name)
+                blf.enable(font_id, blf.CLIPPING)
         blf.disable(font_id, blf.CLIPPING)
         blf.disable(font_id, blf.SHADOW)
     finally:
@@ -839,12 +955,17 @@ def _draw_type_list(
             pass
 
     # Scrollbar thumb when the list overflows (same style as the map scrollbars)
+    st.list_scrollbar_thumb = None
+    st.list_scrollbar_track = None
     if scroll_max > 0:
         gpu.state.blend_set("ALPHA")
-        bar_thick, bar_off = _get_scrollbar_style(ui_scale)
+        _bar_thick, bar_off = _get_scrollbar_style(ui_scale)
         frac = st.list_scroll / scroll_max
-        _draw_scrollbar_thumb(
-            zone_x + zone_w - bar_thick - bar_off,
+        # Hover and drag share one expanded look (Blender overlay style).
+        active = st.hovered_list_scrollbar or st.list_scroll_dragging
+        thick = _scrollbar_thickness(ui_scale, active)
+        thumb_rect, track_rect = _draw_scrollbar_thumb(
+            zone_x + zone_w - thick - bar_off,
             zone_y + bar_off,
             zone_h - 2 * bar_off,
             view_h / total_h,
@@ -852,7 +973,10 @@ def _draw_type_list(
             colors,
             master_alpha,
             ui_scale,
+            active=active,
         )
+        st.list_scrollbar_thumb = thumb_rect
+        st.list_scrollbar_track = track_rect
 
 
 def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
@@ -962,6 +1086,8 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     type_counts: dict[str, int] = {}
     type_colors: dict[str, tuple[float, float, float, float]] = {}
     type_nodes: dict[str, list[str]] = {}
+    type_selected_counts: dict[str, int] = {}
+    type_active_label: str | None = None
 
     bounds_min_x = float("inf")
     bounds_min_y = float("inf")
@@ -1101,6 +1227,10 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     info["type_label"] = label
                     type_counts[label] = type_counts.get(label, 0) + 1
                     type_nodes.setdefault(label, []).append(node.name)
+                    if node.select:
+                        type_selected_counts[label] = type_selected_counts.get(label, 0) + 1
+                    if node == active_node:
+                        type_active_label = label
 
                 if node.mute:
                     bg_color = colors["bg"]
@@ -1125,6 +1255,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     border_alpha = 0.35 * master_alpha
                 info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, border_alpha))
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT * 2
+                info["name"] = node.name
 
                 if node.type == "GROUP":
                     marker_col = node_color if colored_nodes and not node.select else border_col
@@ -1249,7 +1380,13 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
         tree_data["group_markers"] = group_markers
         tree_data["type_stats"] = type_counts
         tree_data["type_colors"] = type_colors
+        # Stable child order (by name) so selecting a node — which recompiles
+        # and re-iterates node_tree.nodes — never reshuffles the sub-list.
+        for _lbl in type_nodes:
+            type_nodes[_lbl].sort()
         tree_data["type_nodes"] = type_nodes
+        tree_data["type_selected_counts"] = type_selected_counts
+        tree_data["type_active_label"] = type_active_label
         # Position-refresh support (see _apply_move_updates)
         tree_data["out_pos"] = out_pos
         tree_data["in_pos"] = in_pos
@@ -1579,6 +1716,7 @@ def _ensure_minimap_batches(
         round(ui_scale, 3),
         show_borders,
         st.hovered_type_label,
+        st.hovered_node,
         bool(highlight_border),
     )
     sb = st.batch_scale
@@ -1612,8 +1750,9 @@ def _ensure_minimap_batches(
     min_dim = 3.0 * ui_scale
     node_infos = tree_data["node_infos"]
     hovered_type = st.hovered_type_label
+    hovered_node_name = st.hovered_node
     hl_color = None
-    if hovered_type and highlight_border is not None:
+    if (hovered_type or hovered_node_name) and highlight_border is not None:
         hl_color = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
 
     # Cull window in baked space: the map interior plus slack for anchor
@@ -1675,12 +1814,20 @@ def _ensure_minimap_batches(
 
         border_color = info["border_color"]
         border_w = info["border_w"]
-        if hl_color and not is_frame and info.get("type_label") == hovered_type:
-            border_color = hl_color
-            border_w = 1.25
+        if hl_color and not is_frame:
+            # Guard on hovered_type so a hidden type list (infos without
+            # "type_label") can't match None == None for every node.
+            if hovered_type is not None and info.get("type_label") == hovered_type:
+                border_color = hl_color
+                border_w = 1.25
+            elif hovered_node_name is not None and info.get("name") == hovered_node_name:
+                border_color = hl_color
+                border_w = 1.25
 
-        # Sub-pixel borders are invisible; skip their vertex work entirely
-        draw_border = show_borders and (is_frame or (bw_raw >= _MIN_BORDER_PX and bh_raw >= _MIN_BORDER_PX))
+        # Borders always emit vertices regardless of on-screen size so they
+        # stay visible at any zoom (hover and normal alike); the SDF shader
+        # clamps the line width for tiny nodes.
+        draw_border = show_borders
 
         if is_tiny:
             bw_final = max(bw, min_dim)
@@ -2032,6 +2179,14 @@ def _get_scrollbar_style(ui_scale: float) -> tuple[int, int]:
     return max(2, int(_SCROLLBAR_THICKNESS * ui_scale)), int(_SCROLLBAR_INSET * ui_scale)
 
 
+def _scrollbar_thickness(ui_scale: float, active: bool = False) -> int:
+    """Return the scrollbar thumb thickness; expanded while hovered or dragged."""
+    thick, _ = _get_scrollbar_style(ui_scale)
+    if not active:
+        return thick
+    return max(thick + 1, int(_SCROLLBAR_THICKNESS_HOVER * ui_scale))
+
+
 def _draw_scrollbar_thumb(
     x: float,
     y: float,
@@ -2042,22 +2197,41 @@ def _draw_scrollbar_thumb(
     master_alpha: float,
     ui_scale: float,
     horizontal: bool = False,
-) -> None:
+    active: bool = False,
+    pressed: bool = False,
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
     """Draw a scrollbar thumb pill; the origin is the track's start end.
 
     *visible_frac* is the visible/content ratio sizing the thumb;
     *pos_frac* (0..1) slides it along the track from its start end
-    (left when horizontal, bottom otherwise).
+    (left when horizontal, bottom otherwise). Hovering (*active*) fades
+    the thumb to full opacity; dragging (*pressed*) additionally lifts
+    each channel by 5/255 like SCROLL_PRESSED in Blender's widget code.
+    Returns the drawn ``(thumb_rect, track_rect)`` as ``(x, y, w, h)``
+    for hit-testing.
     """
-    thick, _ = _get_scrollbar_style(ui_scale)
+    thick = _scrollbar_thickness(ui_scale, active)
+    if not active:
+        color = _alpha_mul(colors["scroll_item"], master_alpha * _SCROLLBAR_ALPHA)
+    else:
+        rgba = colors["scroll_item"]
+        if pressed:
+            lift = 5.0 / 255.0
+            rgba = (
+                min(rgba[0] + lift, 1.0),
+                min(rgba[1] + lift, 1.0),
+                min(rgba[2] + lift, 1.0),
+                rgba[3],
+            )
+        color = _alpha_mul(rgba, master_alpha)
     min_thumb = int(_SCROLLBAR_MIN_THUMB * ui_scale)
     thumb_len = max(min_thumb, int(track_len * visible_frac))
     offset = int((track_len - thumb_len) * min(max(pos_frac, 0.0), 1.0))
-    color = _alpha_mul(colors["scroll_item"], master_alpha * _SCROLLBAR_ALPHA)
     if horizontal:
         _draw_pill(x + offset, y, thumb_len, thick, color)
-    else:
-        _draw_pill(x, y + offset, thick, thumb_len, color)
+        return (x + offset, y, thumb_len, thick), (x, y, track_len, thick)
+    _draw_pill(x, y + offset, thick, thumb_len, color)
+    return (x, y + offset, thick, thumb_len), (x, y, thick, track_len)
 
 
 def _draw_minimap_scrollbars(
@@ -2193,6 +2367,15 @@ def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: fl
 
     for i in range(3):
         _draw_filled_rounded_rect(bar_x, bar_y + i * (t + bar_gap), bar_w, t, t * 0.5, color)
+
+
+def _paint_expand_icon(x: float, y: float, size: float, color, ui_scale: float, expanded: bool) -> None:
+    """Draw a plus (collapsed) or minus (expanded) glyph centered at ``(x, y)``."""
+    t = max(1, int(1.2 * ui_scale))
+    arm = size * 0.5
+    _draw_filled_rounded_rect(x - arm, y - t / 2, arm * 2, t, t * 0.5, color)
+    if not expanded:
+        _draw_filled_rounded_rect(x - t / 2, y - arm, t, arm * 2, t * 0.5, color)
 
 
 _BUTTON_ICONS = {
@@ -2339,6 +2522,10 @@ def draw_minimap() -> None:
     if not node_tree or not node_tree.nodes or len(node_tree.nodes) == 0:
         return
 
+    # Cache the editor viewport rect once for this frame; reused by the
+    # transform/clamp logic and the viewport overlay draws below.
+    visible = _get_visible_rect(space, region)
+
     # Single RNA pass: fingerprint, raw tree bounds, and drawable node count.
     show_borders = getattr(settings, "show_node_borders", True)
     with _Timer("tree_snapshot"):
@@ -2387,7 +2574,7 @@ def draw_minimap() -> None:
         with _Timer("type_list_width"):
             _step_list_width(st, settings, mw, ui_scale)
 
-        _clamp_pan_to_viewport(space, region, st)
+        _clamp_pan_to_viewport(space, region, st, visible)
 
     # Refresh tree data: pure position changes (node drags) patch the cached
     # tables immediately; anything else schedules a debounced full compile.
@@ -2432,10 +2619,10 @@ def draw_minimap() -> None:
             st.pending_fingerprint = current_fingerprint
 
     # Build screen-space batches (cached; applies current zoom/pan via matrix)
-    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region)
+    cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region, visible)
     st.scale = scale
     with _Timer("ensure_batches"):
-        highlight_border = colors["node_active"] if st.hovered_type_label else None
+        highlight_border = colors["node_active"] if (st.hovered_type_label or st.hovered_node) else None
         _ensure_minimap_batches(
             st,
             mx,
@@ -2487,6 +2674,7 @@ def draw_minimap() -> None:
             panel_r,
             master_alpha,
             ui_scale,
+            visible,
         )
 
     # Content batches are baked in map-local space; place them with one
@@ -2636,6 +2824,7 @@ def draw_minimap() -> None:
             ui_scale,
             scissor_active,
             st,
+            visible=visible,
         )
 
     # Minimap Scrollbars

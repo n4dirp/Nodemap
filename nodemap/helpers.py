@@ -39,6 +39,7 @@ def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
                     continue
             if mode == "ALL" or area.type == mode:
                 area.tag_redraw()
+                # logger.info(f"Redrawing area: {area.type}")
 
 
 def _theme(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
@@ -225,6 +226,14 @@ class MinimapState:
     list_row_h: float = 16.0
     hovered_type_label: str | None = None
     list_row_rects: list = field(default_factory=list)
+    list_expanded: set = field(default_factory=set)
+    list_node_rects: list = field(default_factory=list)
+    list_toggle_rects: dict = field(default_factory=dict)
+    hovered_list_node: tuple | None = None
+    hovered_list_scrollbar: bool = False
+    list_scroll_dragging: bool = False
+    list_scrollbar_thumb: tuple[float, float, float, float] | None = None
+    list_scrollbar_track: tuple[float, float, float, float] | None = None
     list_anim_active: bool = False
     list_anim_from: float = 0.0
     list_anim_target: float = -1.0
@@ -250,6 +259,7 @@ class MinimapState:
     list_cache_key: Any = None
     cached_list_entries: list | None = None
     cached_list_layout: dict | None = None
+    cached_list_children: dict = field(default_factory=dict)
     cached_list_swatches_batch: Any = None
     tree_data_version: int = 0
     pos_data_version: int = 0
@@ -415,6 +425,9 @@ _LIST_PAD_X = 6.0
 _LIST_SWATCH = 5.0
 _LIST_SWATCH_GAP = 5.0
 _LIST_COUNT_GAP = 8.0
+# Extra width around the type-list scrollbar track that still counts as a
+# hover/press hit, matching the generous gutter of Blender overlay scrollbars.
+_SCROLLBAR_HIT_PAD = 6.0
 
 
 def _get_type_list_width(settings, st: MinimapState, mw: float, ui_scale: float) -> float:
@@ -482,26 +495,57 @@ def _schedule_list_anim_redraw(st: MinimapState) -> None:
         pass
 
 
+def _compute_base_map_geom(
+    st: MinimapState,
+) -> tuple[float, float, float, float, float, float, float, float, float]:
+    """Return the scale-independent geometry shared by all map transforms.
+
+    Computes ``(inner_l, inner_b, inner_w, inner_h, bbox_w, bbox_h, base_scale,
+    tree_cx, tree_cy)`` from the current state. Pure: no prefs lookups, no
+    mutation of *st*.
+    """
+    bounds = st.tree_bounds
+    inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
+    bbox_w = max(bounds[2] - bounds[0], 1.0)
+    bbox_h = max(bounds[3] - bounds[1], 1.0)
+    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+    tree_cx = (bounds[0] + bounds[2]) / 2
+    tree_cy = (bounds[1] + bounds[3]) / 2
+    return inner_l, inner_b, inner_w, inner_h, bbox_w, bbox_h, base_scale, tree_cx, tree_cy
+
+
+def _compute_map_transform(
+    st: MinimapState | None = None,
+) -> tuple[float, float, float, float, float]:
+    """Compute the screen mapping ``(cx, cy, scale, tree_cx, tree_cy)`` for the minimap.
+
+    Pure: no side effects, no preference lookups. Callers that need the
+    scale-independent geometry (inner rect, base_scale) can use
+    :func:`_compute_base_map_geom` directly.
+    """
+    if st is None:
+        st = _state()
+    inner_l, inner_b, inner_w, inner_h, _bw, _bh, base_scale, tree_cx, tree_cy = _compute_base_map_geom(st)
+    scale = base_scale * st.zoom
+    cx = inner_l + inner_w / 2 + st.pan[0]
+    cy = inner_b + inner_h / 2 + st.pan[1]
+    return cx, cy, scale, tree_cx, tree_cy
+
+
 def _get_minimap_transform(
     st: MinimapState | None = None,
     space: Any = None,
     region: Any = None,
+    visible: tuple[float, float, float, float] | None = None,
 ) -> tuple[float, float, float, float, float]:
     """Computes internal transformations representing scale, zoom, and panning inside the minimap."""
     if st is None:
         st = _state()
-    bounds = st.tree_bounds
-
     base_zoom = st.base_zoom
     zoom = base_zoom
-    pan = st.pan
 
-    inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
-
-    bbox_w = max(bounds[2] - bounds[0], 1.0)
-    bbox_h = max(bounds[3] - bounds[1], 1.0)
-
-    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+    geom = _compute_base_map_geom(st)
+    inner_l, inner_b, inner_w, inner_h, _bw, _bh, base_scale, _tcx, _tcy = geom
 
     # Dynamic Auto-Zoom if follow_view is active
     addon = bpy.context.preferences.addons.get(__package__)
@@ -512,7 +556,8 @@ def _get_minimap_transform(
             region = bpy.context.region
 
         if space and space.type == "NODE_EDITOR" and region:
-            visible = _get_visible_rect(space, region)
+            if visible is None:
+                visible = _get_visible_rect(space, region)
             if visible:
                 vw = max(visible[2] - visible[0], 1.0)
                 vh = max(visible[3] - visible[1], 1.0)
@@ -527,22 +572,20 @@ def _get_minimap_transform(
 
                 st.zoom = zoom
                 # Execute clamping passively during draw so panning outside the minimap updates bounds
-                _clamp_pan_to_viewport(space, region, st)
-                pan = st.pan
+                _clamp_pan_to_viewport(space, region, st, visible)
 
     st.zoom = zoom
-    scale = base_scale * zoom
-
-    cx = inner_l + inner_w / 2 + pan[0]
-    cy = inner_b + inner_h / 2 + pan[1]
-
-    tree_cx = (bounds[0] + bounds[2]) / 2
-    tree_cy = (bounds[1] + bounds[3]) / 2
-
+    scale = base_scale * st.zoom
+    cx = inner_l + inner_w / 2 + st.pan[0]
+    cy = inner_b + inner_h / 2 + st.pan[1]
+    tree_cx = (st.tree_bounds[0] + st.tree_bounds[2]) / 2
+    tree_cy = (st.tree_bounds[1] + st.tree_bounds[3]) / 2
     return cx, cy, scale, tree_cx, tree_cy
 
 
-def _clamp_pan_to_viewport(space, region, st: MinimapState) -> None:
+def _clamp_pan_to_viewport(
+    space, region, st: MinimapState, visible: tuple[float, float, float, float] | None = None
+) -> None:
     """Clamp *st.pan* so the editor viewport stays inside the minimap (follow mode).
 
     No-op when the ``follow_view`` preference is off.
@@ -551,27 +594,15 @@ def _clamp_pan_to_viewport(space, region, st: MinimapState) -> None:
     if not addon or not getattr(addon.preferences.settings, "follow_view", False):
         return
 
-    visible = _get_visible_rect(space, region)
+    if visible is None:
+        visible = _get_visible_rect(space, region)
     if not visible:
         return
 
-    bounds = st.tree_bounds
-    zoom = st.zoom
-    pan = st.pan
-
+    cx, cy, scale, tree_cx, tree_cy = _compute_map_transform(st)
     inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
     inner_r = inner_l + inner_w
     inner_t = inner_b + inner_h
-
-    bbox_w = bounds[2] - bounds[0]
-    bbox_h = bounds[3] - bounds[1]
-    base_scale = min(inner_w / max(bbox_w, 1.0), inner_h / max(bbox_h, 1.0))
-    scale = base_scale * zoom
-
-    cx = inner_l + inner_w / 2 + pan[0]
-    cy = inner_b + inner_h / 2 + pan[1]
-    tree_cx = (bounds[0] + bounds[2]) / 2
-    tree_cy = (bounds[1] + bounds[3]) / 2
 
     # Transform viewport corners to minimap pixel space
     vl, vb, vr, vt = visible
@@ -705,18 +736,12 @@ def _compute_frame_all_targets(
     else:
         c_min_x, c_min_y, c_max_x, c_max_y = bounds
 
-    _, _, inner_w, inner_h = _get_map_content_rect(st)
-
-    bbox_w = max(bounds[2] - bounds[0], 1.0)
-    bbox_h = max(bounds[3] - bounds[1], 1.0)
-    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+    _, _, inner_w, inner_h, _, _, base_scale, tree_cx, tree_cy = _compute_base_map_geom(st)
 
     combined_w = max(c_max_x - c_min_x, 1.0)
     combined_h = max(c_max_y - c_min_y, 1.0)
     zoom = min(inner_w / (base_scale * combined_w), inner_h / (base_scale * combined_h), 1.0)
 
-    tree_cx = (bounds[0] + bounds[2]) / 2
-    tree_cy = (bounds[1] + bounds[3]) / 2
     combined_cx = (c_min_x + c_max_x) / 2
     combined_cy = (c_min_y + c_max_y) / 2
 
@@ -757,12 +782,7 @@ def _compute_frame_to_bounds_targets(
     """
     st = _state(area_ptr)
 
-    _, _, inner_w, inner_h = _get_map_content_rect(st)
-
-    bounds = st.tree_bounds
-    bbox_w = max(bounds[2] - bounds[0], 1.0)
-    bbox_h = max(bounds[3] - bounds[1], 1.0)
-    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
+    _, _, inner_w, inner_h, _, _, base_scale, tree_cx, tree_cy = _compute_base_map_geom(st)
 
     tw = max(target_bounds[2] - target_bounds[0], 1.0)
     th = max(target_bounds[3] - target_bounds[1], 1.0)
@@ -771,8 +791,6 @@ def _compute_frame_to_bounds_targets(
     else:
         zoom = min(inner_w / (base_scale * tw), inner_h / (base_scale * th), 1.0)
 
-    tree_cx = (bounds[0] + bounds[2]) / 2
-    tree_cy = (bounds[1] + bounds[3]) / 2
     target_cx = (target_bounds[0] + target_bounds[2]) / 2
     target_cy = (target_bounds[1] + target_bounds[3]) / 2
 
@@ -803,14 +821,7 @@ def _frame_to_bounds(
 def _compute_center_pan(tree_x: float, tree_y: float, area_ptr: int | None = None) -> tuple[float, float]:
     """Compute minimap pan values that center the given tree point, keeping zoom."""
     st = _state(area_ptr)
-    bounds = st.tree_bounds
-    _, _, inner_w, inner_h = _get_map_content_rect(st)
-    bbox_w = max(bounds[2] - bounds[0], 1.0)
-    bbox_h = max(bounds[3] - bounds[1], 1.0)
-    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
-    scale = base_scale * st.zoom
-    tree_cx = (bounds[0] + bounds[2]) / 2
-    tree_cy = (bounds[1] + bounds[3]) / 2
+    _, _, scale, tree_cx, tree_cy = _compute_map_transform(st)
     return -(tree_x - tree_cx) * scale, -(tree_y - tree_cy) * scale
 
 
@@ -1009,7 +1020,7 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 0.37, 0.34, 0.9)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
         "text": _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0)),
-        "scroll_item": _theme_rgba("user_interface.wcol_scroll.outline", (0.45, 0.45, 0.45, 0.5)),
+        "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
     }

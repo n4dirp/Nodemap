@@ -8,6 +8,7 @@ from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 from .helpers import (
     _HANDLE_THICKNESS,
     _MINIMAP_BUTTONS,
+    _SCROLLBAR_HIT_PAD,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     MinimapState,
@@ -16,10 +17,10 @@ from .helpers import (
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
+    _compute_map_transform,
     _expand_bounds_margin,
     _find_node_at,
     _get_area_and_region_under_mouse,
-    _get_map_content_rect,
     _get_minimap_margins,
     _get_minimap_transform,
     _get_node_tree_bounds,
@@ -51,28 +52,30 @@ def _is_in_minimap(region_x: int, region_y: int, st: MinimapState | None = None)
 def _region_to_tree(region_x: int, region_y: int, st: MinimapState | None = None) -> tuple[float, float] | None:
     if st is None:
         st = _state()
-    rect = st.rect
-    if not rect:
+    if not st.rect or not st.tree_bounds:
         return None
-    bounds = st.tree_bounds
-    if not bounds:
-        return None
+    return _tree_from_region(region_x, region_y, _compute_map_transform(st))
 
-    inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
-    bbox_w = max(bounds[2] - bounds[0], 1.0)
-    bbox_h = max(bounds[3] - bounds[1], 1.0)
-    base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
-    scale = base_scale * st.zoom
+
+def _tree_from_region(
+    region_x: int, region_y: int, t: tuple[float, float, float, float, float]
+) -> tuple[float, float] | None:
+    """Inverse-map a minimap pixel coordinate to tree space using a precomputed transform."""
+    cx, cy, scale, tree_cx, tree_cy = t
     if scale <= 0:
         return None
+    return tree_cx + (region_x - cx) / scale, tree_cy + (region_y - cy) / scale
 
-    cx = inner_l + inner_w / 2 + st.pan[0]
-    cy = inner_b + inner_h / 2 + st.pan[1]
-    tree_cx = (bounds[0] + bounds[2]) / 2
-    tree_cy = (bounds[1] + bounds[3]) / 2
-    tx = tree_cx + (region_x - cx) / scale
-    ty = tree_cy + (region_y - cy) / scale
-    return tx, ty
+
+def _view_zoom_factors(space, region, visible: tuple[float, float, float, float] | None = None) -> tuple[float, float]:
+    """Return pixels-per-tree-unit for each axis given the editor's visible rect."""
+    if visible is None:
+        visible = _get_visible_rect(space, region)
+    if not visible:
+        return 1.0, 1.0
+    vw = max(visible[2] - visible[0], 1e-6)
+    vh = max(visible[3] - visible[1], 1e-6)
+    return region.width / vw, region.height / vh
 
 
 def _frame_btn_at(mx: int, my: int, st: MinimapState) -> str | None:
@@ -107,6 +110,47 @@ def _list_row_at(region_x: int, region_y: int, st: MinimapState) -> str | None:
         if x <= region_x <= x + w and y <= region_y <= y + h:
             return label
     return None
+
+
+def _list_child_at(region_x: int, region_y: int, st: MinimapState) -> tuple[str, str] | None:
+    """Return ``(label, node_name)`` of the expanded child row under the cursor."""
+    for x, y, w, h, label, node_name in st.list_node_rects:
+        if x <= region_x <= x + w and y <= region_y <= y + h:
+            return label, node_name
+    return None
+
+
+def _in_rect(region_x: int, region_y: int, rect: tuple[float, float, float, float]) -> bool:
+    """Return True when the cursor falls inside the ``(x, y, w, h)`` rect."""
+    x, y, w, h = rect
+    return x <= region_x <= x + w and y <= region_y <= y + h
+
+
+def _list_scrollbar_hit(region_x: int, region_y: int, st: MinimapState) -> bool:
+    """Return True when the cursor is over the type-list scrollbar gutter."""
+    track = st.list_scrollbar_track
+    if not track or st.list_scroll_max <= 0:
+        return False
+    x, y, w, h = track
+    pad = _SCROLLBAR_HIT_PAD * _get_ui_scale()
+    return x - pad <= region_x <= x + w + pad and y <= region_y <= y + h
+
+
+def _apply_list_scroll_drag(mx: int, my: int, grab: float, st: MinimapState) -> None:
+    """Scroll the type list so the dragged thumb tracks the cursor.
+
+    *grab* is the cursor-to-thumb-top distance captured at press; mapping the
+    thumb top back to a track fraction keeps the grab point stable.
+    """
+    track = st.list_scrollbar_track
+    thumb = st.list_scrollbar_thumb
+    if not track or not thumb or st.list_scroll_max <= 0:
+        return
+    _tx, ty, _tw, tl = track
+    thumb_len = thumb[3]
+    span = max(tl - thumb_len, 1.0)
+    offset = min(max(my + grab - thumb_len - ty, 0.0), span)
+    st.list_scroll = (1.0 - offset / span) * st.list_scroll_max
 
 
 _CURSOR_MAP: dict[str, str] = {
@@ -283,6 +327,10 @@ class NODEMAP_OT_navigate(Operator):
     _redirect_acc: list[float]
     _armed_btn: str | None = None
     _list_row_pressed: str | None = None
+    _list_child_pressed: tuple[str, str] | None = None
+    _list_toggle_pressed: str | None = None
+    _list_scroll_pressed: bool = False
+    _list_scroll_grab: float = 0.0
 
     _smooth_timer: str | None = None
     _inertia_active: bool = False
@@ -330,6 +378,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._mmb_dragging
             or self._resize_handle is not None
             or self._drag_start is not None
+            or self._list_scroll_pressed
             or self._anim_active
             or self._inertia_active
             or self._drag_active
@@ -381,8 +430,33 @@ class NODEMAP_OT_navigate(Operator):
                     if st.pressed:
                         st.pressed = False
                         redraw_ui("NODE_EDITOR")
+                    if self._list_scroll_pressed:
+                        self._list_scroll_pressed = False
+                        st.list_scroll_dragging = False
+                        self._list_scroll_grab = 0.0
+                        redraw_ui("NODE_EDITOR")
+                        return {"RUNNING_MODAL"}
                     if self._armed_btn:
                         self._activate_armed_button(context, settings)
+                        return {"RUNNING_MODAL"}
+                    if self._list_child_pressed:
+                        label, node_name = self._list_child_pressed
+                        self._list_child_pressed = None
+                        still_over = _list_child_at(self._mx, self._my, st) == (label, node_name)
+                        if _in_list_zone(self._mx, self._my, st) and still_over:
+                            self._select_single_node(context, node_name)
+                        return {"RUNNING_MODAL"}
+                    if self._list_toggle_pressed:
+                        label = self._list_toggle_pressed
+                        self._list_toggle_pressed = None
+                        toggle = st.list_toggle_rects.get(label)
+                        if toggle and _in_list_zone(self._mx, self._my, st) and _in_rect(self._mx, self._my, toggle):
+                            if label in st.list_expanded:
+                                st.list_expanded.discard(label)
+                            else:
+                                st.list_expanded.add(label)
+                            st.list_cache_key = None
+                            redraw_ui("NODE_EDITOR")
                         return {"RUNNING_MODAL"}
                     if self._list_row_pressed:
                         label = self._list_row_pressed
@@ -448,7 +522,41 @@ class NODEMAP_OT_navigate(Operator):
                         self._armed_btn = armed
                         return {"RUNNING_MODAL"}
                     if _in_list_zone(self._mx, self._my, st):
-                        self._list_row_pressed = _list_row_at(self._mx, self._my, st)
+                        track = st.list_scrollbar_track
+                        thumb = st.list_scrollbar_thumb
+                        if _list_scrollbar_hit(self._mx, self._my, st) and track and thumb:
+                            thumb_top = thumb[1] + thumb[3]
+                            if thumb[1] <= self._my <= thumb_top:
+                                # Direct grab: keep the pressed point pinned to the cursor.
+                                self._list_scroll_grab = thumb_top - self._my
+                            else:
+                                # Trough click pages one track-length toward the
+                                # click, then continues as a drag from there.
+                                # Note: y grows upward but larger list_scroll
+                                # shifts content down, so a click above the
+                                # thumb decreases the scroll.
+                                if self._my > thumb_top:
+                                    st.list_scroll = max(st.list_scroll - track[3], 0.0)
+                                else:
+                                    st.list_scroll = min(st.list_scroll + track[3], st.list_scroll_max)
+                                span = max(track[3] - thumb[3], 1.0)
+                                offset = min(span * (1.0 - st.list_scroll / st.list_scroll_max), span)
+                                self._list_scroll_grab = track[1] + offset + thumb[3] - self._my
+                            self._list_scroll_pressed = True
+                            st.list_scroll_dragging = True
+                            redraw_ui("NODE_EDITOR")
+                            return {"RUNNING_MODAL"}
+                        child = _list_child_at(self._mx, self._my, st)
+                        if child:
+                            self._list_child_pressed = child
+                        else:
+                            label = _list_row_at(self._mx, self._my, st)
+                            if label:
+                                toggle = st.list_toggle_rects.get(label)
+                                if toggle and _in_rect(self._mx, self._my, toggle):
+                                    self._list_toggle_pressed = label
+                                else:
+                                    self._list_row_pressed = label
                         return {"RUNNING_MODAL"}
                     if addon:
                         handle = self._get_handle_at(context, event)
@@ -535,8 +643,33 @@ class NODEMAP_OT_navigate(Operator):
                 if self._was_in_minimap:
                     self._cancel_smooth(context)
                     if _in_list_zone(self._mx, self._my, st):
+                        if _list_scrollbar_hit(self._mx, self._my, st):
+                            # Scrollbar owns the press; no row selection or pan.
+                            return {"RUNNING_MODAL"}
+                        child = _list_child_at(self._mx, self._my, st)
+                        if child:
+                            _label, node_name = child
+                            self._select_single_node(context, node_name)
+                            if not self._view_selected_animated(context, settings):
+                                try:
+                                    with self._override_ctx(context):
+                                        bpy.ops.node.view_selected()
+                                except RuntimeError:
+                                    pass
+                            self._was_in_minimap = False
+                            return {"RUNNING_MODAL"}
                         label = _list_row_at(self._mx, self._my, st)
                         if label:
+                            toggle = st.list_toggle_rects.get(label)
+                            if toggle and _in_rect(self._mx, self._my, toggle):
+                                if label in st.list_expanded:
+                                    st.list_expanded.discard(label)
+                                else:
+                                    st.list_expanded.add(label)
+                                st.list_cache_key = None
+                                redraw_ui("NODE_EDITOR")
+                                self._was_in_minimap = False
+                                return {"RUNNING_MODAL"}
                             self._select_type_nodes(context, label)
                             if not self._view_selected_animated(context, settings):
                                 try:
@@ -602,17 +735,36 @@ class NODEMAP_OT_navigate(Operator):
                     self._resize_apply_delta(context, event)
                     redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
+                if self._list_scroll_pressed and st.list_scroll_dragging:
+                    _apply_list_scroll_drag(self._mx, self._my, self._list_scroll_grab, st)
+                    redraw_ui("NODE_EDITOR")
+                    return {"RUNNING_MODAL"}
                 if not self._dragging and not self._mmb_dragging and not self._drag_start:
                     self._update_cursor(context, event)
                 if not self._dragging and not self._mmb_dragging and not self._resize_handle:
                     in_list = _in_list_zone(self._mx, self._my, st)
-                    row_label = _list_row_at(self._mx, self._my, st) if in_list else None
+                    # The scrollbar gutter suppresses row hovers so the bar can
+                    # be approached without flashing the rows underneath.
+                    over_bar = in_list and _list_scrollbar_hit(self._mx, self._my, st)
+                    if st.hovered_list_scrollbar != over_bar:
+                        st.hovered_list_scrollbar = over_bar
+                        redraw_ui("NODE_EDITOR")
+                    row_label = None if over_bar else (_list_row_at(self._mx, self._my, st) if in_list else None)
+                    child_hover = None if over_bar else (_list_child_at(self._mx, self._my, st) if in_list else None)
                     if st.hovered_type_label != row_label:
                         st.hovered_type_label = row_label
                         redraw_ui("NODE_EDITOR")
+                    if st.hovered_list_node != child_hover:
+                        st.hovered_list_node = child_hover
+                        redraw_ui("NODE_EDITOR")
                     old_hovered = st.hovered_node
                     new_hovered = None
-                    if in_minimap and not in_list:
+                    if in_list:
+                        # Hovering a single child row highlights only that node's
+                        # border on the minimap (not the whole type group).
+                        if child_hover is not None:
+                            new_hovered = child_hover[1]
+                    elif in_minimap:
                         tree_coord = _region_to_tree(self._mx, self._my, st)
                         if tree_coord and self._space and self._space.edit_tree:
                             hovered = _find_node_at(self._space.edit_tree.nodes, tree_coord[0], tree_coord[1])
@@ -673,7 +825,8 @@ class NODEMAP_OT_navigate(Operator):
                 if in_minimap and _in_list_zone(self._mx, self._my, st):
                     direction = -1 if event.type == "WHEELUPMOUSE" else 1
                     st.list_scroll = min(max(st.list_scroll + direction * st.list_row_h * 3, 0.0), st.list_scroll_max)
-                    st.hovered_type_label = _list_row_at(self._mx, self._my, st)
+                    over_bar = _list_scrollbar_hit(self._mx, self._my, st)
+                    st.hovered_type_label = None if over_bar else _list_row_at(self._mx, self._my, st)
                     redraw_ui("NODE_EDITOR")
                     return {"RUNNING_MODAL"}
                 if in_minimap:
@@ -729,16 +882,17 @@ class NODEMAP_OT_navigate(Operator):
                         else:
                             new_zoom = max(0.1, min(effective_zoom * zoom_delta, 20.0))
 
-                            cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st)
-                            tree_coord = _region_to_tree(self._mx, self._my, st)
+                            transform = _get_minimap_transform(st)
+                            tree_coord = _tree_from_region(self._mx, self._my, transform)
 
-                            if scale > 0 and tree_coord is not None:
+                            if transform[2] > 0 and tree_coord is not None:
+                                _, _, scale, tree_cx, tree_cy = transform
+                                base_scale = scale / st.zoom
                                 tx, ty = tree_coord
-                                base_scale = scale / effective_zoom
                                 pan_x, pan_y = st.pan
 
-                                pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - effective_zoom)
-                                pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - effective_zoom)
+                                pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - st.zoom)
+                                pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - st.zoom)
 
                                 st.base_zoom = new_zoom
                                 st.zoom = new_zoom
@@ -843,6 +997,27 @@ class NODEMAP_OT_navigate(Operator):
                     active_set = True
         redraw_ui("NODE_EDITOR")
 
+    def _select_single_node(self, context: Context, node_name: str) -> None:
+        """Select only the editor node whose compiled name matches *node_name*."""
+        space = self._space
+        st = self._st
+        if not space or space.type != "NODE_EDITOR" or not st:
+            return
+        node_tree = space.edit_tree
+        if not node_tree:
+            return
+        node = node_tree.nodes.get(node_name)
+        if not node:
+            return
+        try:
+            with self._override_ctx(context):
+                bpy.ops.node.select_all(action="DESELECT")
+        except RuntimeError:
+            pass
+        node.select = True
+        node_tree.nodes.active = node
+        redraw_ui("NODE_EDITOR")
+
     def _activate_armed_button(self, context: Context, settings) -> None:
         """Release the armed minimap button; run its action when still under the cursor."""
         btn_id = self._armed_btn
@@ -913,92 +1088,76 @@ class NODEMAP_OT_navigate(Operator):
         st = self._st
         if not st:
             return
-        bounds = st.tree_bounds
-        _, _, inner_w, inner_h = _get_map_content_rect(st)
-        bbox_w = max(bounds[2] - bounds[0], 1.0)
-        bbox_h = max(bounds[3] - bounds[1], 1.0)
-        base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
-        scale = base_scale * st.zoom
+        visible = _get_visible_rect(self._space, self._region)
+        if not visible:
+            return
+        _, _, scale, _, _ = _compute_map_transform(st)
         if scale <= 0:
             return
-        visible = _get_visible_rect(self._space, self._region)
+        view_zoom_x, view_zoom_y = _view_zoom_factors(self._space, self._region, visible)
 
-        if visible:
-            vw_rect = visible[2] - visible[0]
-            vh_rect = visible[3] - visible[1]
-            view_zoom_x = self._region.width / vw_rect if vw_rect > 0 else 1.0
-            view_zoom_y = self._region.height / vh_rect if vh_rect > 0 else 1.0
+        vx = (dx / scale) * view_zoom_x
+        vy = (dy / scale) * view_zoom_y
+        if abs(dx) <= 1 and abs(dy) <= 1:
+            self._smooth_velocity[0] *= 0.15
+            self._smooth_velocity[1] *= 0.15
+        else:
+            self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + vx * 0.4
+            self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + vy * 0.4
 
-            vx = (dx / scale) * view_zoom_x
-            vy = (dy / scale) * view_zoom_y
-            if abs(dx) <= 1 and abs(dy) <= 1:
-                self._smooth_velocity[0] *= 0.15
-                self._smooth_velocity[1] *= 0.15
-            else:
-                self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + vx * 0.4
-                self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + vy * 0.4
+        if smooth:
+            self._drag_target[0] += vx
+            self._drag_target[1] += vy
+            if not self._drag_active:
+                self._drag_active = True
+                self._create_timer(context)
+            return
 
-            if smooth:
-                self._drag_target[0] += vx
-                self._drag_target[1] += vy
-                if not self._drag_active:
-                    self._drag_active = True
-                    self._create_timer(context)
-                return
+        self._pan_acc[0] += vx
+        self._pan_acc[1] += vy
+        pan_x = int(self._pan_acc[0])
+        pan_y = int(self._pan_acc[1])
+        self._pan_acc[0] -= pan_x
+        self._pan_acc[1] -= pan_y
 
-            self._pan_acc[0] += vx
-            self._pan_acc[1] += vy
-            pan_x = int(self._pan_acc[0])
-            pan_y = int(self._pan_acc[1])
-            self._pan_acc[0] -= pan_x
-            self._pan_acc[1] -= pan_y
+        if pan_x != 0 or pan_y != 0:
+            try:
+                pan_before = st.pan[0], st.pan[1]
 
-            if pan_x != 0 or pan_y != 0:
-                try:
-                    pan_before = st.pan[0], st.pan[1]
+                with self._override_ctx(context):
+                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                _clamp_pan_to_viewport(self._space, self._region, st)
 
-                    with self._override_ctx(context):
-                        bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                    _clamp_pan_to_viewport(self._space, self._region, st)
+                clamp_dx = st.pan[0] - pan_before[0]
+                clamp_dy = st.pan[1] - pan_before[1]
 
-                    clamp_dx = st.pan[0] - pan_before[0]
-                    clamp_dy = st.pan[1] - pan_before[1]
+                if clamp_dx != 0 or clamp_dy != 0:
+                    self._pan_acc[0] += (-clamp_dx / scale) * view_zoom_x
+                    self._pan_acc[1] += (-clamp_dy / scale) * view_zoom_y
 
-                    if clamp_dx != 0 or clamp_dy != 0:
-                        self._pan_acc[0] += (-clamp_dx / scale) * view_zoom_x
-                        self._pan_acc[1] += (-clamp_dy / scale) * view_zoom_y
+                    extra_pan_x = int(self._pan_acc[0])
+                    extra_pan_y = int(self._pan_acc[1])
+                    self._pan_acc[0] -= extra_pan_x
+                    self._pan_acc[1] -= extra_pan_y
 
-                        extra_pan_x = int(self._pan_acc[0])
-                        extra_pan_y = int(self._pan_acc[1])
-                        self._pan_acc[0] -= extra_pan_x
-                        self._pan_acc[1] -= extra_pan_y
-
-                        if extra_pan_x != 0 or extra_pan_y != 0:
-                            with self._override_ctx(context):
-                                bpy.ops.view2d.pan(deltax=extra_pan_x, deltay=extra_pan_y)
-                            _clamp_pan_to_viewport(self._space, self._region, st)
-                except RuntimeError:
-                    pass
+                    if extra_pan_x != 0 or extra_pan_y != 0:
+                        with self._override_ctx(context):
+                            bpy.ops.view2d.pan(deltax=extra_pan_x, deltay=extra_pan_y)
+                        _clamp_pan_to_viewport(self._space, self._region, st)
+            except RuntimeError:
+                pass
 
     def _redirect_to_view2d(self, context: Context, dx: float, dy: float) -> None:
         st = self._st
         if not st:
             return
-        bounds = st.tree_bounds
-        _, _, inner_w, inner_h = _get_map_content_rect(st)
-        bbox_w = max(bounds[2] - bounds[0], 1.0)
-        bbox_h = max(bounds[3] - bounds[1], 1.0)
-        base_scale = min(inner_w / bbox_w, inner_h / bbox_h)
-        scale = base_scale * st.zoom
+        _, _, scale, _, _ = _compute_map_transform(st)
         if scale <= 0:
             return
         visible = _get_visible_rect(self._space, self._region)
         if not visible:
             return
-        vw = visible[2] - visible[0]
-        vh = visible[3] - visible[1]
-        view_zoom_x = self._region.width / vw if vw > 0 else 1.0
-        view_zoom_y = self._region.height / vh if vh > 0 else 1.0
+        view_zoom_x, view_zoom_y = _view_zoom_factors(self._space, self._region, visible)
         self._redirect_acc[0] += (dx / scale) * view_zoom_x
         self._redirect_acc[1] += (dy / scale) * view_zoom_y
         pan_x = int(self._redirect_acc[0])
@@ -1029,10 +1188,7 @@ class NODEMAP_OT_navigate(Operator):
         delta_tree_x = tree_coord[0] - view_cx
         delta_tree_y = tree_coord[1] - view_cy
 
-        vw = visible[2] - visible[0]
-        vh = visible[3] - visible[1]
-        view_zoom_x = self._region.width / vw if vw > 0 else 1.0
-        view_zoom_y = self._region.height / vh if vh > 0 else 1.0
+        view_zoom_x, view_zoom_y = _view_zoom_factors(self._space, self._region, visible)
 
         pan_x = int(delta_tree_x * view_zoom_x)
         pan_y = int(delta_tree_y * view_zoom_y)
@@ -1094,10 +1250,17 @@ class NODEMAP_OT_navigate(Operator):
         self._last_cursor = ""
         self._armed_btn = None
         self._list_row_pressed = None
+        self._list_child_pressed = None
+        self._list_toggle_pressed = None
+        self._list_scroll_pressed = False
+        self._list_scroll_grab = 0.0
         st = self._st
         if st:
             st.hovered_frame_btn = None
             st.hovered_type_label = None
+            st.hovered_list_node = None
+            st.hovered_list_scrollbar = False
+            st.list_scroll_dragging = False
             if st.pressed:
                 st.pressed = False
         redraw_ui("NODE_EDITOR")
@@ -1384,10 +1547,7 @@ class NODEMAP_OT_navigate(Operator):
         if not current:
             return
 
-        cur_w = max(current[2] - current[0], 1e-6)
-        cur_h = max(current[3] - current[1], 1e-6)
-        view_zoom_x = region.width / cur_w
-        view_zoom_y = region.height / cur_h
+        view_zoom_x, view_zoom_y = _view_zoom_factors(space, region, current)
         delta_x = ((desired[0] + desired[2]) / 2 - (current[0] + current[2]) / 2) * view_zoom_x
         delta_y = ((desired[1] + desired[3]) / 2 - (current[1] + current[3]) / 2) * view_zoom_y
 
@@ -1508,6 +1668,8 @@ class NODEMAP_OT_navigate(Operator):
         self._redirect_acc = [0.0, 0.0]
         self._armed_btn = None
         self._list_row_pressed = None
+        self._list_scroll_pressed = False
+        self._list_scroll_grab = 0.0
         self._smooth_timer = None
         self._inertia_active = False
         self._inertia_mode = None
@@ -1549,7 +1711,14 @@ class NODEMAP_OT_navigate(Operator):
             self._st.resize_active = None
             self._st.hovered_frame_btn = None
             self._st.hovered_type_label = None
+            self._st.hovered_list_node = None
+            self._st.hovered_list_scrollbar = False
+            self._st.list_scroll_dragging = False
         self._list_row_pressed = None
+        self._list_child_pressed = None
+        self._list_toggle_pressed = None
+        self._list_scroll_pressed = False
+        self._list_scroll_grab = 0.0
 
 
 classes = (
