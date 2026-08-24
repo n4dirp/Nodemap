@@ -965,6 +965,53 @@ class NODEMAP_OT_navigate(Operator):
             case _:
                 return {"PASS_THROUGH"}
 
+    def _node_select_location(self, node) -> tuple[float, float]:
+        """Tree-space coordinate to emulate a click on *node*.
+
+        Native Blender only selects frame nodes when clicked on their
+        header/border, so frames are redirected to their header. Other nodes
+        use their interior center; a small offset is used if the node has no
+        measured dimensions yet.
+        """
+        if node.type == "FRAME":
+            return node.location_absolute.x + 15, node.location_absolute.y - 15
+        w = node.width if node.width > 0 else 20.0
+        h = node.height if node.height > 0 else 20.0
+        return node.location_absolute.x + w / 2.0, node.location_absolute.y - h / 2.0
+
+    def _select_node_via_operator(self, context: Context, node, extend: bool, deselect_all: bool) -> bool:
+        """Select *node* via the native ``node.select`` operator.
+
+        Projects the node's tree position into the editor's region coordinates
+        and passes those to ``bpy.ops.node.select``, emulating a standard UI
+        click. This avoids the NodeTree "modified" tag that Python property
+        assignment (``node.select = True``) triggers, which forces a full EEVEE
+        material rebuild. Returns False if the operator could not be invoked so
+        callers can fall back to the property API.
+        """
+        vr = self._region.view2d if self._region else None
+        if not vr:
+            return False
+        target_x, target_y = self._node_select_location(node)
+        region_coords = vr.view_to_region(target_x, target_y, clip=False)
+        if not region_coords:
+            return False
+        rx, ry = int(region_coords[0]), int(region_coords[1])
+        kwargs: dict = {"extend": extend}
+        if bpy.app.version >= (3, 0, 0):
+            kwargs["location"] = (rx, ry)
+            kwargs["deselect_all"] = deselect_all
+        else:
+            kwargs["mouse_x"] = rx
+            kwargs["mouse_y"] = ry
+        try:
+            with self._override_ctx(context):
+                bpy.ops.node.select(**kwargs)
+            return True
+        except Exception as e:
+            logger.debug("Failed to select via operator: %s", e)
+            return False
+
     def _handle_click_selection(self, context: Context, event: Event, st: dict) -> None:
         space = self._space
         if not space or space.type != "NODE_EDITOR":
@@ -979,10 +1026,17 @@ class NODEMAP_OT_navigate(Operator):
 
         node = _find_node_at(node_tree.nodes, tree_coord[0], tree_coord[1])
         if node:
-            with self._override_ctx(context):
-                bpy.ops.node.select_all(action="DESELECT")
-            node.select = True
-            node_tree.nodes.active = node
+            if not self._select_node_via_operator(context, node, extend=event.shift, deselect_all=not event.shift):
+                # Fallback for API changes (may trigger EEVEE compile)
+                if event.shift:
+                    node.select = not node.select
+                    if node.select:
+                        node_tree.nodes.active = node
+                else:
+                    for n in node_tree.nodes:
+                        n.select = False
+                    node.select = True
+                    node_tree.nodes.active = node
 
             addon = context.preferences.addons.get(__package__)
             if addon and getattr(addon.preferences.settings, "auto_frame_selected", True):
@@ -1016,14 +1070,13 @@ class NODEMAP_OT_navigate(Operator):
                 bpy.ops.node.select_all(action="DESELECT")
         except RuntimeError:
             pass
-        active_set = False
         for name in names:
             node = node_tree.nodes.get(name)
             if node:
-                node.select = True
-                if not active_set:
-                    node_tree.nodes.active = node
-                    active_set = True
+                # Native operator keeps selection/additive state and sets the
+                # active node without tagging the NodeTree for an EEVEE rebuild.
+                if not self._select_node_via_operator(context, node, extend=True, deselect_all=False):
+                    node.select = True
         redraw_ui("NODE_EDITOR")
 
     def _select_single_node(self, context: Context, node_name: str) -> None:
@@ -1043,8 +1096,9 @@ class NODEMAP_OT_navigate(Operator):
                 bpy.ops.node.select_all(action="DESELECT")
         except RuntimeError:
             pass
-        node.select = True
-        node_tree.nodes.active = node
+        if not self._select_node_via_operator(context, node, extend=False, deselect_all=False):
+            node.select = True
+            node_tree.nodes.active = node
         redraw_ui("NODE_EDITOR")
 
     def _activate_armed_button(self, context: Context, settings) -> None:
