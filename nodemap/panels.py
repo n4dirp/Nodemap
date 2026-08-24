@@ -30,6 +30,9 @@ class NODEMAP_PT_popup(Panel):
         sub = row.row(align=True)
         sub.alignment = "RIGHT"
         NODEMAP_PT_presets.draw_panel_header(sub)
+        sub.separator()
+
+        sub.operator("nodemap.open_pref", text="", icon="PREFERENCES", emboss=False)
 
         row = layout.row(align=True)
         row.operator("nodemap.frame_all", text="Frame All")

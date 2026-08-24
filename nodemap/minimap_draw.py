@@ -88,6 +88,9 @@ _SCROLLBAR_MIN_THUMB = 6.0
 _SCROLLBAR_ALPHA = 0.65
 
 _TYPE_LIST_ANIM_AWAIT_TIMEOUT = 1.0
+# Minimum label width (device-independent px); below it the count column is
+# dropped so type names keep the full row instead of clipping.
+_TYPE_LIST_MIN_LABEL_W = 32.0
 
 _NODE_ROUNDNESS_DEFAULT = 2.0
 
@@ -757,7 +760,10 @@ def _draw_type_list(
     # Always reserve the swatch/toggle column so multi-node + icons never
     # overlap the type label, even when colored nodes are disabled.
     label_x = content_x + (swatch + swatch_gap)
-    label_max_w = max(0.0, count_right - widest_count - count_gap - label_x)
+    # Hide counts when reserving them would squeeze the label below the
+    # minimum; names then reclaim the full row width.
+    show_counts = count_right - widest_count - count_gap - label_x >= _TYPE_LIST_MIN_LABEL_W * ui_scale
+    label_max_w = max(0.0, (count_right - widest_count - count_gap if show_counts else count_right) - label_x)
     text_y_off = (row_h - line_h) / 2
 
     text_col = _alpha_mul(colors["text"], 0.65 * master_alpha)
@@ -861,7 +867,9 @@ def _draw_type_list(
 
         child_indent = swatch + swatch_gap
         child_label_x = label_x + child_indent
-        child_label_max_w = max(0.0, label_max_w - child_indent)
+        # Child rows never draw a count, so their names always run to the
+        # right edge instead of reserving the header count column.
+        child_label_max_w = max(0.0, count_right - child_label_x)
         child_clip_l = int(child_label_x)
         child_clip_r = int(child_label_x + child_label_max_w)
         clip_t = int(zone_y - row_h)
@@ -890,12 +898,13 @@ def _draw_type_list(
                 blf.draw(font_id, label)
                 # Counts sit right of the label clip box; BLF discards glyphs
                 # past the box instead of clipping them.
-                blf.disable(font_id, blf.CLIPPING)
-                count_text, count_w, _cnt = entry_map.get(label, ("", 0.0, 1))
-                blf.position(font_id, count_right - count_w, text_y, 0)
-                blf.color(font_id, *count_col)
-                blf.draw(font_id, count_text)
-                blf.enable(font_id, blf.CLIPPING)
+                if show_counts:
+                    blf.disable(font_id, blf.CLIPPING)
+                    count_text, count_w, _cnt = entry_map.get(label, ("", 0.0, 1))
+                    blf.position(font_id, count_right - count_w, text_y, 0)
+                    blf.color(font_id, *count_col)
+                    blf.draw(font_id, count_text)
+                    blf.enable(font_id, blf.CLIPPING)
 
                 # Icon sits over the text; restore alpha blending after BLF.
                 gpu.state.blend_set("ALPHA")
@@ -2629,7 +2638,9 @@ def draw_minimap() -> None:
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region, visible)
     st.scale = scale
     with _Timer("ensure_batches"):
-        highlight_border = colors["node_active"] if (st.hovered_type_label or st.hovered_node) else None
+        highlight_border = (
+            _alpha_mul(colors["node_active"], 0.5) if (st.hovered_type_label or st.hovered_node) else None
+        )
         _ensure_minimap_batches(
             st,
             mx,

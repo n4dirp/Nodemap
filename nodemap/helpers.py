@@ -473,6 +473,8 @@ def start_list_width_animation(st: MinimapState, settings) -> None:
             return
     except AttributeError:
         pass
+    if not getattr(settings, "animations", True):
+        return
     st.list_anim_active = True
     st.list_anim_from = st.list_width
     st.list_anim_target = 0.0 if not getattr(settings, "show_type_list", False) else -1.0

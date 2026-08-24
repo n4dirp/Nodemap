@@ -403,10 +403,10 @@ class NODEMAP_PG_settings(PropertyGroup):
         default="SELECT",
     )
 
-    smooth_pan: BoolProperty(
-        name="Smooth Pan",
+    animations: BoolProperty(
+        name="Animations",
         description=(
-            "Apply inertia and smooth animations when panning the view with the minimap\n"
+            "Enable smooth animations for panning, framing, and the type list\n"
             "* Overridden by the Reduce Motion accessibility option"
         ),
         default=True,
@@ -468,9 +468,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         _reduce_motion = context.preferences.view.use_reduce_motion
         col.active = not _reduce_motion
         row = col.row(align=True, heading="")
-        row.prop(settings, "smooth_pan", text="")
+        row.prop(settings, "animations", text="")
         sub = row.row(align=True)
-        sub.active = settings.smooth_pan
+        sub.active = settings.animations
         sub.row().prop(settings, "pan_speed", expand=True)
 
         col.separator()
