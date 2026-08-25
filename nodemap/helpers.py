@@ -423,7 +423,7 @@ STATS_FONT_SIZE = 8
 _TYPE_LIST_MIN_WIDTH = 70.0
 _TYPE_LIST_MAX_WIDTH_PCT = 0.35
 _LIST_PAD_X = 6.0
-_LIST_SWATCH = 5.0
+_LIST_SWATCH = 8.0
 _LIST_SWATCH_GAP = 5.0
 _LIST_COUNT_GAP = 8.0
 # Extra width around the type-list scrollbar track that still counts as a
@@ -454,7 +454,9 @@ def _get_type_list_width(
     count_gap = _LIST_COUNT_GAP * ui_scale
     widest_label = max(blf.dimensions(font_id, label)[0] for label in type_stats)
     widest_count = max(blf.dimensions(font_id, str(count))[0] for count in type_stats.values())
-    content_w = pad_x * 2 + swatch + swatch_gap + widest_label + count_gap + widest_count
+    # Leading icon columns: expand-toggle slot, plus color-swatch slot when enabled.
+    icon_cols = 2 if getattr(settings, "colored_nodes", True) else 1
+    content_w = pad_x * 2 + icon_cols * (swatch + swatch_gap) + widest_label + count_gap + widest_count
     return min(max(content_w, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
 
 

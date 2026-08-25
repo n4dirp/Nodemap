@@ -720,6 +720,7 @@ def _draw_type_list(
     swatch = _LIST_SWATCH * ui_scale
     swatch_gap = _LIST_SWATCH_GAP * ui_scale
     count_gap = _LIST_COUNT_GAP * ui_scale
+    icon_col = swatch + swatch_gap
 
     # Compute total rows height so the background can shrink-wrap when the
     # list is shorter than the minimap.
@@ -753,13 +754,13 @@ def _draw_type_list(
     st.list_scroll_max = scroll_max
 
     show_swatch = getattr(settings, "colored_nodes", True)
+    swatch_col = icon_col if show_swatch else 0.0
 
     content_x = zone_x + pad_x
     # Static extra margin so counts stay clear of the expanded scrollbar.
     count_right = zone_x + zone_w - pad_x - 4 * ui_scale
-    # Always reserve the swatch/toggle column so multi-node + icons never
-    # overlap the type label, even when colored nodes are disabled.
-    label_x = content_x + (swatch + swatch_gap)
+    # Labels start past icon columns (expand toggle, plus color swatch if enabled).
+    label_x = content_x + icon_col + swatch_col
     # Hide counts when reserving them would squeeze the label below the
     # minimum; names then reclaim the full row width.
     show_counts = count_right - widest_count - count_gap - label_x >= _TYPE_LIST_MIN_LABEL_W * ui_scale
@@ -865,7 +866,10 @@ def _draw_type_list(
         blf.shadow(font_id, 3, 0, 0, 0, 255)
         blf.shadow_offset(font_id, 0, -1)
 
-        child_indent = swatch + swatch_gap
+        # Child rows: indented by one column/tab relative to headers.
+        # When swatches are enabled, the child swatch sits indented under the
+        # header label start, and the child name follows it.
+        child_indent = icon_col
         child_label_x = label_x + child_indent
         # Child rows never draw a count, so their names always run to the
         # right edge instead of reserving the header count column.
@@ -875,7 +879,7 @@ def _draw_type_list(
         clip_t = int(zone_y - row_h)
         clip_b = int(zone_y + zone_h + row_h)
 
-        child_swatch_x = content_x + child_indent
+        child_swatch_x = content_x + icon_col + swatch_col
 
         for kind, label, node_name, _s_top, s_bottom, _row_idx in visible_rows:
             text_y = s_bottom + text_y_off
@@ -906,20 +910,20 @@ def _draw_type_list(
                     blf.draw(font_id, count_text)
                     blf.enable(font_id, blf.CLIPPING)
 
-                # Icon sits over the text; restore alpha blending after BLF.
+                # Restore alpha blending after BLF.
                 gpu.state.blend_set("ALPHA")
 
-                # Icon in the swatch slot stays the type color for every state:
-                # +/− toggle for multi-node types, colored swatch for single-node.
                 icon_color = type_colors.get(label, colors["node"])
                 icon_rgba = _alpha_mul(icon_color, master_alpha)
                 if entry_map.get(label, ("", 0.0, 1))[2] > 1:
                     _paint_expand_icon(
-                        content_x + swatch / 2, s_bottom + row_h / 2, swatch, icon_rgba, ui_scale, label in expanded
+                        content_x + swatch / 2, s_bottom + row_h / 2, swatch, text_col, ui_scale, label in expanded
                     )
-                elif show_swatch:
+                # Swatch lives in its own column so it stays visible even when
+                # the expand toggle is active.
+                if show_swatch:
                     _draw_filled_rounded_rect(
-                        content_x, s_bottom + (row_h - swatch) / 2, swatch, swatch, swatch / 2, icon_rgba
+                        content_x + icon_col, s_bottom + (row_h - swatch) / 2, swatch, swatch, swatch / 2, icon_rgba
                     )
             else:
                 # Child row: icon is the type color; text shows selection state.
@@ -2386,12 +2390,36 @@ def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: fl
 
 
 def _paint_expand_icon(x: float, y: float, size: float, color, ui_scale: float, expanded: bool) -> None:
-    """Draw a plus (collapsed) or minus (expanded) glyph centered at ``(x, y)``."""
-    t = max(1, int(1.2 * ui_scale))
+    """Draw a two-line arrowhead centered at ``(x, y)``: right when collapsed, down when expanded."""
+    t = max(1.0, 1.2 * ui_scale)
     arm = size * 0.5
-    _draw_filled_rounded_rect(x - arm, y - t / 2, arm * 2, t, t * 0.5, color)
-    if not expanded:
-        _draw_filled_rounded_rect(x - t / 2, y - arm, t, arm * 2, t * 0.5, color)
+
+    # Screen space is y-up, so a clockwise quarter-turn tips the chevron down.
+    base_angle = -90.0 if expanded else 0.0
+
+    gpu.matrix.push()
+    try:
+        gpu.matrix.translate((x, y))
+        gpu.matrix.multiply_matrix(Matrix.Rotation(math.radians(base_angle), 4, "Z"))
+
+        # 1. CENTER FIX:
+        # Shift the local origin so the bounding box of the chevron is visually centered.
+        # The tip sits at local X=0, and the bounding box reaches back to X = -arm * cos(45).
+        offset_x = (arm * math.cos(math.radians(45.0))) / 2.0
+        gpu.matrix.translate((offset_x, 0.0))
+
+        for sign in (-1, 1):
+            gpu.matrix.push()
+            gpu.matrix.multiply_matrix(Matrix.Rotation(math.radians(sign * 45.0), 4, "Z"))
+
+            # 2. CONNECTION FIX:
+            # Extend the width by t / 2.0. This ensures the geometric centers of both
+            # rounded tips overlap perfectly at (0, 0), completely eliminating the gap.
+            _draw_filled_rounded_rect(-arm, -t / 2.0, arm + (t / 2.0), t, t / 2.0, color)
+
+            gpu.matrix.pop()
+    finally:
+        gpu.matrix.pop()
 
 
 _BUTTON_ICONS = {
