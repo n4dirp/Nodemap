@@ -245,6 +245,7 @@ class MinimapState:
     pending_timer: Any = None
     pending_timer_deadline: float = 0.0
     pending_fingerprint: Any = None
+    force_immediate_compile: bool = False
     tree_data: dict | None = None
     cached_backdrops_batch: Any = None
     cached_borders_batch: Any = None
@@ -418,7 +419,7 @@ def _get_map_content_rect(st: MinimapState) -> tuple[float, float, float, float]
     return mx + left_inset, my + pad, max(mw - pad - left_inset, 1.0), max(mh - 2 * pad, 1.0)
 
 
-STATS_FONT_ID = 1
+STATS_FONT_ID = 0
 STATS_FONT_SIZE = 8
 _TYPE_LIST_MIN_WIDTH = 70.0
 _TYPE_LIST_MAX_WIDTH_PCT = 0.35

@@ -1228,7 +1228,18 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 frame_border_alpha = master_alpha if node.select else master_alpha * 0.9
                 info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, frame_border_alpha))
                 info["frame_color"] = frame_color
+                info["name"] = node.name
                 info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT
+                if show_type_list and show_frames:
+                    if "Frame" not in type_counts:
+                        type_colors["Frame"] = frame_color
+                    info["type_label"] = "Frame"
+                    type_counts["Frame"] = type_counts.get("Frame", 0) + 1
+                    type_nodes.setdefault("Frame", []).append(node.name)
+                    if node.select:
+                        type_selected_counts["Frame"] = type_selected_counts.get("Frame", 0) + 1
+                    if node == active_node:
+                        type_active_label = "Frame"
             else:
                 if colored_nodes:
                     if getattr(node, "use_custom_color", False):
@@ -1834,7 +1845,7 @@ def _ensure_minimap_batches(
 
         border_color = info["border_color"]
         border_w = info["border_w"]
-        if hl_color and not is_frame:
+        if hl_color:
             # Guard on hovered_type so a hidden type list (infos without
             # "type_label") can't match None == None for every node.
             if hovered_type is not None and info.get("type_label") == hovered_type:
@@ -2392,7 +2403,7 @@ def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: fl
 def _paint_expand_icon(x: float, y: float, size: float, color, ui_scale: float, expanded: bool) -> None:
     """Draw a two-line arrowhead centered at ``(x, y)``: right when collapsed, down when expanded."""
     t = max(1.0, 1.2 * ui_scale)
-    arm = size * 0.5
+    arm = size * 0.6
 
     # Screen space is y-up, so a clockwise quarter-turn tips the chevron down.
     base_angle = -90.0 if expanded else 0.0
@@ -2415,7 +2426,7 @@ def _paint_expand_icon(x: float, y: float, size: float, color, ui_scale: float, 
             # 2. CONNECTION FIX:
             # Extend the width by t / 2.0. This ensures the geometric centers of both
             # rounded tips overlap perfectly at (0, 0), completely eliminating the gap.
-            _draw_filled_rounded_rect(-arm, -t / 2.0, arm + (t / 2.0), t, t / 2.0, color)
+            _draw_filled_rounded_rect(-arm, -t / 2.0, arm + (t / 2.0), t, t / 2.0, _alpha_mul(color, 0.5))
 
             gpu.matrix.pop()
     finally:
@@ -2656,18 +2667,22 @@ def draw_minimap() -> None:
 
             # An expanding type list needs compiled type stats to measure its
             # target width; compile immediately instead of after the debounce.
-            interval = 0.0 if st.list_anim_active and st.list_anim_target < 0 else delay
+            # List click actions also request an immediate compile so the visual
+            # feedback is not delayed by the debounce interval.
+            immediate = (st.list_anim_active and st.list_anim_target < 0) or st.force_immediate_compile
+            interval = 0.0 if immediate else delay
             bpy.app.timers.register(_settle_fire, first_interval=interval)
             st.pending_timer = _settle_fire
             st.pending_timer_deadline = now + delay
             st.pending_fingerprint = current_fingerprint
+            st.force_immediate_compile = False
 
     # Build screen-space batches (cached; applies current zoom/pan via matrix)
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region, visible)
     st.scale = scale
     with _Timer("ensure_batches"):
         highlight_border = (
-            _alpha_mul(colors["node_active"], 0.5) if (st.hovered_type_label or st.hovered_node) else None
+            _alpha_mul(colors["node_active"], 0.2) if (st.hovered_type_label or st.hovered_node) else None
         )
         _ensure_minimap_batches(
             st,

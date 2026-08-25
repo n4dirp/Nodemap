@@ -458,6 +458,7 @@ class NODEMAP_OT_navigate(Operator):
                         self._list_child_pressed = None
                         still_over = _list_child_at(self._mx, self._my, st) == (label, node_name)
                         if _in_list_zone(self._mx, self._my, st) and still_over:
+                            st.force_immediate_compile = True
                             self._select_single_node(context, node_name)
                         return {"RUNNING_MODAL"}
                     if self._list_toggle_pressed:
@@ -470,12 +471,14 @@ class NODEMAP_OT_navigate(Operator):
                             else:
                                 st.list_expanded.add(label)
                             st.list_cache_key = None
+                            st.force_immediate_compile = True
                             self._redraw_ui()
                         return {"RUNNING_MODAL"}
                     if self._list_row_pressed:
                         label = self._list_row_pressed
                         self._list_row_pressed = None
                         if _in_list_zone(self._mx, self._my, st) and _list_row_at(self._mx, self._my, st) == label:
+                            st.force_immediate_compile = True
                             self._select_type_nodes(context, label)
                         return {"RUNNING_MODAL"}
                     if self._resize_handle:
@@ -520,6 +523,7 @@ class NODEMAP_OT_navigate(Operator):
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
                         if settings and settings.left_click_action in ("SELECT", "PAN_SELECT"):
+                            st.force_immediate_compile = True
                             self._handle_click_selection(context, event, st)
                         self._was_in_minimap = False
                         self._drag_start = None
@@ -645,6 +649,7 @@ class NODEMAP_OT_navigate(Operator):
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap and not _in_list_zone(self._mx, self._my, st):
                         if settings and settings.right_click_action in ("SELECT", "PAN_SELECT"):
+                            st.force_immediate_compile = True
                             self._handle_click_selection(context, event, st)
                         self._was_in_minimap = False
                         self._drag_start = None
@@ -663,6 +668,7 @@ class NODEMAP_OT_navigate(Operator):
                         child = _list_child_at(self._mx, self._my, st)
                         if child:
                             _label, node_name = child
+                            st.force_immediate_compile = True
                             self._select_single_node(context, node_name)
                             if not self._view_selected_animated(context, settings):
                                 try:
@@ -681,9 +687,11 @@ class NODEMAP_OT_navigate(Operator):
                                 else:
                                     st.list_expanded.add(label)
                                 st.list_cache_key = None
+                                st.force_immediate_compile = True
                                 self._redraw_ui()
                                 self._was_in_minimap = False
                                 return {"RUNNING_MODAL"}
+                            st.force_immediate_compile = True
                             self._select_type_nodes(context, label)
                             if not self._view_selected_animated(context, settings):
                                 try:
