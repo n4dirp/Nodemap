@@ -753,8 +753,9 @@ def _draw_type_list(
     st.list_scroll = min(max(st.list_scroll, 0.0), scroll_max)
     st.list_scroll_max = scroll_max
 
-    show_swatch = getattr(settings, "colored_nodes", True)
-    swatch_col = icon_col if show_swatch else 0.0
+    show_type_colors = getattr(settings, "show_type_colors", True) and getattr(settings, "colored_nodes", True)
+
+    swatch_col = icon_col if show_type_colors else 0.0
 
     content_x = zone_x + pad_x
     # Static extra margin so counts stay clear of the expanded scrollbar.
@@ -921,7 +922,7 @@ def _draw_type_list(
                     )
                 # Swatch lives in its own column so it stays visible even when
                 # the expand toggle is active.
-                if show_swatch:
+                if show_type_colors:
                     _draw_filled_rounded_rect(
                         content_x + icon_col, s_bottom + (row_h - swatch) / 2, swatch, swatch, swatch / 2, icon_rgba
                     )
@@ -947,7 +948,7 @@ def _draw_type_list(
                 # Child icon matches the normal item's swatch (same size/shape).
                 # Restore alpha blending after the row's text draw.
                 gpu.state.blend_set("ALPHA")
-                if show_swatch:
+                if show_type_colors:
                     _draw_filled_rounded_rect(
                         child_swatch_x,
                         s_bottom + (row_h - swatch) / 2,

@@ -522,9 +522,11 @@ class NODEMAP_OT_navigate(Operator):
                         self._destroy_timer(context)
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap:
-                        if settings and settings.left_click_action in ("SELECT", "PAN_SELECT"):
+                        if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
                             st.force_immediate_compile = True
-                            self._handle_click_selection(context, event, st)
+                            self._handle_click_selection(
+                                context, event, st, frame=settings.left_click_action == "SELECT_FRAME"
+                            )
                         self._was_in_minimap = False
                         self._drag_start = None
                         return {"RUNNING_MODAL"}
@@ -593,8 +595,8 @@ class NODEMAP_OT_navigate(Operator):
                             context.window.cursor_modal_set(cursor)
                             self._last_cursor = cursor
                             return {"RUNNING_MODAL"}
-                    self._drag_start = (self._mx, self._my)
-                    if settings and settings.left_click_action in ("PAN", "PAN_SELECT"):
+                    if settings and settings.left_click_action in ("PAN", "SELECT_PAN"):
+                        self._drag_start = (self._mx, self._my)
                         self._center_view_on_mouse(context, self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 else:
@@ -648,9 +650,11 @@ class NODEMAP_OT_navigate(Operator):
                         self._destroy_timer(context)
                         return {"RUNNING_MODAL"}
                     if not self._dragging and self._was_in_minimap and not _in_list_zone(self._mx, self._my, st):
-                        if settings and settings.right_click_action in ("SELECT", "PAN_SELECT"):
+                        if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
                             st.force_immediate_compile = True
-                            self._handle_click_selection(context, event, st)
+                            self._handle_click_selection(
+                                context, event, st, frame=settings.right_click_action == "SELECT_FRAME"
+                            )
                         self._was_in_minimap = False
                         self._drag_start = None
                         return {"RUNNING_MODAL"}
@@ -718,8 +722,8 @@ class NODEMAP_OT_navigate(Operator):
                             context.window.cursor_modal_set(cursor)
                             self._last_cursor = cursor
                             return {"RUNNING_MODAL"}
-                    self._drag_start = (self._mx, self._my)
-                    if settings and settings.right_click_action in ("PAN", "PAN_SELECT"):
+                    if settings and settings.right_click_action in ("PAN", "SELECT_PAN"):
+                        self._drag_start = (self._mx, self._my)
                         self._center_view_on_mouse(context, self._mx, self._my)
                     return {"RUNNING_MODAL"}
                 else:
@@ -1071,7 +1075,7 @@ class NODEMAP_OT_navigate(Operator):
             return True
         return False
 
-    def _handle_click_selection(self, context: Context, event: Event, st: dict) -> None:
+    def _handle_click_selection(self, context: Context, event: Event, st: dict, frame: bool = False) -> None:
         space = self._space
         if not space or space.type != "NODE_EDITOR":
             return
@@ -1097,10 +1101,10 @@ class NODEMAP_OT_navigate(Operator):
                     node.select = True
                     node_tree.nodes.active = node
 
-            addon = context.preferences.addons.get(__package__)
-            if addon and getattr(addon.preferences.settings, "auto_frame_selected", True):
-                settings = addon.preferences.settings
-                if not self._view_selected_animated(context, settings):
+            if frame:
+                addon = context.preferences.addons.get(__package__)
+                settings = addon.preferences.settings if addon else None
+                if not (settings and self._view_selected_animated(context, settings)):
                     try:
                         with self._override_ctx(context):
                             bpy.ops.node.view_selected()

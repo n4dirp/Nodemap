@@ -83,6 +83,14 @@ class AddonLogFormatter(logging.Formatter):
         return f"{timestamp}  {short_name:<16} | {record.getMessage()}"
 
 
+_CLICK_ACTION_ITEMS = [
+    ("PAN", "Pan View", "Center the view on the clicked location"),
+    ("SELECT", "Select Node", "Select the node under the cursor"),
+    ("SELECT_FRAME", "Select Node + Frame View", "Select the node and frame it in the editor"),
+    ("SELECT_PAN", "Select Node + Pan View", "Select the node and pan the view"),
+]
+
+
 class NODEMAP_PG_settings(PropertyGroup):
     """Preferences for the Nodes Minimap."""
 
@@ -316,12 +324,19 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_minimap_cache,
     )
 
+    show_type_colors: BoolProperty(
+        name="Type Colors",
+        description="Draw a colored swatch icon next to each entry in the type list",
+        default=True,
+        update=_update_minimap_cache,
+    )
+
     type_list_sort: EnumProperty(
         name="Type List Sort",
         description="How entries are ordered in the node-type list",
         items=[
+            ("NAME", "Alphabetical", "Order alphabetically by type name"),
             ("COUNT", "Count", "Order by node count, highest first"),
-            ("NAME", "Name", "Order alphabetically by type name"),
         ],
         default="NAME",
     )
@@ -343,12 +358,6 @@ class NODEMAP_PG_settings(PropertyGroup):
         max=0.5,
         step=0.01,
         unit="TIME_ABSOLUTE",
-    )
-
-    auto_frame_selected: BoolProperty(
-        name="Auto Frame Selected",
-        description="Automatically frame the selected node",
-        default=True,
     )
 
     interactive: BoolProperty(
@@ -384,23 +393,15 @@ class NODEMAP_PG_settings(PropertyGroup):
     left_click_action: EnumProperty(
         name="Left Click",
         description="Left click behavior in the minimap",
-        items=[
-            ("PAN", "Pan View", "Center the view on the clicked location"),
-            ("SELECT", "Select Node", "Select the node under the cursor"),
-            ("PAN_SELECT", "Pan + Select", "Center the view and select the node"),
-        ],
+        items=_CLICK_ACTION_ITEMS,
         default="PAN",
     )
 
     right_click_action: EnumProperty(
         name="Right Click",
         description="Right click behavior in the minimap",
-        items=[
-            ("PAN", "Pan View", "Center the view on the clicked location"),
-            ("SELECT", "Select Node", "Select the node under the cursor"),
-            ("PAN_SELECT", "Pan + Select", "Center the view and select the node"),
-        ],
-        default="SELECT",
+        items=_CLICK_ACTION_ITEMS,
+        default="SELECT_FRAME",
     )
 
     animations: BoolProperty(
@@ -474,16 +475,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.row().prop(settings, "pan_speed", expand=True)
 
         col.separator()
-        col.row().prop(settings, "left_click_action", text="Left Click")
-        col.row().prop(settings, "right_click_action", text="Right Click")
-
-        if {"SELECT", "PAN_SELECT"} & {
-            settings.left_click_action,
-            settings.right_click_action,
-        }:
-            col.prop(settings, "auto_frame_selected", text="Auto Frame Selected")
-
-        col.separator()
+        col.prop(settings, "left_click_action", text="Left Click")
+        col.prop(settings, "right_click_action", text="Right Click")
         col.row().prop(settings, "scroll_wheel_mode", expand=True)
 
         layout.separator()
@@ -518,8 +511,12 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         layout.separator()
         layout.label(text="Type List")
-        col = layout.column(align=True)
+        col = layout.column()
+        col.active = settings.show_type_list
         col.prop(settings, "type_list_font_size", text="Font Size")
+        swatch_row = col.row()
+        swatch_row.active = settings.colored_nodes
+        swatch_row.prop(settings, "show_type_colors", text="Type Colors")
 
         layout.separator()
         layout.label(text="Performance")
