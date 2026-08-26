@@ -699,6 +699,7 @@ def _draw_type_list(
     # so the content slides out with the panel instead of vanishing.
     if st.list.width <= 0:
         st.list.hovered_type_label = None
+        st.list.hovered_node = None
         st.interaction.hovered_node = None
         st.list.hovered_scrollbar = False
         st.list.scrollbar_thumb = None
@@ -709,6 +710,7 @@ def _draw_type_list(
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
         st.list.hovered_type_label = None
+        st.list.hovered_node = None
         st.interaction.hovered_node = None
         st.list.hovered_scrollbar = False
         st.list.scrollbar_thumb = None
@@ -809,7 +811,7 @@ def _draw_type_list(
         entry_map = {lbl: (ct, cw, cnt) for (lbl, ct, cw, cnt) in entries}
         expanded = st.list.expanded
         hovered = st.list.hovered_type_label
-        hovered_child = st.interaction.hovered_node
+        hovered_child = st.list.hovered_node
 
         # Walk the shared layout model; cull rows outside the viewport.
         visible_rows = []

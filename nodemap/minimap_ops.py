@@ -842,23 +842,15 @@ class NODEMAP_OT_navigate(Operator):
             if st.list.hovered_type_label != row_label:
                 st.list.hovered_type_label = row_label
                 self._redraw_ui()
-            if st.interaction.hovered_node != child_hover:
-                st.interaction.hovered_node = child_hover
+            if st.list.hovered_node != child_hover:
+                st.list.hovered_node = child_hover
                 self._redraw_ui()
-            old_hovered = st.interaction.hovered_node
             new_hovered = None
-            if in_list:
+            if in_list and child_hover is not None:
                 # Hovering a single child row highlights only that node's
                 # border on the minimap (not the whole type group).
-                if child_hover is not None:
-                    new_hovered = child_hover[1]
-            elif in_minimap:
-                tree_coord = _region_to_tree(self._mx, self._my, st)
-                if tree_coord and self._space and self._space.edit_tree:
-                    hovered = _find_node_at(self._space.edit_tree.nodes, tree_coord[0], tree_coord[1])
-                    if hovered:
-                        new_hovered = hovered.name
-            if old_hovered != new_hovered:
+                new_hovered = child_hover[1]
+            if st.interaction.hovered_node != new_hovered:
                 st.interaction.hovered_node = new_hovered
                 self._redraw_ui()
             old_btn = st.buttons.hovered
@@ -1127,6 +1119,7 @@ class NODEMAP_OT_navigate(Operator):
                     except RuntimeError:
                         pass
 
+        st.list.hovered_node = None
         st.interaction.hovered_node = None
         self._redraw_ui()
 
@@ -1422,12 +1415,13 @@ class NODEMAP_OT_navigate(Operator):
         st = self._st
         if st:
             st.buttons.hovered = None
-            st.list.hovered_type_label = None
-            st.interaction.hovered_node = None
-            st.list.hovered_scrollbar = False
-            st.list.scrollbar_dragging = False
-            if st.interaction.pressed:
-                st.interaction.pressed = False
+        st.list.hovered_type_label = None
+        st.list.hovered_node = None
+        st.interaction.hovered_node = None
+        st.list.hovered_scrollbar = False
+        st.list.scrollbar_dragging = False
+        if st.interaction.pressed:
+            st.interaction.pressed = False
         self._redraw_ui()
 
     def _cancel_smooth(self, context: Context) -> None:
@@ -1908,6 +1902,7 @@ class NODEMAP_OT_navigate(Operator):
             self._st.interaction.resize_active = None
             self._st.buttons.hovered = None
             self._st.list.hovered_type_label = None
+            self._st.list.hovered_node = None
             self._st.interaction.hovered_node = None
             self._st.list.hovered_scrollbar = False
             self._st.list.scrollbar_dragging = False
