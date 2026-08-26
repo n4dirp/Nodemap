@@ -7,7 +7,7 @@ import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from .helpers import _srgb_to_linear, _theme
+from .theme import _srgb_to_linear, _theme_rgba
 
 GPUStageInterfaceInfo = gpu.types.GPUStageInterfaceInfo
 GPUShaderCreateInfo = gpu.types.GPUShaderCreateInfo
@@ -501,14 +501,6 @@ def _build_pill_batch(
         indices=indices,
     )
     return shader, batch
-
-
-def _theme_rgba(path: str, default: tuple[float, ...]):
-    """Fetch a theme color via _theme, guaranteeing a 4-element RGBA tuple."""
-    result = _theme(path, default)
-    if len(result) == 3:
-        return result + (1.0,)
-    return result
 
 
 def _get_theme_colors():

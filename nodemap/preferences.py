@@ -53,7 +53,8 @@ def _update_minimap_cache(self, context):
     """Invalidate compiled batches in all active states and trigger UI redraw."""
     try:
         # Avoid module-level circular imports
-        from .helpers import _minimap_state, redraw_ui
+        from .helpers import redraw_ui
+        from .state import _minimap_state
 
         for state in _minimap_state.values():
             state.cached_fingerprint = None
@@ -479,13 +480,17 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "right_click_action", text="Right Click")
         col.row().prop(settings, "scroll_wheel_mode", expand=True)
 
-        layout.separator()
-        layout.label(text="Keymap")
+        col.separator()
+        split = col.split(factor=0.4)
+        sub = split.column()
+        sub.alignment = "RIGHT"
+        sub.label(text="Keymap")
+        col = split.column()
         wm = context.window_manager
         kc = wm.keyconfigs.user
         from . import addon_keymaps
 
-        row = layout.row()
+        row = col.row()
         row.use_property_split = False
         for km_addon, kmi_addon in addon_keymaps:
             km = kc.keymaps.get(km_addon.name)
@@ -513,10 +518,12 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.label(text="Type List")
         col = layout.column()
         col.active = settings.show_type_list
+        row = col.row()
+        row.prop(settings, "type_list_sort", text="Sort", expand=True)
         col.prop(settings, "type_list_font_size", text="Font Size")
-        swatch_row = col.row()
-        swatch_row.active = settings.colored_nodes
-        swatch_row.prop(settings, "show_type_colors", text="Type Colors")
+        sub = col.row()
+        sub.active = settings.colored_nodes
+        sub.prop(settings, "show_type_colors", text="Type Colors")
 
         layout.separator()
         layout.label(text="Performance")

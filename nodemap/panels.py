@@ -3,8 +3,8 @@
 from bl_ui.utils import PresetPanel
 from bpy.types import Panel
 
-from .helpers import _state
 from .presets import PRESET_SUBDIR
+from .state import _state
 
 
 class NODEMAP_PT_popup(Panel):
@@ -71,12 +71,6 @@ class NODEMAP_PT_popup(Panel):
             grid.prop(settings, "show_socket_indicators", text="Sockets")
             grid.prop(settings, "show_type_list", text="Type List")
             grid.prop(settings, "show_wires", text="Wires")
-
-            if settings.show_type_list:
-                body.separator()
-                row = body.row()
-                row.label(text="Sort List")
-                row.prop(settings, "type_list_sort", text="Sort", expand=True)
 
             body.separator()
             col = body.column()

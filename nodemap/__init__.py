@@ -8,7 +8,6 @@ import os
 import bpy
 from bpy.types import SpaceNodeEditor
 
-from .helpers import _ensure_area_states, _minimap_window_operators, _registration_state
 from .minimap_draw import draw_minimap
 from .minimap_ops import classes as operator_classes
 from .panels import classes as panel_classes
@@ -16,6 +15,7 @@ from .panels import draw_minimap_header_button
 from .preferences import _update_logger_from_prefs
 from .preferences import classes as prefs_classes
 from .presets import classes as preset_classes
+from .state import _ensure_area_states, _minimap_window_operators, _registration_state
 
 ADDON_DIR = os.path.dirname(__file__)
 

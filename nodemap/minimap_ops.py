@@ -5,36 +5,42 @@ import logging
 import bpy
 from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
-from .helpers import (
-    _HANDLE_THICKNESS,
-    _MINIMAP_BUTTONS,
-    _SCROLLBAR_HIT_PAD,
-    MIN_MAP_HEIGHT,
-    MIN_MAP_WIDTH,
-    MinimapState,
-    _clamp_pan_to_viewport,
+from .framing import (
     _compute_editor_frame_selected_targets,
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
-    _compute_map_transform,
+    frame_all,
+    frame_selected,
+    frame_view,
+)
+from .helpers import (
+    _HANDLE_THICKNESS,
+    _SCROLLBAR_HIT_PAD,
+    MIN_MAP_HEIGHT,
+    MIN_MAP_WIDTH,
     _expand_bounds_margin,
     _find_node_at,
     _get_area_and_region_under_mouse,
     _get_minimap_margins,
-    _get_minimap_transform,
     _get_node_dims,
     _get_node_tree_bounds,
     _get_safe_bounds,
     _get_ui_scale,
-    _get_visible_rect,
-    _minimap_window_operators,
-    _state,
-    frame_all,
-    frame_selected,
-    frame_view,
     redraw_ui,
     start_list_width_animation,
+)
+from .state import (
+    _MINIMAP_BUTTONS,
+    MinimapState,
+    _minimap_window_operators,
+    _state,
+)
+from .transforms import (
+    _clamp_pan_to_viewport,
+    _compute_map_transform,
+    _get_minimap_transform,
+    _get_visible_rect,
 )
 
 logger = logging.getLogger(__package__)
@@ -617,9 +623,7 @@ class NODEMAP_OT_navigate(Operator):
             if not self._dragging and self._was_in_minimap:
                 if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
                     st.force_immediate_compile = True
-                    self._handle_click_selection(
-                        context, event, st, frame=settings.left_click_action == "SELECT_FRAME"
-                    )
+                    self._handle_click_selection(context, event, st, frame=settings.left_click_action == "SELECT_FRAME")
                 self._was_in_minimap = False
                 self._drag_start = None
                 return {"RUNNING_MODAL"}
@@ -743,15 +747,6 @@ class NODEMAP_OT_navigate(Operator):
                         pass
                 self._destroy_timer(context)
                 return {"RUNNING_MODAL"}
-            if not self._dragging and self._was_in_minimap and not _in_list_zone(self._mx, self._my, st):
-                if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                    st.force_immediate_compile = True
-                    self._handle_click_selection(
-                        context, event, st, frame=settings.right_click_action == "SELECT_FRAME"
-                    )
-                self._was_in_minimap = False
-                self._drag_start = None
-                return {"RUNNING_MODAL"}
             self._was_in_minimap = False
             self._drag_start = None
             return {"PASS_THROUGH"}
@@ -816,9 +811,15 @@ class NODEMAP_OT_navigate(Operator):
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
+            if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
+                st.force_immediate_compile = True
+                self._handle_click_selection(
+                    context, event, st, frame=settings.right_click_action == "SELECT_FRAME"
+                )
             if settings and settings.right_click_action in ("PAN", "SELECT_PAN"):
                 self._drag_start = (self._mx, self._my)
                 self._center_view_on_mouse(context, self._mx, self._my)
+            self._was_in_minimap = False
             return {"RUNNING_MODAL"}
         else:
             self._drag_start = None
@@ -911,9 +912,7 @@ class NODEMAP_OT_navigate(Operator):
             dx = self._mx - self._drag_start[0]
             dy = self._my - self._drag_start[1]
             if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
-                if not self._dragging and (
-                    self._anim_active or self._frame_anim_active or self._editor_anim_active
-                ):
+                if not self._dragging and (self._anim_active or self._frame_anim_active or self._editor_anim_active):
                     self._cancel_smooth(context)
                 self._dragging = True
                 if self._was_in_minimap:
@@ -1008,7 +1007,6 @@ class NODEMAP_OT_navigate(Operator):
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
-
 
     def _node_select_location(self, node) -> tuple[float, float]:
         """Tree-space coordinate to emulate a click on *node*.

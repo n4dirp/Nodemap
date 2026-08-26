@@ -32,43 +32,49 @@ from .gpu_draw import (
     _get_batch_rect_shader,
 )
 from .helpers import (
-    _COLOR_TAG_TO_THEME_ATTR,
     _HANDLE_THICKNESS,
     _LIST_COUNT_GAP,
     _LIST_PAD_X,
     _LIST_SWATCH,
     _LIST_SWATCH_GAP,
-    _MINIMAP_BUTTONS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     STATS_FONT_ID,
     STATS_FONT_SIZE,
-    MinimapState,
-    _alpha_mul,
-    _clamp_pan_to_viewport,
-    _compute_outline_color,
     _expand_bounds_margin,
-    _get_map_content_rect,
     _get_minimap_margins,
-    _get_minimap_transform,
     _get_node_dims,
-    _get_node_editor_theme_colors,
     _get_node_initials,
     _get_node_label_lines,
     _get_safe_bounds,
     _get_tree_snapshot,
     _get_type_list_width,
     _get_ui_scale,
-    _get_visible_rect,
-    _minimap_window_operators,
-    _registration_state,
     _schedule_list_anim_redraw,
-    _srgb_to_linear,
-    _state,
-    _theme_rgba,
     get_tree_fingerprint,
 )
 from .preferences import TRACE_LEVEL
+from .state import (
+    _MINIMAP_BUTTONS,
+    MinimapState,
+    _minimap_window_operators,
+    _registration_state,
+    _state,
+)
+from .theme import (
+    _COLOR_TAG_TO_THEME_ATTR,
+    _alpha_mul,
+    _compute_outline_color,
+    _get_node_editor_theme_colors,
+    _srgb_to_linear,
+    _theme_rgba,
+)
+from .transforms import (
+    _clamp_pan_to_viewport,
+    _get_map_content_rect,
+    _get_minimap_transform,
+    _get_visible_rect,
+)
 
 logger = logging.getLogger(__package__)
 
