@@ -12,6 +12,11 @@ from .helpers import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, "TRACE")
 
+# Guard flag: set True during handle drags to suppress property update
+# callbacks, preventing tree_data invalidation and the resulting one-frame
+# content flash.
+_suppress_update = False
+
 
 def _trace_logger(self, msg, *args, **kwargs):
     if self.isEnabledFor(TRACE_LEVEL):
@@ -49,15 +54,45 @@ def _update_logger_from_prefs():
     logger.setLevel(level_map[level])
 
 
-def _update_minimap_cache(self, context):
-    """Invalidate compiled batches in all active states and trigger UI redraw."""
+def _update_invalidate_all(self, context):
+    """Invalidate batches and schedule recompile for structural preference changes.
+
+    Used when a setting affects what tree data must be compiled (e.g. wire
+    visibility, node labels). Keeps tree_data as a fallback so the next draw
+    has content to show (no blank frame), clears the fingerprint so the draw
+    detects the change and schedules a recompile, and sets force_immediate so
+    the recompile fires on the next event loop iteration (~1 frame).
+    """
+    if _suppress_update:
+        return
     try:
-        # Avoid module-level circular imports
         from .helpers import redraw_ui
         from .state import _minimap_state
 
         for state in _minimap_state.values():
-            state.cached_fingerprint = None
+            state.cache.fingerprint = None
+            state.cache._batches_dirty = True
+            state.cache.force_immediate = True
+        redraw_ui("NODE_EDITOR")
+    except (ImportError, AttributeError):
+        pass
+
+
+def _update_invalidate_batches(self, context):
+    """Invalidate GPU batches only for display preference changes.
+
+    Used when a setting affects how content is rendered (size, position,
+    opacity, colors) but not what tree data is needed. Preserves tree_data
+    to avoid an expensive one-frame flash from a full tree recompile.
+    """
+    if _suppress_update:
+        return
+    try:
+        from .helpers import redraw_ui
+        from .state import _minimap_state
+
+        for state in _minimap_state.values():
+            state.cache.invalidate_batches_only()
         redraw_ui("NODE_EDITOR")
     except (ImportError, AttributeError):
         pass
@@ -111,7 +146,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("BOTTOM_RIGHT", "Bottom Right", "Display in the bottom-right corner"),
         ],
         default="BOTTOM_RIGHT",
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     minimap_width: IntProperty(
@@ -120,7 +155,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=300,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     minimap_height: IntProperty(
@@ -129,7 +164,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=128,
         min=MIN_MAP_HEIGHT,
         subtype="PIXEL",
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     max_width_pct: IntProperty(
@@ -139,7 +174,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         min=10,
         max=100,
         subtype="PERCENTAGE",
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     max_height_pct: IntProperty(
@@ -149,7 +184,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         min=10,
         max=100,
         subtype="PERCENTAGE",
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     opacity: FloatProperty(
@@ -160,14 +195,14 @@ class NODEMAP_PG_settings(PropertyGroup):
         max=1.0,
         precision=3,
         subtype="FACTOR",
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     custom_bg_color: BoolProperty(
         name="Custom Background",
         description="Use a custom background color instead of the Blender theme color",
         default=False,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     bg_color: FloatVectorProperty(
@@ -178,7 +213,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         min=0.0,
         max=1.0,
         subtype="COLOR_GAMMA",
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     show_viewport_overlay: BoolProperty(
@@ -217,56 +252,56 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Show Node Count",
         description="Display node count at the bottom of the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     show_frame_all_btn: BoolProperty(
         name="Frame All Button",
         description="Show a Frame-all button inside the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     show_frame_view_btn: BoolProperty(
         name="Frame View Button",
         description="Show a Frame-view button inside the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     show_frame_selected_btn: BoolProperty(
         name="Frame Selected Button",
         description="Show a Frame-selected button inside the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     show_list_toggle_btn: BoolProperty(
         name="List Toggle Button",
         description="Show a button in the minimap to toggle the node-type list",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     show_names: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     show_frames: BoolProperty(
         name="Show Frames",
         description="Display frame node backgrounds in the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     show_frame_labels: BoolProperty(
         name="Show Frame Labels",
         description="Display labels above frame nodes in the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     node_label_mode: EnumProperty(
@@ -277,42 +312,42 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("FULL", "Name", "Display full name split across lines"),
         ],
         default="COMPACT",
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     colored_nodes: BoolProperty(
         name="Colored Nodes",
         description="Use custom node colors and color tags",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     show_wires: BoolProperty(
         name="Show Wires",
         description="Display node connections in the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     show_wire_color: BoolProperty(
         name="Socket Wire Colors",
         description="Color wires by the output socket type",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     show_socket_indicators: BoolProperty(
         name="Socket Indicators",
         description="Display colored indicator pills on node sockets",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     show_node_borders: BoolProperty(
         name="Node Borders",
         description="Display borders around nodes, highlighting selection and active state",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     show_type_list: BoolProperty(
@@ -322,14 +357,14 @@ class NODEMAP_PG_settings(PropertyGroup):
             "hovering a row highlights those nodes, clicking selects them"
         ),
         default=False,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     show_type_colors: BoolProperty(
         name="Type Colors",
         description="Draw a colored swatch icon next to each entry in the type list",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     type_list_sort: EnumProperty(
@@ -348,7 +383,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=8,
         min=6,
         max=20,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     debounce_interval: FloatProperty(
@@ -365,7 +400,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Interactive",
         description="Enable mouse and keyboard interaction with the minimap",
         default=True,
-        update=_update_minimap_cache,
+        update=_update_invalidate_all,
     )
 
     scroll_wheel_mode: EnumProperty(
@@ -382,7 +417,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Follow View",
         description="Keep the editor viewport inside the minimap by adjusting the minimap pan automatically",
         default=False,
-        update=_update_minimap_cache,
+        update=_update_invalidate_batches,
     )
 
     frame_view_fill: BoolProperty(

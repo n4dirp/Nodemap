@@ -244,7 +244,7 @@ def _get_type_list_width(settings, st, mw: float, ui_scale: float, font_size: in
     """
     if not getattr(settings, "show_type_list", False):
         return 0.0
-    tree_data = st.tree_data
+    tree_data = st.cache.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
         return 0.0
@@ -277,27 +277,27 @@ def start_list_width_animation(st, settings) -> None:
         pass
     if not getattr(settings, "animations", True):
         return
-    st.list_anim_active = True
-    st.list_anim_from = st.list_width
-    st.list_anim_target = 0.0 if not getattr(settings, "show_type_list", False) else -1.0
+    st.list.anim_active = True
+    st.list.anim_from = st.list.width
+    st.list.anim_target = 0.0 if not getattr(settings, "show_type_list", False) else -1.0
     frames = _LIST_ANIM_FRAMES.get(getattr(settings, "pan_speed", "MEDIUM"), 24)
-    st.list_anim_duration = frames / 60.0
-    st.list_anim_start = time.perf_counter()
+    st.list.anim_duration = frames / 60.0
+    st.list.anim_start = time.perf_counter()
 
 
 def _list_anim_tick(st) -> None:
-    st.list_anim_timer = None
-    if st.list_anim_active:
+    st.list.anim_timer = None
+    if st.list.anim_active:
         redraw_ui("NODE_EDITOR")
 
 
 def _schedule_list_anim_redraw(st) -> None:
     """Schedule a one-shot timer tick that forces a redraw while the list animates."""
-    if st.list_anim_timer is not None:
+    if st.list.anim_timer is not None:
         return
     try:
         bpy.app.timers.register(lambda: _list_anim_tick(st), first_interval=1 / 60)
-        st.list_anim_timer = True
+        st.list.anim_timer = True
     except (RuntimeError, ValueError):
         pass
 

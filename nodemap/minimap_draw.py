@@ -57,6 +57,7 @@ from .preferences import TRACE_LEVEL
 from .state import (
     _MINIMAP_BUTTONS,
     MinimapState,
+    ResizeHandle,
     _minimap_window_operators,
     _registration_state,
     _state,
@@ -267,7 +268,7 @@ def _compute_minimap_rect(
     min_dim_w = MIN_MAP_WIDTH * ui_scale
     min_dim_h = MIN_MAP_HEIGHT * ui_scale
     if mw < min_dim_w or mh < min_dim_h:
-        st.rect = (0.0, 0.0, 0.0, 0.0)
+        st.view.rect = (0.0, 0.0, 0.0, 0.0)
         return None
 
     return mx, my, mw, mh, padding, y_margin
@@ -353,12 +354,12 @@ def _draw_resize_handles(
     st: MinimapState,
 ) -> None:
     """Draw full-edge resize indicators, colored orange when the percentage cap is active."""
-    handle = st.resize_active
+    handle = st.interaction.resize_active
     if not handle:
         return
 
-    w_clamped = st.width_clamped
-    h_clamped = st.height_clamped
+    w_clamped = st.view.width_clamped
+    h_clamped = st.view.height_clamped
 
     col_base = _alpha_mul(colors["text"], 0.5 * master_alpha)
     col_warn = _alpha_mul(colors["indicator"], master_alpha)
@@ -366,13 +367,13 @@ def _draw_resize_handles(
     margin = 6 * ui_scale
 
     match handle:
-        case "W":
+        case ResizeHandle.W:
             wx = mx + 2 * ui_scale if corner in ("TOP_RIGHT", "BOTTOM_RIGHT") else mx + mw - 2 * ui_scale - thick
             _draw_pill(wx, my + margin, thick, mh - 2 * margin, col_warn if w_clamped else col_base)
-        case "H":
+        case ResizeHandle.H:
             hy = my + 2 * ui_scale if corner in ("TOP_RIGHT", "TOP_LEFT") else my + mh - 2 * ui_scale - thick
             _draw_pill(mx + margin, hy, mw - 2 * margin, thick, col_warn if h_clamped else col_base)
-        case "C":
+        case ResizeHandle.C:
             wx = mx + 2 * ui_scale if corner in ("TOP_RIGHT", "BOTTOM_RIGHT") else mx + mw - 2 * ui_scale - thick
             _draw_pill(wx, my + margin, thick, mh - 2 * margin, col_warn if w_clamped else col_base)
 
@@ -474,7 +475,7 @@ def _draw_viewport_overlay(
     hole_w = v_right - v_left
     hole_h = v_top - v_bottom
 
-    # border_alpha_mul = 0.5 if st and st.pressed else 1.0
+    # border_alpha_mul = 0.5 if st and st.interaction.pressed else 1.0
 
     # Darkened overlay (optional)
     if getattr(settings, "show_viewport_overlay", True):
@@ -508,7 +509,7 @@ def _draw_viewport_overlay(
 
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
-        if st and st.pressed:
+        if st and st.interaction.pressed:
             outline_col = _alpha_mul(colors["node_active"], master_alpha)
         else:
             outline_col = _alpha_mul(colors["node_outline"], master_alpha)
@@ -543,7 +544,7 @@ def _draw_node_count(
     ty = my + (FONT_SIZE * ui_scale) - 3
 
     st = _state()
-    btn_bottoms = [btn[1] for btn in (st.frame_all_btn, st.frame_view_btn, st.frame_selected_btn) if btn]
+    btn_bottoms = [rect[1] for rect in st.buttons.rects.values() if rect]
     if btn_bottoms and min(btn_bottoms) <= ty + font_size:
         return
 
@@ -562,29 +563,29 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
     """
     list_font_size = getattr(settings, "type_list_font_size", STATS_FONT_SIZE)
     target_now = _get_type_list_width(settings, st, mw, ui_scale, list_font_size)
-    if not st.list_anim_active:
-        st.list_width = target_now
+    if not st.list.anim_active:
+        st.list.width = target_now
         return
 
-    if st.list_anim_target < 0:
+    if st.list.anim_target < 0:
         if target_now > 0:
-            st.list_anim_target = target_now
-            st.list_anim_start = time.perf_counter()
-        elif time.perf_counter() - st.list_anim_start > _TYPE_LIST_ANIM_AWAIT_TIMEOUT:
-            st.list_anim_active = False
-            st.list_width = target_now
+            st.list.anim_target = target_now
+            st.list.anim_start = time.perf_counter()
+        elif time.perf_counter() - st.list.anim_start > _TYPE_LIST_ANIM_AWAIT_TIMEOUT:
+            st.list.anim_active = False
+            st.list.width = target_now
             return
         else:
-            st.list_width = st.list_anim_from
+            st.list.width = st.list.anim_from
             _schedule_list_anim_redraw(st)
             return
 
-    progress = min((time.perf_counter() - st.list_anim_start) / max(st.list_anim_duration, 1e-4), 1.0)
+    progress = min((time.perf_counter() - st.list.anim_start) / max(st.list.anim_duration, 1e-4), 1.0)
     eased = 1.0 - (1.0 - progress) ** 3
-    st.list_width = st.list_anim_from + (st.list_anim_target - st.list_anim_from) * eased
+    st.list.width = st.list.anim_from + (st.list.anim_target - st.list.anim_from) * eased
     if progress >= 1.0:
-        st.list_width = st.list_anim_target
-        st.list_anim_active = False
+        st.list.width = st.list.anim_target
+        st.list.anim_active = False
     else:
         _schedule_list_anim_redraw(st)
 
@@ -597,10 +598,10 @@ def _type_list_cache_key(st: MinimapState, settings, colors: dict, master_alpha:
         _theme_rgba(f"node_editor.{attr}", colors["node"])[:3] for attr in _COLOR_TAG_TO_THEME_ATTR.values()
     )
     return (
-        st.tree_data_version,
+        st.cache.tree_version,
         getattr(settings, "type_list_sort", "COUNT"),
         getattr(settings, "colored_nodes", True),
-        frozenset(st.list_expanded),
+        frozenset(st.list.expanded),
         ui_scale,
         master_alpha,
         tuple(colors["node"]),
@@ -617,7 +618,7 @@ def _build_type_list_cache(
     origin, y downward from the top row at scroll=0 — so scrolling and width
     animation only move the matrix translate, never rebuild the batch.
     """
-    tree_data = st.tree_data or {}
+    tree_data = st.cache.tree_data or {}
     type_stats = tree_data.get("type_stats") or {}
 
     font_id = STATS_FONT_ID
@@ -642,11 +643,16 @@ def _build_type_list_cache(
 
     # Icons (swatch / +/− / child circle) are drawn live in _draw_type_list so
     # selection and active state can recolor them per frame; no baked batch.
-    st.list_cache_key = key
-    st.cached_list_entries = entries
-    st.cached_list_children = tree_data.get("type_nodes") or {}
-    st.cached_list_layout = {"font_size": font_size, "line_h": line_h, "row_h": row_h, "widest_count": widest_count}
-    st.cached_list_swatches_batch = None
+    st.cache.list_key = key
+    st.cache.list_entries = entries
+    st.cache.list_children = tree_data.get("type_nodes") or {}
+    st.cache.list_layout = {
+        "font_size": font_size,
+        "line_h": line_h,
+        "row_h": row_h,
+        "widest_count": widest_count,
+    }
+    st.cache.list_swatches_batch = None
 
 
 def _iter_type_list_layout(
@@ -685,42 +691,42 @@ def _draw_type_list(
     ui_scale: float,
 ) -> None:
     """Draw the interactive node-type list zone along the minimap's left edge."""
-    st.list_row_rects = []
-    st.list_node_rects = []
-    st.list_toggle_rects = {}
-    st.list_scroll_max = 0.0
+    st.list.row_rects = []
+    st.list.node_rects = []
+    st.list.toggle_rects = {}
+    st.list.scroll_max = 0.0
     # Drawn whenever the zone has width, including while it animates shut,
     # so the content slides out with the panel instead of vanishing.
-    if st.list_width <= 0:
-        st.hovered_type_label = None
-        st.hovered_list_node = None
-        st.hovered_list_scrollbar = False
-        st.list_scrollbar_thumb = None
-        st.list_scrollbar_track = None
-        st.list_zone_rect = None
+    if st.list.width <= 0:
+        st.list.hovered_type_label = None
+        st.interaction.hovered_node = None
+        st.list.hovered_scrollbar = False
+        st.list.scrollbar_thumb = None
+        st.list.scrollbar_track = None
+        st.list.zone_rect = None
         return
-    tree_data = st.tree_data
+    tree_data = st.cache.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
-        st.hovered_type_label = None
-        st.hovered_list_node = None
-        st.hovered_list_scrollbar = False
-        st.list_scrollbar_thumb = None
-        st.list_scrollbar_track = None
-        st.list_zone_rect = None
+        st.list.hovered_type_label = None
+        st.interaction.hovered_node = None
+        st.list.hovered_scrollbar = False
+        st.list.scrollbar_thumb = None
+        st.list.scrollbar_track = None
+        st.list.zone_rect = None
         return
 
     key = _type_list_cache_key(st, settings, colors, master_alpha, ui_scale)
-    if key != st.list_cache_key or not st.cached_list_layout:
+    if key != st.cache.list_key or not st.cache.list_layout:
         with _Timer("type_list_cache_build"):
             _build_type_list_cache(st, settings, key, colors, master_alpha, ui_scale)
-    entries = st.cached_list_entries or []
-    layout = st.cached_list_layout or {}
+    entries = st.cache.list_entries or []
+    layout = st.cache.list_layout or {}
     font_size = layout.get("font_size", int(getattr(settings, "type_list_font_size", STATS_FONT_SIZE) * ui_scale))
     row_h = layout.get("row_h", 16.0)
     line_h = layout.get("line_h", 12.0)
     widest_count = layout.get("widest_count", 0.0)
-    st.list_row_h = row_h
+    st.list.row_height = row_h
 
     pad_x = _LIST_PAD_X * ui_scale
     swatch = _LIST_SWATCH * ui_scale
@@ -731,19 +737,19 @@ def _draw_type_list(
     # Compute total rows height so the background can shrink-wrap when the
     # list is shorter than the minimap.
     row_pad_v = 3 * ui_scale
-    _children = st.cached_list_children or {}
+    _children = st.cache.list_children or {}
     total_h = 0.0
-    for _ in _iter_type_list_layout(entries, _children, st.list_expanded, row_h):
+    for _ in _iter_type_list_layout(entries, _children, st.list.expanded, row_h):
         total_h += row_h
 
     # Zone geometry: inset by the resize-handle thickness so edge resize
     # borders stay reachable around the list
     handle_pad = _HANDLE_THICKNESS * ui_scale
     zone_x = mx + handle_pad
-    zone_w = mx + padding + st.list_width - 2 * ui_scale - zone_x
+    zone_w = mx + padding + st.list.width - 2 * ui_scale - zone_x
     zone_h = min(mh - 2 * handle_pad, total_h + 2 * row_pad_v)
     zone_y = my + mh - zone_h - handle_pad
-    st.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
+    st.list.zone_rect = (zone_x, zone_y, zone_w, zone_h)
 
     zone_r = colors.get("panel_roundness", 4.0) * 0.6
     _draw_filled_rounded_rect(zone_x, zone_y, zone_w, zone_h, zone_r, _alpha_mul(colors["bg"], master_alpha))
@@ -756,8 +762,8 @@ def _draw_type_list(
     view_b = zone_y + row_pad_v
     view_h = max(view_t - view_b, row_h)
     scroll_max = max(0.0, total_h - view_h)
-    st.list_scroll = min(max(st.list_scroll, 0.0), scroll_max)
-    st.list_scroll_max = scroll_max
+    st.list.scroll = min(max(st.list.scroll, 0.0), scroll_max)
+    st.list.scroll_max = scroll_max
 
     show_type_colors = getattr(settings, "show_type_colors", True) and getattr(settings, "colored_nodes", True)
 
@@ -801,16 +807,16 @@ def _draw_type_list(
         gpu.state.blend_set("ALPHA")
 
         entry_map = {lbl: (ct, cw, cnt) for (lbl, ct, cw, cnt) in entries}
-        expanded = st.list_expanded
-        hovered = st.hovered_type_label
-        hovered_child = st.hovered_list_node
+        expanded = st.list.expanded
+        hovered = st.list.hovered_type_label
+        hovered_child = st.interaction.hovered_node
 
         # Walk the shared layout model; cull rows outside the viewport.
         visible_rows = []
         for row_idx, (kind, label, node_name, local_y) in enumerate(
             _iter_type_list_layout(entries, _children, expanded, row_h)
         ):
-            s_top = view_t + st.list_scroll + local_y
+            s_top = view_t + st.list.scroll + local_y
             s_bottom = s_top - row_h
             if s_top <= view_b or s_bottom >= view_t:
                 continue
@@ -838,8 +844,8 @@ def _draw_type_list(
             header_rects.append((pill_x, s_bottom, pill_w, row_h, label))
             if entry_map.get(label, ("", 0.0, 1))[2] > 1:
                 toggle_rects[label] = (content_x, s_bottom, swatch + swatch_gap, row_h)
-        st.list_row_rects = header_rects
-        st.list_toggle_rects = toggle_rects
+        st.list.row_rects = header_rects
+        st.list.toggle_rects = toggle_rects
 
         # Active child hit-test lookups run up here so the outline can be drawn
         # in this pre-text pass (BLF disables alpha blending after glyph draws).
@@ -863,7 +869,7 @@ def _draw_type_list(
             if child_active:
                 _draw_rounded_rect_border(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, sel_col, 0.5 * ui_scale)
             child_rects.append((pill_x, s_bottom, pill_w, row_h, label, node_name))
-        st.list_node_rects = child_rects
+        st.list.node_rects = child_rects
 
         # Hoisted BLF state (size, shadow, clip box); calling the shared text
         # helper per row would redo this setup twice per visible row.
@@ -982,14 +988,14 @@ def _draw_type_list(
             pass
 
     # Scrollbar thumb when the list overflows (same style as the map scrollbars)
-    st.list_scrollbar_thumb = None
-    st.list_scrollbar_track = None
+    st.list.scrollbar_thumb = None
+    st.list.scrollbar_track = None
     if scroll_max > 0:
         gpu.state.blend_set("ALPHA")
         _bar_thick, bar_off = _get_scrollbar_style(ui_scale)
-        frac = st.list_scroll / scroll_max
+        frac = st.list.scroll / scroll_max
         # Hover and drag share one expanded look (Blender overlay style).
-        active = st.hovered_list_scrollbar or st.list_scroll_dragging
+        active = st.list.hovered_scrollbar or st.list.scrollbar_dragging
         thick = _scrollbar_thickness(ui_scale, active)
         thumb_rect, track_rect = _draw_scrollbar_thumb(
             zone_x + zone_w - thick - bar_off,
@@ -1002,8 +1008,8 @@ def _draw_type_list(
             ui_scale,
             active=active,
         )
-        st.list_scrollbar_thumb = thumb_rect
-        st.list_scrollbar_track = track_rect
+        st.list.scrollbar_thumb = thumb_rect
+        st.list.scrollbar_track = track_rect
 
 
 def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
@@ -1024,48 +1030,48 @@ def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
 def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
     """Timer callback: compile tree data after fingerprint settles, then force redraw.
 
-    When ``st.pending_settle_flush`` is set (drag position refreshes happened),
+    When ``st.cache.pending_settle_flush`` is set (drag position refreshes happened),
     an unchanged fingerprint only needs the tree-data generation bumped so
     frozen wire/marker batches snap to the already-patched positions. A
     position-only diff is patched incrementally; anything else recompiles.
     """
     include_selection = getattr(settings, "show_node_borders", True)
     current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
-    old_fingerprint = st.cached_fingerprint
+    old_fingerprint = st.cache.fingerprint
     unchanged = old_fingerprint == current_fingerprint
     trace = logger.isEnabledFor(TRACE_LEVEL)
-    if unchanged and not st.pending_settle_flush:
-        st.pending_timer = None
-        st.pending_timer_deadline = 0.0
-        st.pending_fingerprint = None
+    if unchanged and not st.cache.pending_settle_flush:
+        st.cache.pending_timer = None
+        st.cache.pending_timer_deadline = 0.0
+        st.cache.pending_fingerprint = None
         if trace:
             logger.trace("SETTLE skip: fingerprint unchanged, nothing pending")
         return None
     applied = False
     path = "compile"
-    if unchanged and st.tree_data:
+    if unchanged and st.cache.tree_data:
         # Positions were fully patched by _apply_move_updates; rebaking the
         # frozen wire/marker generation skips the full recompile.
-        st.tree_data_version += 1
+        st.cache.tree_version += 1
         applied = True
         path = "settle_bump"
-    elif _is_move_only_diff(old_fingerprint, current_fingerprint) and st.tree_data:
+    elif _is_move_only_diff(old_fingerprint, current_fingerprint) and st.cache.tree_data:
         with _Timer("move_update"):
             applied = _apply_move_updates(st, node_tree)
         if applied:
-            st.cached_fingerprint = current_fingerprint
+            st.cache.fingerprint = current_fingerprint
             # Movement settled: unfreeze wire/marker batches so they snap to
             # the patched positions without a full recompile.
-            st.tree_data_version += 1
+            st.cache.tree_version += 1
             path = "move_patch"
     if not applied:
         with _Timer("compile_tree"):
             _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale)
-            st.cached_fingerprint = current_fingerprint
-    st.pending_timer = None
-    st.pending_timer_deadline = 0.0
-    st.pending_fingerprint = None
-    st.pending_settle_flush = False
+            st.cache.fingerprint = current_fingerprint
+    st.cache.pending_timer = None
+    st.cache.pending_timer_deadline = 0.0
+    st.cache.pending_fingerprint = None
+    st.cache.pending_settle_flush = False
     if trace:
         logger.trace("SETTLE %s", path)
     screen = bpy.context.screen
@@ -1084,11 +1090,11 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     are NOT applied here — content batches are baked in map-local space
     by ``_ensure_minimap_batches()`` and placed with a matrix transform.
 
-    Stores result in ``st.tree_data``.
+    Stores result in ``st.cache.tree_data``.
     """
     nodes = node_tree.nodes
     active_node = nodes.active
-    zoom = st.zoom
+    zoom = st.view.zoom
 
     tree_data: dict = {}
 
@@ -1474,9 +1480,9 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     # Persisted so position-only refreshes skip the links RNA pass entirely
     tree_data["raw_links"] = raw_links
     tree_data["wire_items"] = wire_items
-    st.tree_data = tree_data
-    st.tree_data_version += 1
-    st.pos_data_version += 1
+    st.cache.tree_data = tree_data
+    st.cache.tree_version += 1
+    st.cache.position_version += 1
 
 
 def _extract_raw_links(node_tree) -> list[tuple[str, str, str, str]]:
@@ -1544,7 +1550,7 @@ def _apply_move_updates(st: MinimapState, node_tree) -> bool:
     Returns True when applied; False when cached tables are missing and a
     full recompile is required.
     """
-    tree_data = st.tree_data
+    tree_data = st.cache.tree_data
     if not tree_data:
         return False
     infos = tree_data.get("node_infos")
@@ -1706,7 +1712,7 @@ def _apply_move_updates(st: MinimapState, node_tree) -> bool:
             if trace:
                 t1 = time.perf_counter()
             tree_data["wire_items"] = _resolve_wire_items(raw_links, out_pos, in_pos)
-            st.pos_data_version += 1
+            st.cache.position_version += 1
             if trace:
                 wires_t = time.perf_counter() - t1
         if trace:
@@ -1740,9 +1746,9 @@ def _ensure_minimap_batches(
     the scale drifts past the bucket width (radius/thickness/font buckets),
     styling keys change, or the anchor drifts too far for culling to stay
     conservative. When *highlight_border* is an RGBA color, nodes whose type
-    matches ``st.hovered_type_label`` get a highlighted border.
+    matches ``st.list.hovered_type_label`` get a highlighted border.
     """
-    tree_data = st.tree_data
+    tree_data = st.cache.tree_data
     if tree_data is None:
         return
     origin = tree_data.get("origin")
@@ -1750,22 +1756,22 @@ def _ensure_minimap_batches(
         return
 
     key = (
-        st.pos_data_version,
+        st.cache.position_version,
         round(ui_scale, 3),
         show_borders,
-        st.hovered_type_label,
-        st.hovered_node,
+        st.list.hovered_type_label,
+        st.interaction.hovered_node,
         bool(highlight_border),
     )
-    sb = st.batch_scale
-    anchor_x, anchor_y = st.batch_anchor
+    sb = st.cache.batch_scale
+    anchor_x, anchor_y = st.cache.batch_anchor
     # A settle bump changes only tree_data_version, so wire/marker freshness
     # must gate the early return too — otherwise wires stay frozen at their
     # pre-drag positions until an unrelated rebuild trigger fires.
-    wire_key = (st.tree_data_version, round(ui_scale, 3))
-    wires_fresh = wire_key == st.wire_cache_key and st.wire_scale == sb
+    wire_key = (st.cache.tree_version, round(ui_scale, 3))
+    wires_fresh = wire_key == st.cache.wire_key and st.cache.wire_scale == sb
     if (
-        key == st.batch_cache_key
+        key == st.cache.batch_key
         and wires_fresh
         and sb > 0.0
         and abs(scale - sb) <= _SCALE_REBUILD_REL * max(sb, 1e-6)
@@ -1778,7 +1784,7 @@ def _ensure_minimap_batches(
     # Sticky bake scale: adopt the live scale only when the drift budget is
     # exceeded, so fill and wire generations always share one bake scale
     # (and thus one content-matrix factor) between bucket crossings.
-    prev_sb = st.batch_scale
+    prev_sb = st.cache.batch_scale
     if prev_sb > 0.0 and abs(scale - prev_sb) <= _SCALE_REBUILD_REL * max(prev_sb, 1e-6):
         sb = prev_sb
     else:
@@ -1787,8 +1793,8 @@ def _ensure_minimap_batches(
     font_id = 0
     min_dim = 3.0 * ui_scale
     node_infos = tree_data["node_infos"]
-    hovered_type = st.hovered_type_label
-    hovered_node_name = st.hovered_node
+    hovered_type = st.list.hovered_type_label
+    hovered_node_name = st.interaction.hovered_node
     hl_color = None
     if (hovered_type or hovered_node_name) and highlight_border is not None:
         hl_color = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
@@ -2000,7 +2006,7 @@ def _ensure_minimap_batches(
     num_fills = len(all_pos_fill) // 4
     if num_fills > 0:
         shader = _get_batch_rect_shader()
-        st.cached_backdrops_batch = batch_for_shader(
+        st.cache.backdrops_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -2013,12 +2019,12 @@ def _ensure_minimap_batches(
             indices=_create_quad_indices(num_fills),
         )
     else:
-        st.cached_backdrops_batch = None
+        st.cache.backdrops_batch = None
 
     num_borders = len(all_pos_border) // 4
     if num_borders > 0:
         shader = _get_batch_rect_border_shader()
-        st.cached_borders_batch = batch_for_shader(
+        st.cache.borders_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -2032,12 +2038,12 @@ def _ensure_minimap_batches(
             indices=_create_quad_indices(num_borders),
         )
     else:
-        st.cached_borders_batch = None
+        st.cache.borders_batch = None
 
     num_frame_fills = len(frame_pos_fill) // 4
     if num_frame_fills > 0:
         shader = _get_batch_rect_shader()
-        st.cached_frames_fill_batch = batch_for_shader(
+        st.cache.frames_fill_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -2050,12 +2056,12 @@ def _ensure_minimap_batches(
             indices=_create_quad_indices(num_frame_fills),
         )
     else:
-        st.cached_frames_fill_batch = None
+        st.cache.frames_fill_batch = None
 
     num_frame_borders = len(frame_pos_border) // 4
     if num_frame_borders > 0:
         shader = _get_batch_rect_border_shader()
-        st.cached_frames_border_batch = batch_for_shader(
+        st.cache.frames_border_batch = batch_for_shader(
             shader,
             "TRIS",
             {
@@ -2069,14 +2075,14 @@ def _ensure_minimap_batches(
             indices=_create_quad_indices(num_frame_borders),
         )
     else:
-        st.cached_frames_border_batch = None
+        st.cache.frames_border_batch = None
 
-    st.cached_text = cached_text
+    st.cache.text = cached_text
 
     # Sockets — unified batch with per-vertex color + auto-hide by zoom
     ph = max(1, tree_data["socket_ph_base"] * sb * ui_scale)
     pw = ph
-    st.cached_socket_ph = ph
+    st.cache.socket_ph = ph
     if tree_data["socket_items"] and scale >= _MIN_SOCKET_SCALE:
         half_w = pw / 2
         half_h = ph / 2
@@ -2114,7 +2120,7 @@ def _ensure_minimap_batches(
         num_s = len(socket_all_pos) // 4
         if num_s > 0:
             shader = _get_batch_rect_shader()
-            st.cached_socket_batch = batch_for_shader(
+            st.cache.socket_batch = batch_for_shader(
                 shader,
                 "TRIS",
                 {
@@ -2127,22 +2133,22 @@ def _ensure_minimap_batches(
                 indices=_create_quad_indices(num_s),
             )
         else:
-            st.cached_socket_batch = None
+            st.cache.socket_batch = None
     else:
-        st.cached_socket_batch = None
+        st.cache.socket_batch = None
 
     # Wires and markers get their own cache generation so position-only
     # refreshes (drags) skip the O(links) pill rebake entirely. Rebuilds
     # track the sticky bake scale exactly, keeping the shared matrix factor
     # consistent.
-    if wire_key != st.wire_cache_key or st.wire_scale != sb:
+    if wire_key != st.cache.wire_key or st.cache.wire_scale != sb:
         _rebuild_wire_marker_batches(st, tree_data, ocx, ocy, sb, ui_scale, min_dim)
-        st.wire_cache_key = wire_key
-        st.wire_scale = sb
+        st.cache.wire_key = wire_key
+        st.cache.wire_scale = sb
 
-    st.batch_cache_key = key
-    st.batch_scale = sb
-    st.batch_anchor = (cx, cy)
+    st.cache.batch_key = key
+    st.cache.batch_scale = sb
+    st.cache.batch_anchor = (cx, cy)
 
 
 def _rebuild_wire_marker_batches(
@@ -2187,8 +2193,8 @@ def _rebuild_wire_marker_batches(
     shadow_batch = None
     if shadow_points:
         _shadow_shader, shadow_batch = _build_pill_batch(shadow_points, thickness * 2.5)
-    st.cached_wire_batches = wire_batches
-    st.cached_wire_shadow_batch = shadow_batch
+    st.cache.wire_batches = wire_batches
+    st.cache.wire_shadow_batch = shadow_batch
 
     # Group node underline markers — baked like wires
     marker_batches = []
@@ -2209,7 +2215,7 @@ def _rebuild_wire_marker_batches(
                 _mshader, mbatch = _build_pill_batch(group, marker_thick)
                 if mbatch is not None:
                     marker_batches.append((marker_color, mbatch))
-    st.cached_marker_batches = marker_batches
+    st.cache.marker_batches = marker_batches
 
 
 def _get_scrollbar_style(ui_scale: float) -> tuple[int, int]:
@@ -2452,7 +2458,7 @@ def _get_visible_minimap_buttons(settings) -> list[str]:
     """Return ids of enabled minimap buttons in draw order."""
     if not settings or not getattr(settings, "interactive", True):
         return []
-    return [btn_id for btn_id, pref_attr, _state_attr in _MINIMAP_BUTTONS if getattr(settings, pref_attr, True)]
+    return [btn_id for btn_id, pref_attr in _MINIMAP_BUTTONS if getattr(settings, pref_attr, True)]
 
 
 def _layout_minimap_buttons(
@@ -2481,7 +2487,7 @@ def _layout_minimap_buttons(
     for btn_id in visible_ids:
         if btn_id == "LIST":
             lx = round(mx + padding + margin)
-            if st.list_width > 0:
+            if st.list.width > 0:
                 # Slide right of the list zone: list, padding, button.
                 lx = max(lx, round(_get_map_content_rect(st)[0] + margin))
             rects[btn_id] = (lx, top_y, size)
@@ -2496,10 +2502,7 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
     addon = bpy.context.preferences.addons.get(__package__)
     settings = getattr(addon.preferences, "settings", None) if addon else None
     st = _state()
-    st.frame_all_btn = None
-    st.frame_view_btn = None
-    st.frame_selected_btn = None
-    st.list_toggle_btn = None
+    st.buttons.rects.clear()
 
     visible_ids = _get_visible_minimap_buttons(settings)
     if not visible_ids:
@@ -2517,7 +2520,7 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
         _draw_pill(sx, sy, size, span_h, bg_color)
         _draw_pill_border(sx, sy, size, span_h, border_color, 0.5)
 
-    for btn_id, _pref_attr, state_attr in _MINIMAP_BUTTONS:
+    for btn_id, _pref_attr in _MINIMAP_BUTTONS:
         if btn_id not in rects:
             continue
         bx, by, size = rects[btn_id]
@@ -2525,13 +2528,13 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
             # Standalone capsule outside the shared stack
             _draw_pill(bx, by, size, size, bg_color)
             _draw_pill_border(bx, by, size, size, border_color, 0.5)
-        hovered = st.hovered_frame_btn == btn_id
+        hovered = st.buttons.hovered == btn_id
         ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
         if hovered:
             _draw_pill(bx + 1, by + 1, size - 2, size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
             ico_color = _alpha_mul(colors["text"], master_alpha)
         _BUTTON_ICONS[btn_id](bx, by, size, ico_color, ui_scale)
-        setattr(st, state_attr, (bx, by, size, size))
+        st.buttons.rects[btn_id] = (bx, by, size, size)
 
 
 def draw_minimap() -> None:
@@ -2626,10 +2629,10 @@ def draw_minimap() -> None:
 
         bounds = _expand_bounds_margin(raw_bounds, ui_scale, mh, padding)
 
-        st.rect = (mx, my, mw, mh)
-        st.tree_bounds = bounds
-        st.margin = y_margin
-        st.padding = padding
+        st.view.rect = (mx, my, mw, mh)
+        st.view.tree_bounds = bounds
+        st.view.margin = y_margin
+        st.view.padding = padding
 
         # Reserve the type-list zone before computing the map transform so
         # node framing and panning never place tree content behind the list.
@@ -2640,18 +2643,18 @@ def draw_minimap() -> None:
 
     # Refresh tree data: pure position changes (node drags) patch the cached
     # tables immediately; anything else schedules a debounced full compile.
-    old_fingerprint = st.cached_fingerprint
+    old_fingerprint = st.cache.fingerprint
     if old_fingerprint != current_fingerprint:
         move_only = _is_move_only_diff(old_fingerprint, current_fingerprint)
         applied = False
-        if move_only and (time.perf_counter() - st.last_move_refresh) >= _MOVE_REFRESH_MIN_INTERVAL:
+        if move_only and (time.perf_counter() - st.cache.last_move_refresh) >= _MOVE_REFRESH_MIN_INTERVAL:
             with _Timer("apply_move_updates"):
                 applied = _apply_move_updates(st, node_tree)
             if applied:
-                st.last_move_refresh = time.perf_counter()
-                st.pending_settle_flush = True
+                st.cache.last_move_refresh = time.perf_counter()
+                st.cache.pending_settle_flush = True
         if applied:
-            st.cached_fingerprint = current_fingerprint
+            st.cache.fingerprint = current_fingerprint
         # Always keep a settle timer armed: it flushes frozen wire/marker
         # batches (forced via pending_settle_flush) or runs the pending full
         # compile. Re-arm (push back) only when the fingerprint changed again
@@ -2660,14 +2663,14 @@ def draw_minimap() -> None:
         # starved by continuous redraws.
         delay = getattr(settings, "debounce_interval", 0.15)
         now = time.perf_counter()
-        if st.pending_timer is not None and st.pending_fingerprint != current_fingerprint:
-            if now < st.pending_timer_deadline:
+        if st.cache.pending_timer is not None and st.cache.pending_fingerprint != current_fingerprint:
+            if now < st.cache.pending_timer_deadline:
                 try:
-                    bpy.app.timers.unregister(st.pending_timer)
+                    bpy.app.timers.unregister(st.cache.pending_timer)
                 except ValueError:
                     pass
-                st.pending_timer = None
-        if st.pending_timer is None:
+                st.cache.pending_timer = None
+        if st.cache.pending_timer is None:
 
             def _settle_fire():
                 return _debounced_compile(st, node_tree, colors, settings, master_alpha, ui_scale)
@@ -2676,20 +2679,29 @@ def draw_minimap() -> None:
             # target width; compile immediately instead of after the debounce.
             # List click actions also request an immediate compile so the visual
             # feedback is not delayed by the debounce interval.
-            immediate = (st.list_anim_active and st.list_anim_target < 0) or st.force_immediate_compile
+            immediate = (st.list.anim_active and st.list.anim_target < 0) or st.cache.force_immediate
             interval = 0.0 if immediate else delay
             bpy.app.timers.register(_settle_fire, first_interval=interval)
-            st.pending_timer = _settle_fire
-            st.pending_timer_deadline = now + delay
-            st.pending_fingerprint = current_fingerprint
-            st.force_immediate_compile = False
+            st.cache.pending_timer = _settle_fire
+            st.cache.pending_timer_deadline = now + delay
+            st.cache.pending_fingerprint = current_fingerprint
+            st.cache.force_immediate = False
 
     # Build screen-space batches (cached; applies current zoom/pan via matrix)
+    # When a structural preference changed, _batches_dirty forces a batch
+    # rebuild using the existing tree_data (which still reflects the old
+    # settings). The debounce timer will recompile tree_data on the next
+    # event-loop iteration, producing a second rebuild with fresh data.
+    if st.cache._batches_dirty:
+        st.cache._batches_dirty = False
+        st.cache.position_version += 1
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region, visible)
-    st.scale = scale
+    st.view.scale = scale
     with _Timer("ensure_batches"):
         highlight_border = (
-            _alpha_mul(colors["node_active"], 0.2) if (st.hovered_type_label or st.hovered_node) else None
+            _alpha_mul(colors["node_active"], 0.2)
+            if (st.list.hovered_type_label or st.interaction.hovered_node)
+            else None
         )
         _ensure_minimap_batches(
             st,
@@ -2748,12 +2760,12 @@ def draw_minimap() -> None:
     # Content batches are baked in map-local space; place them with one
     # matrix transform (translate -> scale about the view pivot) instead of
     # rebuilding vertex data on pan/drag frames.
-    origin = st.tree_data.get("origin") if st.tree_data else None
+    origin = st.cache.tree_data.get("origin") if st.cache.tree_data else None
     content_k = 1.0
     piv_x = 0.0
     piv_y = 0.0
     if origin:
-        batch_sb = st.batch_scale if st.batch_scale > 0.0 else scale
+        batch_sb = st.cache.batch_scale if st.cache.batch_scale > 0.0 else scale
         content_k = scale / batch_sb
         piv_x = (tree_cx - origin[0]) * batch_sb
         piv_y = (tree_cy - origin[1]) * batch_sb
@@ -2766,8 +2778,8 @@ def draw_minimap() -> None:
             gpu.matrix.multiply_matrix(content_mat)
 
             # Frame nodes
-            frames_fill_batch = st.cached_frames_fill_batch
-            frames_border_batch = st.cached_frames_border_batch
+            frames_fill_batch = st.cache.frames_fill_batch
+            frames_border_batch = st.cache.frames_border_batch
             if frames_fill_batch or frames_border_batch:
                 with _Timer("draw_frames"):
                     fill_shader = _get_batch_rect_shader()
@@ -2783,8 +2795,8 @@ def draw_minimap() -> None:
                         frames_border_batch.draw(border_shader)
 
             # Link wires (baked batches; shadow underlay first, then colors)
-            wire_batches = st.cached_wire_batches or []
-            wire_shadow_batch = st.cached_wire_shadow_batch
+            wire_batches = st.cache.wire_batches or []
+            wire_shadow_batch = st.cache.wire_shadow_batch
             if getattr(settings, "show_wires", True) and (wire_shadow_batch or wire_batches):
                 with _Timer("draw_wires"):
                     pill_shader = _get_batch_pill_shader()
@@ -2802,7 +2814,7 @@ def draw_minimap() -> None:
                         batch.draw(pill_shader)
 
             # Node fill backgrounds
-            backdrops_batch = st.cached_backdrops_batch
+            backdrops_batch = st.cache.backdrops_batch
             if backdrops_batch:
                 with _Timer("draw_backdrops"):
                     fill_shader = _get_batch_rect_shader()
@@ -2814,7 +2826,7 @@ def draw_minimap() -> None:
                     backdrops_batch.draw(fill_shader)
 
             # Node borders
-            borders_batch = st.cached_borders_batch
+            borders_batch = st.cache.borders_batch
             if borders_batch:
                 with _Timer("draw_borders"):
                     border_shader = _get_batch_rect_border_shader()
@@ -2826,7 +2838,7 @@ def draw_minimap() -> None:
                     borders_batch.draw(border_shader)
 
             # Group node underline markers (baked batches)
-            marker_batches = st.cached_marker_batches or []
+            marker_batches = st.cache.marker_batches or []
             if marker_batches:
                 with _Timer("draw_group_markers"):
                     pill_shader = _get_batch_pill_shader()
@@ -2840,7 +2852,7 @@ def draw_minimap() -> None:
                         batch.draw(pill_shader)
 
             # Socket indicator pills (single batch with per-vertex color)
-            socket_batch = st.cached_socket_batch
+            socket_batch = st.cache.socket_batch
             if getattr(settings, "show_socket_indicators", False) and socket_batch:
                 with _Timer("draw_sockets"):
                     shader = _get_batch_rect_shader()
@@ -2854,7 +2866,7 @@ def draw_minimap() -> None:
             gpu.matrix.pop()
 
     # Text labels — mapped manually so BLF never sees the content matrix
-    cached_text = st.cached_text or []
+    cached_text = st.cache.text or []
     if cached_text and origin:
         with _Timer("draw_text"):
             gpu.state.blend_set("ALPHA")

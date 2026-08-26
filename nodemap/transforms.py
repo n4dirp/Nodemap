@@ -17,10 +17,10 @@ def _get_map_content_rect(st: MinimapState) -> tuple[float, float, float, float]
     Subtracts the type-list zone plus a margin from the left edge so node
     framing and panning never place tree content behind the list.
     """
-    mx, my, mw, mh = st.rect
-    pad = st.padding
-    left_inset = pad + st.list_width
-    if st.list_width > 0:
+    mx, my, mw, mh = st.view.rect
+    pad = st.view.padding
+    left_inset = pad + st.list.width
+    if st.list.width > 0:
         left_inset += 4.0 * _get_ui_scale()
     return mx + left_inset, my + pad, max(mw - pad - left_inset, 1.0), max(mh - 2 * pad, 1.0)
 
@@ -34,7 +34,7 @@ def _compute_base_map_geom(
     tree_cx, tree_cy)`` from the current state. Pure: no prefs lookups, no
     mutation of *st*.
     """
-    bounds = st.tree_bounds
+    bounds = st.view.tree_bounds
     inner_l, inner_b, inner_w, inner_h = _get_map_content_rect(st)
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
@@ -56,9 +56,9 @@ def _compute_map_transform(
     if st is None:
         st = _state()
     inner_l, inner_b, inner_w, inner_h, _bw, _bh, base_scale, tree_cx, tree_cy = _compute_base_map_geom(st)
-    scale = base_scale * st.zoom
-    cx = inner_l + inner_w / 2 + st.pan[0]
-    cy = inner_b + inner_h / 2 + st.pan[1]
+    scale = base_scale * st.view.zoom
+    cx = inner_l + inner_w / 2 + st.view.pan[0]
+    cy = inner_b + inner_h / 2 + st.view.pan[1]
     return cx, cy, scale, tree_cx, tree_cy
 
 
@@ -71,7 +71,7 @@ def _get_minimap_transform(
     """Computes internal transformations representing scale, zoom, and panning inside the minimap."""
     if st is None:
         st = _state()
-    base_zoom = st.base_zoom
+    base_zoom = st.view.base_zoom
     zoom = base_zoom
 
     geom = _compute_base_map_geom(st)
@@ -100,23 +100,23 @@ def _get_minimap_transform(
                 if min_req_zoom < zoom:
                     zoom = min_req_zoom
 
-                st.zoom = zoom
+                st.view.zoom = zoom
                 # Execute clamping passively during draw so panning outside the minimap updates bounds
                 _clamp_pan_to_viewport(space, region, st, visible)
 
-    st.zoom = zoom
-    scale = base_scale * st.zoom
-    cx = inner_l + inner_w / 2 + st.pan[0]
-    cy = inner_b + inner_h / 2 + st.pan[1]
-    tree_cx = (st.tree_bounds[0] + st.tree_bounds[2]) / 2
-    tree_cy = (st.tree_bounds[1] + st.tree_bounds[3]) / 2
+    st.view.zoom = zoom
+    scale = base_scale * st.view.zoom
+    cx = inner_l + inner_w / 2 + st.view.pan[0]
+    cy = inner_b + inner_h / 2 + st.view.pan[1]
+    tree_cx = (st.view.tree_bounds[0] + st.view.tree_bounds[2]) / 2
+    tree_cy = (st.view.tree_bounds[1] + st.view.tree_bounds[3]) / 2
     return cx, cy, scale, tree_cx, tree_cy
 
 
 def _clamp_pan_to_viewport(
     space, region, st: MinimapState, visible: tuple[float, float, float, float] | None = None
 ) -> None:
-    """Clamp *st.pan* so the editor viewport stays inside the minimap (follow mode).
+    """Clamp *st.view.pan* so the editor viewport stays inside the minimap (follow mode).
 
     No-op when the ``follow_view`` preference is off.
     """
@@ -166,10 +166,12 @@ def _clamp_pan_to_viewport(
         elif vy > inner_b:
             dy = inner_b - vy
 
+    pan_x, pan_y = st.view.pan
     if abs(dx) > 0.5:
-        st.pan[0] += dx
+        pan_x += dx
     if abs(dy) > 0.5:
-        st.pan[1] += dy
+        pan_y += dy
+    st.view.pan = (pan_x, pan_y)
 
 
 def _get_visible_rect(

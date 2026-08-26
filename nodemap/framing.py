@@ -25,7 +25,7 @@ def _compute_frame_all_targets(
 ) -> tuple[float, float, float] | None:
     """Compute target zoom and pan to frame the entire node tree.
 
-    Updates ``st.tree_bounds`` immediately (required for correct targets and
+    Updates ``st.view.tree_bounds`` immediately (required for correct targets and
     drawing during animation). Returns ``(zoom, pan_x, pan_y)`` or ``None``
     when data is unavailable.
     """
@@ -42,9 +42,9 @@ def _compute_frame_all_targets(
 
     bounds = _get_node_tree_bounds(node_tree.nodes)
 
-    _, _, _, mh = st.rect
-    bounds = _expand_bounds_margin(bounds, _get_ui_scale(), mh, st.padding)
-    st.tree_bounds = bounds
+    _, _, _, mh = st.view.rect
+    bounds = _expand_bounds_margin(bounds, _get_ui_scale(), mh, st.view.padding)
+    st.view.tree_bounds = bounds
 
     addon = bpy.context.preferences.addons.get(__package__)
     follow = addon and getattr(addon.preferences.settings, "follow_view", False)
@@ -90,9 +90,9 @@ def frame_all(
         return
     st = _state(area_ptr)
     zoom, pan_x, pan_y = targets
-    st.base_zoom = zoom
-    st.zoom = zoom
-    st.pan = [pan_x, pan_y]
+    st.view.base_zoom = zoom
+    st.view.zoom = zoom
+    st.view.pan = (pan_x, pan_y)
     _redraw()
 
 
@@ -137,9 +137,9 @@ def _frame_to_bounds(
     """
     st = _state(area_ptr)
     zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(target_bounds, fill, area_ptr)
-    st.base_zoom = zoom
-    st.zoom = zoom
-    st.pan = [pan_x, pan_y]
+    st.view.base_zoom = zoom
+    st.view.zoom = zoom
+    st.view.pan = (pan_x, pan_y)
     _redraw()
 
 
@@ -197,9 +197,11 @@ def _compute_frame_selected_targets(
         return None
     min_x, min_y, max_x, max_y = bounds
 
-    rect = st.rect
+    rect = st.view.rect
     _, _, mw, mh = rect
-    st.tree_bounds = _expand_bounds_margin(_get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding)
+    st.view.tree_bounds = _expand_bounds_margin(
+        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.view.padding
+    )
 
     if len(selected) > 1 or selected[0].type == "FRAME":
         zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(
@@ -280,9 +282,9 @@ def frame_selected(
     zoom, pan_x, pan_y = targets
     st = _state(area_ptr)
     if zoom is not None:
-        st.base_zoom = zoom
-        st.zoom = zoom
-    st.pan = [pan_x, pan_y]
+        st.view.base_zoom = zoom
+        st.view.zoom = zoom
+    st.view.pan = (pan_x, pan_y)
     _redraw()
 
 
@@ -310,9 +312,11 @@ def frame_view(
     addon = bpy.context.preferences.addons.get(__package__)
     fill = addon and getattr(addon.preferences.settings, "frame_view_fill", False)
 
-    rect = st.rect
+    rect = st.view.rect
     _, _, mw, mh = rect
-    st.tree_bounds = _expand_bounds_margin(_get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.padding)
+    st.view.tree_bounds = _expand_bounds_margin(
+        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.view.padding
+    )
     _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
 
 
