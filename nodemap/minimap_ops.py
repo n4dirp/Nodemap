@@ -439,296 +439,10 @@ class NODEMAP_OT_navigate(Operator):
 
         match event.type:
             case "LEFTMOUSE":
-                # --- Release ---
-                if event.value == "RELEASE":
-                    if st.pressed:
-                        st.pressed = False
-                        self._redraw_ui()
-                    if self._list_scroll_pressed:
-                        self._list_scroll_pressed = False
-                        st.list_scroll_dragging = False
-                        self._list_scroll_grab = 0.0
-                        self._redraw_ui()
-                        return {"RUNNING_MODAL"}
-                    if self._armed_btn:
-                        self._activate_armed_button(context, settings)
-                        return {"RUNNING_MODAL"}
-                    if self._list_child_pressed:
-                        label, node_name = self._list_child_pressed
-                        self._list_child_pressed = None
-                        still_over = _list_child_at(self._mx, self._my, st) == (label, node_name)
-                        if _in_list_zone(self._mx, self._my, st) and still_over:
-                            st.force_immediate_compile = True
-                            self._select_single_node(context, node_name)
-                        return {"RUNNING_MODAL"}
-                    if self._list_toggle_pressed:
-                        label = self._list_toggle_pressed
-                        self._list_toggle_pressed = None
-                        toggle = st.list_toggle_rects.get(label)
-                        if toggle and _in_list_zone(self._mx, self._my, st) and _in_rect(self._mx, self._my, toggle):
-                            if label in st.list_expanded:
-                                st.list_expanded.discard(label)
-                            else:
-                                st.list_expanded.add(label)
-                            st.list_cache_key = None
-                            st.force_immediate_compile = True
-                            self._redraw_ui()
-                        return {"RUNNING_MODAL"}
-                    if self._list_row_pressed:
-                        label = self._list_row_pressed
-                        self._list_row_pressed = None
-                        if _in_list_zone(self._mx, self._my, st) and _list_row_at(self._mx, self._my, st) == label:
-                            st.force_immediate_compile = True
-                            self._select_type_nodes(context, label)
-                        return {"RUNNING_MODAL"}
-                    if self._resize_handle:
-                        self._resize_handle = None
-                        self._resize_start_mouse = None
-                        self._resize_start_values = None
-                        context.window.cursor_modal_set("DEFAULT")
-                        self._last_cursor = ""
-                        st.width_clamped = False
-                        st.height_clamped = False
-                        st.hovered_handle = None
-                        st.resize_active = None
-                        self._redraw_ui()
-                        return {"RUNNING_MODAL"}
-                    if self._dragging:
-                        self._dragging = False
-                        self._drag_start = None
-                        if self._drag_active:
-                            self._pan_acc[0] += self._drag_target[0]
-                            self._pan_acc[1] += self._drag_target[1]
-                            self._drag_target = [0.0, 0.0]
-                            self._drag_active = False
-                        if settings and self._animations_enabled(settings, context):
-                            speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
-                            if speed > 2.0:
-                                self._inertia_active = True
-                                self._inertia_mode = "VIEW"
-                                if not self._smooth_timer:
-                                    self._create_timer(context)
-                                return {"RUNNING_MODAL"}
-                        self._smooth_velocity = [0.0, 0.0]
-                        pan_x = int(self._pan_acc[0])
-                        pan_y = int(self._pan_acc[1])
-                        self._pan_acc = [0.0, 0.0]
-                        if pan_x != 0 or pan_y != 0:
-                            try:
-                                with self._override_ctx(context):
-                                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                            except RuntimeError:
-                                pass
-                        self._destroy_timer(context)
-                        return {"RUNNING_MODAL"}
-                    if not self._dragging and self._was_in_minimap:
-                        if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                            st.force_immediate_compile = True
-                            self._handle_click_selection(
-                                context, event, st, frame=settings.left_click_action == "SELECT_FRAME"
-                            )
-                        self._was_in_minimap = False
-                        self._drag_start = None
-                        return {"RUNNING_MODAL"}
-                    self._was_in_minimap = False
-                    self._drag_start = None
-                    return {"PASS_THROUGH"}
-                # --- Press ---
-                self._was_in_minimap = in_minimap
-                if self._was_in_minimap:
-                    self._cancel_smooth(context)
-                    armed = _frame_btn_at(self._mx, self._my, st)
-                    if armed:
-                        self._armed_btn = armed
-                        return {"RUNNING_MODAL"}
-                    if _in_list_zone(self._mx, self._my, st):
-                        track = st.list_scrollbar_track
-                        thumb = st.list_scrollbar_thumb
-                        if _list_scrollbar_hit(self._mx, self._my, st) and track and thumb:
-                            thumb_top = thumb[1] + thumb[3]
-                            if thumb[1] <= self._my <= thumb_top:
-                                # Direct grab: keep the pressed point pinned to the cursor.
-                                self._list_scroll_grab = thumb_top - self._my
-                            else:
-                                # Trough click pages one track-length toward the
-                                # click, then continues as a drag from there.
-                                # Note: y grows upward but larger list_scroll
-                                # shifts content down, so a click above the
-                                # thumb decreases the scroll.
-                                if self._my > thumb_top:
-                                    st.list_scroll = max(st.list_scroll - track[3], 0.0)
-                                else:
-                                    st.list_scroll = min(st.list_scroll + track[3], st.list_scroll_max)
-                                span = max(track[3] - thumb[3], 1.0)
-                                offset = min(span * (1.0 - st.list_scroll / st.list_scroll_max), span)
-                                self._list_scroll_grab = track[1] + offset + thumb[3] - self._my
-                            self._list_scroll_pressed = True
-                            st.list_scroll_dragging = True
-                            self._redraw_ui()
-                            return {"RUNNING_MODAL"}
-                        child = _list_child_at(self._mx, self._my, st)
-                        if child:
-                            self._list_child_pressed = child
-                        else:
-                            label = _list_row_at(self._mx, self._my, st)
-                            if label:
-                                toggle = st.list_toggle_rects.get(label)
-                                if toggle and _in_rect(self._mx, self._my, toggle):
-                                    self._list_toggle_pressed = label
-                                else:
-                                    self._list_row_pressed = label
-                        return {"RUNNING_MODAL"}
-                    if addon:
-                        handle = self._get_handle_at(context, event)
-                        if handle:
-                            self._resize_handle = handle
-                            st.resize_active = handle
-                            self._redraw_ui()
-                            self._resize_start_mouse = (self._mx, self._my)
-                            _ui_scale = _get_ui_scale()
-                            rmx, rmy, rmw, rmh = st.rect
-                            self._resize_start_values = (
-                                int(rmw / _ui_scale),
-                                int(rmh / _ui_scale),
-                            )
-                            cursor = _CURSOR_MAP[handle]
-                            context.window.cursor_modal_set(cursor)
-                            self._last_cursor = cursor
-                            return {"RUNNING_MODAL"}
-                    if settings and settings.left_click_action in ("PAN", "SELECT_PAN"):
-                        self._drag_start = (self._mx, self._my)
-                        self._center_view_on_mouse(context, self._mx, self._my)
-                    return {"RUNNING_MODAL"}
-                else:
-                    self._drag_start = None
-                    return {"PASS_THROUGH"}
+                return self._handle_left_mouse(context, event)
 
             case "RIGHTMOUSE":
-                # --- Release ---
-                if event.value == "RELEASE":
-                    if st.pressed:
-                        st.pressed = False
-                        self._redraw_ui()
-                    if self._resize_handle:
-                        self._resize_handle = None
-                        self._resize_start_mouse = None
-                        self._resize_start_values = None
-                        context.window.cursor_modal_set("DEFAULT")
-                        self._last_cursor = ""
-                        st.width_clamped = False
-                        st.height_clamped = False
-                        st.hovered_handle = None
-                        st.resize_active = None
-                        self._redraw_ui()
-                        return {"RUNNING_MODAL"}
-                    if self._dragging:
-                        self._dragging = False
-                        self._drag_start = None
-                        if self._drag_active:
-                            self._pan_acc[0] += self._drag_target[0]
-                            self._pan_acc[1] += self._drag_target[1]
-                            self._drag_target = [0.0, 0.0]
-                            self._drag_active = False
-                        if settings and self._animations_enabled(settings, context):
-                            speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
-                            if speed > 2.0:
-                                self._inertia_active = True
-                                self._inertia_mode = "VIEW"
-                                if not self._smooth_timer:
-                                    self._create_timer(context)
-                                return {"RUNNING_MODAL"}
-                        self._smooth_velocity = [0.0, 0.0]
-                        pan_x = int(self._pan_acc[0])
-                        pan_y = int(self._pan_acc[1])
-                        self._pan_acc = [0.0, 0.0]
-                        if pan_x != 0 or pan_y != 0:
-                            try:
-                                with self._override_ctx(context):
-                                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                            except RuntimeError:
-                                pass
-                        self._destroy_timer(context)
-                        return {"RUNNING_MODAL"}
-                    if not self._dragging and self._was_in_minimap and not _in_list_zone(self._mx, self._my, st):
-                        if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                            st.force_immediate_compile = True
-                            self._handle_click_selection(
-                                context, event, st, frame=settings.right_click_action == "SELECT_FRAME"
-                            )
-                        self._was_in_minimap = False
-                        self._drag_start = None
-                        return {"RUNNING_MODAL"}
-                    self._was_in_minimap = False
-                    self._drag_start = None
-                    return {"PASS_THROUGH"}
-                # --- Press ---
-                self._was_in_minimap = in_minimap
-                if self._was_in_minimap:
-                    self._cancel_smooth(context)
-                    if _in_list_zone(self._mx, self._my, st):
-                        if _list_scrollbar_hit(self._mx, self._my, st):
-                            # Scrollbar owns the press; no row selection or pan.
-                            return {"RUNNING_MODAL"}
-                        child = _list_child_at(self._mx, self._my, st)
-                        if child:
-                            _label, node_name = child
-                            st.force_immediate_compile = True
-                            self._select_single_node(context, node_name)
-                            if not self._view_selected_animated(context, settings):
-                                try:
-                                    with self._override_ctx(context):
-                                        bpy.ops.node.view_selected()
-                                except RuntimeError:
-                                    pass
-                            self._was_in_minimap = False
-                            return {"RUNNING_MODAL"}
-                        label = _list_row_at(self._mx, self._my, st)
-                        if label:
-                            toggle = st.list_toggle_rects.get(label)
-                            if toggle and _in_rect(self._mx, self._my, toggle):
-                                if label in st.list_expanded:
-                                    st.list_expanded.discard(label)
-                                else:
-                                    st.list_expanded.add(label)
-                                st.list_cache_key = None
-                                st.force_immediate_compile = True
-                                self._redraw_ui()
-                                self._was_in_minimap = False
-                                return {"RUNNING_MODAL"}
-                            st.force_immediate_compile = True
-                            self._select_type_nodes(context, label)
-                            if not self._view_selected_animated(context, settings):
-                                try:
-                                    with self._override_ctx(context):
-                                        bpy.ops.node.view_selected()
-                                except RuntimeError:
-                                    pass
-                        self._was_in_minimap = False
-                        return {"RUNNING_MODAL"}
-                    if addon:
-                        handle = self._get_handle_at(context, event)
-                        if handle:
-                            self._resize_handle = handle
-                            st.resize_active = handle
-                            self._redraw_ui()
-                            self._resize_start_mouse = (self._mx, self._my)
-                            _ui_scale = _get_ui_scale()
-                            rmx, rmy, rmw, rmh = st.rect
-                            self._resize_start_values = (
-                                int(rmw / _ui_scale),
-                                int(rmh / _ui_scale),
-                            )
-                            cursor = _CURSOR_MAP[handle]
-                            context.window.cursor_modal_set(cursor)
-                            self._last_cursor = cursor
-                            return {"RUNNING_MODAL"}
-                    if settings and settings.right_click_action in ("PAN", "SELECT_PAN"):
-                        self._drag_start = (self._mx, self._my)
-                        self._center_view_on_mouse(context, self._mx, self._my)
-                    return {"RUNNING_MODAL"}
-                else:
-                    self._drag_start = None
-                    return {"PASS_THROUGH"}
+                return self._handle_right_mouse(context, event)
 
             case "MIDDLEMOUSE":
                 if event.value == "PRESS" and in_minimap:
@@ -767,187 +481,10 @@ class NODEMAP_OT_navigate(Operator):
                 return {"PASS_THROUGH"}
 
             case "MOUSEMOVE":
-                if self._resize_handle:
-                    self._resize_apply_delta(context, event)
-                    self._redraw_ui()
-                    return {"RUNNING_MODAL"}
-                if self._list_scroll_pressed and st.list_scroll_dragging:
-                    _apply_list_scroll_drag(self._mx, self._my, self._list_scroll_grab, st)
-                    self._redraw_ui()
-                    return {"RUNNING_MODAL"}
-                if not self._dragging and not self._mmb_dragging and not self._drag_start:
-                    self._update_cursor(context, event)
-                if not self._dragging and not self._mmb_dragging and not self._resize_handle:
-                    in_list = _in_list_zone(self._mx, self._my, st)
-                    # The scrollbar gutter suppresses row hovers so the bar can
-                    # be approached without flashing the rows underneath.
-                    over_bar = in_list and _list_scrollbar_hit(self._mx, self._my, st)
-                    if st.hovered_list_scrollbar != over_bar:
-                        st.hovered_list_scrollbar = over_bar
-                        self._redraw_ui()
-                    row_label = None if over_bar else (_list_row_at(self._mx, self._my, st) if in_list else None)
-                    child_hover = None if over_bar else (_list_child_at(self._mx, self._my, st) if in_list else None)
-                    if st.hovered_type_label != row_label:
-                        st.hovered_type_label = row_label
-                        self._redraw_ui()
-                    if st.hovered_list_node != child_hover:
-                        st.hovered_list_node = child_hover
-                        self._redraw_ui()
-                    old_hovered = st.hovered_node
-                    new_hovered = None
-                    if in_list:
-                        # Hovering a single child row highlights only that node's
-                        # border on the minimap (not the whole type group).
-                        if child_hover is not None:
-                            new_hovered = child_hover[1]
-                    elif in_minimap:
-                        tree_coord = _region_to_tree(self._mx, self._my, st)
-                        if tree_coord and self._space and self._space.edit_tree:
-                            hovered = _find_node_at(self._space.edit_tree.nodes, tree_coord[0], tree_coord[1])
-                            if hovered:
-                                new_hovered = hovered.name
-                    if old_hovered != new_hovered:
-                        st.hovered_node = new_hovered
-                        self._redraw_ui()
-                    old_btn = st.hovered_frame_btn
-                    new_btn = _frame_btn_at(self._mx, self._my, st) if in_minimap and not in_list else None
-                    if old_btn != new_btn:
-                        st.hovered_frame_btn = new_btn
-                        self._redraw_ui()
-                if self._list_mmb_dragging and self._list_mmb_drag_start:
-                    dy = self._my - self._list_mmb_drag_start[1]
-                    if abs(dy) > 0:
-                        st.list_scroll = min(
-                            max(st.list_scroll - dy, 0.0),
-                            st.list_scroll_max,
-                        )
-                        self._list_mmb_drag_start = (self._mx, self._my)
-                        self._redraw_ui()
-                    return {"RUNNING_MODAL"}
-                if self._mmb_dragging and self._mmb_drag_start:
-                    dx = self._mx - self._mmb_drag_start[0]
-                    dy = self._my - self._mmb_drag_start[1]
-                    if abs(dx) <= 1 and abs(dy) <= 1:
-                        self._smooth_velocity[0] *= 0.15
-                        self._smooth_velocity[1] *= 0.15
-                    else:
-                        self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + dx * 0.4
-                        self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + dy * 0.4
-                    pan_before = st.pan[0], st.pan[1]
-                    st.pan[0] += dx
-                    st.pan[1] += dy
-                    _clamp_pan_to_viewport(self._space, self._region, st)
-                    rejected_x = dx - (st.pan[0] - pan_before[0])
-                    rejected_y = dy - (st.pan[1] - pan_before[1])
-                    if (rejected_x != 0 or rejected_y != 0) and getattr(settings, "follow_view", False):
-                        st.pan[0] = pan_before[0] + dx
-                        st.pan[1] = pan_before[1] + dy
-                        self._redirect_to_view2d(context, -dx, -dy)
-                    elif rejected_x != 0 or rejected_y != 0:
-                        self._redirect_to_view2d(context, -int(rejected_x), -int(rejected_y))
-                    self._mmb_drag_start = (self._mx, self._my)
-                    self._redraw_ui()
-                    return {"RUNNING_MODAL"}
-                if self._drag_start is not None:
-                    dx = self._mx - self._drag_start[0]
-                    dy = self._my - self._drag_start[1]
-                    if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
-                        if not self._dragging and (
-                            self._anim_active or self._frame_anim_active or self._editor_anim_active
-                        ):
-                            self._cancel_smooth(context)
-                        self._dragging = True
-                        if self._was_in_minimap:
-                            st.pressed = True
-                            smooth = settings and self._animations_enabled(settings, context, default=False)
-                            self._pan_view(context, dx, dy, smooth)
-                            self._drag_start = (self._mx, self._my)
-                    return {"RUNNING_MODAL"}
-                if in_minimap:
-                    return {"RUNNING_MODAL"}
-                return {"PASS_THROUGH"}
+                return self._handle_mouse_move(context, event)
 
             case "WHEELUPMOUSE" | "WHEELDOWNMOUSE":
-                if in_minimap and _in_list_zone(self._mx, self._my, st):
-                    direction = -1 if event.type == "WHEELUPMOUSE" else 1
-                    st.list_scroll = min(max(st.list_scroll + direction * st.list_row_h * 3, 0.0), st.list_scroll_max)
-                    over_bar = _list_scrollbar_hit(self._mx, self._my, st)
-                    st.hovered_type_label = None if over_bar else _list_row_at(self._mx, self._my, st)
-                    self._redraw_ui()
-                    return {"RUNNING_MODAL"}
-                if in_minimap:
-                    if event.ctrl or event.shift:
-                        visible = _get_visible_rect(self._space, self._region)
-                        if visible:
-                            ui_scale = _get_ui_scale()
-                            vw = (visible[2] - visible[0]) * ui_scale
-                            vh = (visible[3] - visible[1]) * ui_scale
-                            scroll_factor = 0.05
-                            direction = 1 if event.type == "WHEELUPMOUSE" else -1
-                            pan_x = int(vw * scroll_factor * -direction) if event.ctrl else 0
-                            pan_y = int(vh * scroll_factor * direction) if event.shift else 0
-                            try:
-                                with self._override_ctx(context):
-                                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                            except RuntimeError:
-                                pass
-                        self._redraw_ui()
-                        return {"RUNNING_MODAL"}
-
-                    prefs = addon.preferences.settings if addon else None
-                    scroll_mode = getattr(prefs, "scroll_wheel_mode", "MINIMAP") if prefs else "MINIMAP"
-                    if event.alt:
-                        scroll_mode = "NODE_EDITOR" if scroll_mode == "MINIMAP" else "MINIMAP"
-
-                    if scroll_mode == "NODE_EDITOR":
-                        try:
-                            zoom_factor = 0.05
-                            with self._override_ctx(context):
-                                if event.type == "WHEELUPMOUSE":
-                                    bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
-                                else:
-                                    bpy.ops.view2d.zoom_out(zoomfacx=-zoom_factor, zoomfacy=-zoom_factor)
-                        except RuntimeError:
-                            pass
-                    else:
-                        zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
-                        effective_zoom = st.zoom
-
-                        is_constrained = False
-                        if addon and getattr(addon.preferences.settings, "follow_view", False):
-                            if effective_zoom < st.base_zoom - 0.001:
-                                is_constrained = True
-
-                        if is_constrained and event.type == "WHEELUPMOUSE":
-                            try:
-                                zoom_factor = 0.05
-                                with self._override_ctx(context):
-                                    bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
-                            except RuntimeError:
-                                pass
-                        else:
-                            new_zoom = max(0.1, min(effective_zoom * zoom_delta, 20.0))
-
-                            transform = _get_minimap_transform(st)
-                            tree_coord = _tree_from_region(self._mx, self._my, transform)
-
-                            if transform[2] > 0 and tree_coord is not None:
-                                _, _, scale, tree_cx, tree_cy = transform
-                                base_scale = scale / st.zoom
-                                tx, ty = tree_coord
-                                pan_x, pan_y = st.pan
-
-                                pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - st.zoom)
-                                pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - st.zoom)
-
-                                st.base_zoom = new_zoom
-                                st.zoom = new_zoom
-                                st.pan = [pan_x_new, pan_y_new]
-                                _clamp_pan_to_viewport(self._space, self._region, st)
-
-                    self._redraw_ui()
-                    return {"RUNNING_MODAL"}
-                return {"PASS_THROUGH"}
+                return self._handle_wheel(context, event)
 
             case "HOME":
                 if event.value == "PRESS" and in_minimap:
@@ -978,9 +515,500 @@ class NODEMAP_OT_navigate(Operator):
                     self._apply_center_animation(context)
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
-
             case _:
                 return {"PASS_THROUGH"}
+
+    def _minimap_event_context(self, context: Context):
+        """Resolve the shared per-event values used by the event handlers.
+
+        Returns the minimap state, the add-on (if registered), its settings, and
+        whether the cursor is currently over the minimap.
+        """
+        st = self._st
+        addon = context.preferences.addons.get(__package__)
+        settings = addon.preferences.settings if addon else None
+        in_minimap = _is_in_minimap(self._mx, self._my, st) if st else False
+        return st, addon, settings, in_minimap
+
+    def _handle_left_mouse(self, context: Context, event: Event) -> set[str]:
+        st, addon, settings, in_minimap = self._minimap_event_context(context)
+        # --- Release ---
+        if event.value == "RELEASE":
+            if st.pressed:
+                st.pressed = False
+                self._redraw_ui()
+            if self._list_scroll_pressed:
+                self._list_scroll_pressed = False
+                st.list_scroll_dragging = False
+                self._list_scroll_grab = 0.0
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
+            if self._armed_btn:
+                self._activate_armed_button(context, settings)
+                return {"RUNNING_MODAL"}
+            if self._list_child_pressed:
+                label, node_name = self._list_child_pressed
+                self._list_child_pressed = None
+                still_over = _list_child_at(self._mx, self._my, st) == (label, node_name)
+                if _in_list_zone(self._mx, self._my, st) and still_over:
+                    st.force_immediate_compile = True
+                    self._select_single_node(context, node_name)
+                return {"RUNNING_MODAL"}
+            if self._list_toggle_pressed:
+                label = self._list_toggle_pressed
+                self._list_toggle_pressed = None
+                toggle = st.list_toggle_rects.get(label)
+                if toggle and _in_list_zone(self._mx, self._my, st) and _in_rect(self._mx, self._my, toggle):
+                    if label in st.list_expanded:
+                        st.list_expanded.discard(label)
+                    else:
+                        st.list_expanded.add(label)
+                    st.list_cache_key = None
+                    st.force_immediate_compile = True
+                    self._redraw_ui()
+                return {"RUNNING_MODAL"}
+            if self._list_row_pressed:
+                label = self._list_row_pressed
+                self._list_row_pressed = None
+                if _in_list_zone(self._mx, self._my, st) and _list_row_at(self._mx, self._my, st) == label:
+                    st.force_immediate_compile = True
+                    self._select_type_nodes(context, label)
+                return {"RUNNING_MODAL"}
+            if self._resize_handle:
+                self._resize_handle = None
+                self._resize_start_mouse = None
+                self._resize_start_values = None
+                context.window.cursor_modal_set("DEFAULT")
+                self._last_cursor = ""
+                st.width_clamped = False
+                st.height_clamped = False
+                st.hovered_handle = None
+                st.resize_active = None
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
+            if self._dragging:
+                self._dragging = False
+                self._drag_start = None
+                if self._drag_active:
+                    self._pan_acc[0] += self._drag_target[0]
+                    self._pan_acc[1] += self._drag_target[1]
+                    self._drag_target = [0.0, 0.0]
+                    self._drag_active = False
+                if settings and self._animations_enabled(settings, context):
+                    speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                    if speed > 2.0:
+                        self._inertia_active = True
+                        self._inertia_mode = "VIEW"
+                        if not self._smooth_timer:
+                            self._create_timer(context)
+                        return {"RUNNING_MODAL"}
+                self._smooth_velocity = [0.0, 0.0]
+                pan_x = int(self._pan_acc[0])
+                pan_y = int(self._pan_acc[1])
+                self._pan_acc = [0.0, 0.0]
+                if pan_x != 0 or pan_y != 0:
+                    try:
+                        with self._override_ctx(context):
+                            bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                    except RuntimeError:
+                        pass
+                self._destroy_timer(context)
+                return {"RUNNING_MODAL"}
+            if not self._dragging and self._was_in_minimap:
+                if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
+                    st.force_immediate_compile = True
+                    self._handle_click_selection(
+                        context, event, st, frame=settings.left_click_action == "SELECT_FRAME"
+                    )
+                self._was_in_minimap = False
+                self._drag_start = None
+                return {"RUNNING_MODAL"}
+            self._was_in_minimap = False
+            self._drag_start = None
+            return {"PASS_THROUGH"}
+        # --- Press ---
+        self._was_in_minimap = in_minimap
+        if self._was_in_minimap:
+            self._cancel_smooth(context)
+            armed = _frame_btn_at(self._mx, self._my, st)
+            if armed:
+                self._armed_btn = armed
+                return {"RUNNING_MODAL"}
+            if _in_list_zone(self._mx, self._my, st):
+                track = st.list_scrollbar_track
+                thumb = st.list_scrollbar_thumb
+                if _list_scrollbar_hit(self._mx, self._my, st) and track and thumb:
+                    thumb_top = thumb[1] + thumb[3]
+                    if thumb[1] <= self._my <= thumb_top:
+                        # Direct grab: keep the pressed point pinned to the cursor.
+                        self._list_scroll_grab = thumb_top - self._my
+                    else:
+                        # Trough click pages one track-length toward the
+                        # click, then continues as a drag from there.
+                        # Note: y grows upward but larger list_scroll
+                        # shifts content down, so a click above the
+                        # thumb decreases the scroll.
+                        if self._my > thumb_top:
+                            st.list_scroll = max(st.list_scroll - track[3], 0.0)
+                        else:
+                            st.list_scroll = min(st.list_scroll + track[3], st.list_scroll_max)
+                        span = max(track[3] - thumb[3], 1.0)
+                        offset = min(span * (1.0 - st.list_scroll / st.list_scroll_max), span)
+                        self._list_scroll_grab = track[1] + offset + thumb[3] - self._my
+                    self._list_scroll_pressed = True
+                    st.list_scroll_dragging = True
+                    self._redraw_ui()
+                    return {"RUNNING_MODAL"}
+                child = _list_child_at(self._mx, self._my, st)
+                if child:
+                    self._list_child_pressed = child
+                else:
+                    label = _list_row_at(self._mx, self._my, st)
+                    if label:
+                        toggle = st.list_toggle_rects.get(label)
+                        if toggle and _in_rect(self._mx, self._my, toggle):
+                            self._list_toggle_pressed = label
+                        else:
+                            self._list_row_pressed = label
+                return {"RUNNING_MODAL"}
+            if addon:
+                handle = self._get_handle_at(context, event)
+                if handle:
+                    self._resize_handle = handle
+                    st.resize_active = handle
+                    self._redraw_ui()
+                    self._resize_start_mouse = (self._mx, self._my)
+                    _ui_scale = _get_ui_scale()
+                    rmx, rmy, rmw, rmh = st.rect
+                    self._resize_start_values = (
+                        int(rmw / _ui_scale),
+                        int(rmh / _ui_scale),
+                    )
+                    cursor = _CURSOR_MAP[handle]
+                    context.window.cursor_modal_set(cursor)
+                    self._last_cursor = cursor
+                    return {"RUNNING_MODAL"}
+            if settings and settings.left_click_action in ("PAN", "SELECT_PAN"):
+                self._drag_start = (self._mx, self._my)
+                self._center_view_on_mouse(context, self._mx, self._my)
+            return {"RUNNING_MODAL"}
+        else:
+            self._drag_start = None
+            return {"PASS_THROUGH"}
+
+    def _handle_right_mouse(self, context: Context, event: Event) -> set[str]:
+        st, addon, settings, in_minimap = self._minimap_event_context(context)
+        # --- Release ---
+        if event.value == "RELEASE":
+            if st.pressed:
+                st.pressed = False
+                self._redraw_ui()
+            if self._resize_handle:
+                self._resize_handle = None
+                self._resize_start_mouse = None
+                self._resize_start_values = None
+                context.window.cursor_modal_set("DEFAULT")
+                self._last_cursor = ""
+                st.width_clamped = False
+                st.height_clamped = False
+                st.hovered_handle = None
+                st.resize_active = None
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
+            if self._dragging:
+                self._dragging = False
+                self._drag_start = None
+                if self._drag_active:
+                    self._pan_acc[0] += self._drag_target[0]
+                    self._pan_acc[1] += self._drag_target[1]
+                    self._drag_target = [0.0, 0.0]
+                    self._drag_active = False
+                if settings and self._animations_enabled(settings, context):
+                    speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                    if speed > 2.0:
+                        self._inertia_active = True
+                        self._inertia_mode = "VIEW"
+                        if not self._smooth_timer:
+                            self._create_timer(context)
+                        return {"RUNNING_MODAL"}
+                self._smooth_velocity = [0.0, 0.0]
+                pan_x = int(self._pan_acc[0])
+                pan_y = int(self._pan_acc[1])
+                self._pan_acc = [0.0, 0.0]
+                if pan_x != 0 or pan_y != 0:
+                    try:
+                        with self._override_ctx(context):
+                            bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                    except RuntimeError:
+                        pass
+                self._destroy_timer(context)
+                return {"RUNNING_MODAL"}
+            if not self._dragging and self._was_in_minimap and not _in_list_zone(self._mx, self._my, st):
+                if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
+                    st.force_immediate_compile = True
+                    self._handle_click_selection(
+                        context, event, st, frame=settings.right_click_action == "SELECT_FRAME"
+                    )
+                self._was_in_minimap = False
+                self._drag_start = None
+                return {"RUNNING_MODAL"}
+            self._was_in_minimap = False
+            self._drag_start = None
+            return {"PASS_THROUGH"}
+        # --- Press ---
+        self._was_in_minimap = in_minimap
+        if self._was_in_minimap:
+            self._cancel_smooth(context)
+            if _in_list_zone(self._mx, self._my, st):
+                if _list_scrollbar_hit(self._mx, self._my, st):
+                    # Scrollbar owns the press; no row selection or pan.
+                    return {"RUNNING_MODAL"}
+                child = _list_child_at(self._mx, self._my, st)
+                if child:
+                    _label, node_name = child
+                    st.force_immediate_compile = True
+                    self._select_single_node(context, node_name)
+                    if not self._view_selected_animated(context, settings):
+                        try:
+                            with self._override_ctx(context):
+                                bpy.ops.node.view_selected()
+                        except RuntimeError:
+                            pass
+                    self._was_in_minimap = False
+                    return {"RUNNING_MODAL"}
+                label = _list_row_at(self._mx, self._my, st)
+                if label:
+                    toggle = st.list_toggle_rects.get(label)
+                    if toggle and _in_rect(self._mx, self._my, toggle):
+                        if label in st.list_expanded:
+                            st.list_expanded.discard(label)
+                        else:
+                            st.list_expanded.add(label)
+                        st.list_cache_key = None
+                        st.force_immediate_compile = True
+                        self._redraw_ui()
+                        self._was_in_minimap = False
+                        return {"RUNNING_MODAL"}
+                    st.force_immediate_compile = True
+                    self._select_type_nodes(context, label)
+                    if not self._view_selected_animated(context, settings):
+                        try:
+                            with self._override_ctx(context):
+                                bpy.ops.node.view_selected()
+                        except RuntimeError:
+                            pass
+                self._was_in_minimap = False
+                return {"RUNNING_MODAL"}
+            if addon:
+                handle = self._get_handle_at(context, event)
+                if handle:
+                    self._resize_handle = handle
+                    st.resize_active = handle
+                    self._redraw_ui()
+                    self._resize_start_mouse = (self._mx, self._my)
+                    _ui_scale = _get_ui_scale()
+                    rmx, rmy, rmw, rmh = st.rect
+                    self._resize_start_values = (
+                        int(rmw / _ui_scale),
+                        int(rmh / _ui_scale),
+                    )
+                    cursor = _CURSOR_MAP[handle]
+                    context.window.cursor_modal_set(cursor)
+                    self._last_cursor = cursor
+                    return {"RUNNING_MODAL"}
+            if settings and settings.right_click_action in ("PAN", "SELECT_PAN"):
+                self._drag_start = (self._mx, self._my)
+                self._center_view_on_mouse(context, self._mx, self._my)
+            return {"RUNNING_MODAL"}
+        else:
+            self._drag_start = None
+            return {"PASS_THROUGH"}
+
+    def _handle_mouse_move(self, context: Context, event: Event) -> set[str]:
+        st, addon, settings, in_minimap = self._minimap_event_context(context)
+        if self._resize_handle:
+            self._resize_apply_delta(context, event)
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
+        if self._list_scroll_pressed and st.list_scroll_dragging:
+            _apply_list_scroll_drag(self._mx, self._my, self._list_scroll_grab, st)
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
+        if not self._dragging and not self._mmb_dragging and not self._drag_start:
+            self._update_cursor(context, event)
+        if not self._dragging and not self._mmb_dragging and not self._resize_handle:
+            in_list = _in_list_zone(self._mx, self._my, st)
+            # The scrollbar gutter suppresses row hovers so the bar can
+            # be approached without flashing the rows underneath.
+            over_bar = in_list and _list_scrollbar_hit(self._mx, self._my, st)
+            if st.hovered_list_scrollbar != over_bar:
+                st.hovered_list_scrollbar = over_bar
+                self._redraw_ui()
+            row_label = None if over_bar else (_list_row_at(self._mx, self._my, st) if in_list else None)
+            child_hover = None if over_bar else (_list_child_at(self._mx, self._my, st) if in_list else None)
+            if st.hovered_type_label != row_label:
+                st.hovered_type_label = row_label
+                self._redraw_ui()
+            if st.hovered_list_node != child_hover:
+                st.hovered_list_node = child_hover
+                self._redraw_ui()
+            old_hovered = st.hovered_node
+            new_hovered = None
+            if in_list:
+                # Hovering a single child row highlights only that node's
+                # border on the minimap (not the whole type group).
+                if child_hover is not None:
+                    new_hovered = child_hover[1]
+            elif in_minimap:
+                tree_coord = _region_to_tree(self._mx, self._my, st)
+                if tree_coord and self._space and self._space.edit_tree:
+                    hovered = _find_node_at(self._space.edit_tree.nodes, tree_coord[0], tree_coord[1])
+                    if hovered:
+                        new_hovered = hovered.name
+            if old_hovered != new_hovered:
+                st.hovered_node = new_hovered
+                self._redraw_ui()
+            old_btn = st.hovered_frame_btn
+            new_btn = _frame_btn_at(self._mx, self._my, st) if in_minimap and not in_list else None
+            if old_btn != new_btn:
+                st.hovered_frame_btn = new_btn
+                self._redraw_ui()
+        if self._list_mmb_dragging and self._list_mmb_drag_start:
+            dy = self._my - self._list_mmb_drag_start[1]
+            if abs(dy) > 0:
+                st.list_scroll = min(
+                    max(st.list_scroll - dy, 0.0),
+                    st.list_scroll_max,
+                )
+                self._list_mmb_drag_start = (self._mx, self._my)
+                self._redraw_ui()
+            return {"RUNNING_MODAL"}
+        if self._mmb_dragging and self._mmb_drag_start:
+            dx = self._mx - self._mmb_drag_start[0]
+            dy = self._my - self._mmb_drag_start[1]
+            if abs(dx) <= 1 and abs(dy) <= 1:
+                self._smooth_velocity[0] *= 0.15
+                self._smooth_velocity[1] *= 0.15
+            else:
+                self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + dx * 0.4
+                self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + dy * 0.4
+            pan_before = st.pan[0], st.pan[1]
+            st.pan[0] += dx
+            st.pan[1] += dy
+            _clamp_pan_to_viewport(self._space, self._region, st)
+            rejected_x = dx - (st.pan[0] - pan_before[0])
+            rejected_y = dy - (st.pan[1] - pan_before[1])
+            if (rejected_x != 0 or rejected_y != 0) and getattr(settings, "follow_view", False):
+                st.pan[0] = pan_before[0] + dx
+                st.pan[1] = pan_before[1] + dy
+                self._redirect_to_view2d(context, -dx, -dy)
+            elif rejected_x != 0 or rejected_y != 0:
+                self._redirect_to_view2d(context, -int(rejected_x), -int(rejected_y))
+            self._mmb_drag_start = (self._mx, self._my)
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
+        if self._drag_start is not None:
+            dx = self._mx - self._drag_start[0]
+            dy = self._my - self._drag_start[1]
+            if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
+                if not self._dragging and (
+                    self._anim_active or self._frame_anim_active or self._editor_anim_active
+                ):
+                    self._cancel_smooth(context)
+                self._dragging = True
+                if self._was_in_minimap:
+                    st.pressed = True
+                    smooth = settings and self._animations_enabled(settings, context, default=False)
+                    self._pan_view(context, dx, dy, smooth)
+                    self._drag_start = (self._mx, self._my)
+            return {"RUNNING_MODAL"}
+        if in_minimap:
+            return {"RUNNING_MODAL"}
+        return {"PASS_THROUGH"}
+
+    def _handle_wheel(self, context: Context, event: Event) -> set[str]:
+        st, addon, settings, in_minimap = self._minimap_event_context(context)
+        if in_minimap and _in_list_zone(self._mx, self._my, st):
+            direction = -1 if event.type == "WHEELUPMOUSE" else 1
+            st.list_scroll = min(max(st.list_scroll + direction * st.list_row_h * 3, 0.0), st.list_scroll_max)
+            over_bar = _list_scrollbar_hit(self._mx, self._my, st)
+            st.hovered_type_label = None if over_bar else _list_row_at(self._mx, self._my, st)
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
+        if in_minimap:
+            if event.ctrl or event.shift:
+                visible = _get_visible_rect(self._space, self._region)
+                if visible:
+                    ui_scale = _get_ui_scale()
+                    vw = (visible[2] - visible[0]) * ui_scale
+                    vh = (visible[3] - visible[1]) * ui_scale
+                    scroll_factor = 0.05
+                    direction = 1 if event.type == "WHEELUPMOUSE" else -1
+                    pan_x = int(vw * scroll_factor * -direction) if event.ctrl else 0
+                    pan_y = int(vh * scroll_factor * direction) if event.shift else 0
+                    try:
+                        with self._override_ctx(context):
+                            bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
+                    except RuntimeError:
+                        pass
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
+
+            prefs = addon.preferences.settings if addon else None
+            scroll_mode = getattr(prefs, "scroll_wheel_mode", "MINIMAP") if prefs else "MINIMAP"
+            if event.alt:
+                scroll_mode = "NODE_EDITOR" if scroll_mode == "MINIMAP" else "MINIMAP"
+
+            if scroll_mode == "NODE_EDITOR":
+                try:
+                    zoom_factor = 0.05
+                    with self._override_ctx(context):
+                        if event.type == "WHEELUPMOUSE":
+                            bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
+                        else:
+                            bpy.ops.view2d.zoom_out(zoomfacx=-zoom_factor, zoomfacy=-zoom_factor)
+                except RuntimeError:
+                    pass
+            else:
+                zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
+                effective_zoom = st.zoom
+
+                is_constrained = False
+                if addon and getattr(addon.preferences.settings, "follow_view", False):
+                    if effective_zoom < st.base_zoom - 0.001:
+                        is_constrained = True
+
+                if is_constrained and event.type == "WHEELUPMOUSE":
+                    try:
+                        zoom_factor = 0.05
+                        with self._override_ctx(context):
+                            bpy.ops.view2d.zoom_in(zoomfacx=zoom_factor, zoomfacy=zoom_factor)
+                    except RuntimeError:
+                        pass
+                else:
+                    new_zoom = max(0.1, min(effective_zoom * zoom_delta, 20.0))
+
+                    transform = _get_minimap_transform(st)
+                    tree_coord = _tree_from_region(self._mx, self._my, transform)
+
+                    if transform[2] > 0 and tree_coord is not None:
+                        _, _, scale, tree_cx, tree_cy = transform
+                        base_scale = scale / st.zoom
+                        tx, ty = tree_coord
+                        pan_x, pan_y = st.pan
+
+                        pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - st.zoom)
+                        pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - st.zoom)
+
+                        st.base_zoom = new_zoom
+                        st.zoom = new_zoom
+                        st.pan = [pan_x_new, pan_y_new]
+                        _clamp_pan_to_viewport(self._space, self._region, st)
+
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
+        return {"PASS_THROUGH"}
+
 
     def _node_select_location(self, node) -> tuple[float, float]:
         """Tree-space coordinate to emulate a click on *node*.
