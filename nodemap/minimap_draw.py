@@ -249,6 +249,16 @@ def _draw_resize_handles(
 
             hy = my + 2 * ui_scale if corner in ("TOP_RIGHT", "TOP_LEFT") else my + mh - 2 * ui_scale - thick
             _draw_pill(mx + margin, hy, mw - 2 * margin, thick, col_warn if h_clamped else col_base)
+        case ResizeHandle.LIST:
+            zone = st.list.zone_rect
+            if not zone:
+                return
+            zx, zy, zw, zh = zone
+            # Divider centered in the 6*scale gap between list zone and map content.
+            divider_cx = zx + zw + 3.0 * ui_scale - thick / 2.0
+            # Clamp to zone vertical extent with small margin so pill stays inside.
+            z_margin = 2 * ui_scale
+            _draw_pill(divider_cx, zy + z_margin, thick, max(zh - 2 * z_margin, 1.0), col_base)
 
 
 def _draw_view_fill(

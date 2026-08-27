@@ -20,7 +20,7 @@ MIN_MAP_HEIGHT: int = 80
 STATS_FONT_ID = 0
 STATS_FONT_SIZE = 10
 _TYPE_LIST_MIN_WIDTH = 70.0
-_TYPE_LIST_MAX_WIDTH_PCT = 0.35
+_TYPE_LIST_MAX_WIDTH_PCT = 0.5
 _LIST_PAD_X = 6.0
 _LIST_SWATCH = 8.0
 _LIST_SWATCH_GAP = 5.0
@@ -237,10 +237,12 @@ def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: f
 
 
 def _get_type_list_width(settings, st, mw: float, ui_scale: float, font_size: int = STATS_FONT_SIZE) -> float:
-    """Measure the type-list zone width for the current tree data (0 when disabled).
+    """Return the type-list zone width as a percentage of *mw* (0 when disabled).
 
-    Called before the map transform is computed so node framing can reserve
-    the zone; ``st.list_width`` must be assigned from its result.
+    Width is driven by ``type_list_width_pct`` (``_TYPE_LIST_MIN_WIDTH`` to
+    ``_TYPE_LIST_MAX_WIDTH_PCT`` clamp) and does not depend on content
+    measurement; content clips or shows extra padding instead.
+    Called before the map transform so node framing can reserve the zone.
     """
     if not getattr(settings, "show_type_list", False):
         return 0.0
@@ -249,18 +251,9 @@ def _get_type_list_width(settings, st, mw: float, ui_scale: float, font_size: in
     if not type_stats:
         return 0.0
 
-    font_id = STATS_FONT_ID
-    blf.size(font_id, int(font_size * ui_scale))
-    pad_x = _LIST_PAD_X * ui_scale
-    swatch = _LIST_SWATCH * ui_scale
-    swatch_gap = _LIST_SWATCH_GAP * ui_scale
-    count_gap = _LIST_COUNT_GAP * ui_scale
-    widest_label = max(blf.dimensions(font_id, label)[0] for label in type_stats)
-    widest_count = max(blf.dimensions(font_id, str(count))[0] for count in type_stats.values())
-    # Leading icon columns: expand-toggle slot, plus color-swatch slot when enabled.
-    icon_cols = 2 if getattr(settings, "colored_nodes", True) else 1
-    content_w = pad_x * 2 + icon_cols * (swatch + swatch_gap) + widest_label + count_gap + widest_count
-    return min(max(content_w, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
+    pct = getattr(settings, "type_list_width_pct", 35) / 100.0
+    raw = mw * pct
+    return min(max(raw, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
 
 
 def start_list_width_animation(st, settings) -> None:

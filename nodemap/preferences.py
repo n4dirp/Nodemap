@@ -386,6 +386,16 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
+    type_list_width_pct: IntProperty(
+        name="Type List Width %",
+        description="Width of the node-type list as a percentage of the minimap width",
+        default=35,
+        min=15,
+        max=50,
+        subtype="PERCENTAGE",
+        update=_update_invalidate_batches,
+    )
+
     debounce_interval: FloatProperty(
         name="Update Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",

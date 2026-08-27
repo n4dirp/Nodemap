@@ -21,6 +21,7 @@ class ResizeHandle(StrEnum):
     W = "W"
     H = "H"
     C = "C"
+    LIST = "LIST"
 
 
 @dataclass

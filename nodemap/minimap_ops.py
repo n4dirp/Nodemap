@@ -17,6 +17,8 @@ from .framing import (
 from .helpers import (
     _HANDLE_THICKNESS,
     _SCROLLBAR_HIT_PAD,
+    _TYPE_LIST_MAX_WIDTH_PCT,
+    _TYPE_LIST_MIN_WIDTH,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     _expand_bounds_margin,
@@ -162,7 +164,25 @@ _CURSOR_MAP: dict[ResizeHandle, str] = {
     ResizeHandle.W: "MOVE_X",
     ResizeHandle.H: "MOVE_Y",
     ResizeHandle.C: "SCROLL_XY",
+    ResizeHandle.LIST: "MOVE_X",
 }
+
+
+def _get_list_divider_handle(st: MinimapState, rx: int, ry: int, ui_scale: float) -> ResizeHandle | None:
+    """Return ``LIST`` when the cursor is over the divider between list and map.
+
+    The divider spans the gap (``6*scale``) between the list zone's right edge
+    and the map content's left edge and uses the same hit thickness as the
+    outer resize borders.
+    """
+    if st.list.width <= 0 or not st.list.zone_rect or not st.view.rect:
+        return None
+    zx, zy, zw, zh = st.list.zone_rect
+    divider_cx = zx + zw + 3.0 * ui_scale
+    hw = _HANDLE_THICKNESS * ui_scale
+    if divider_cx - hw <= rx <= divider_cx + hw and zy <= ry <= zy + zh:
+        return ResizeHandle.LIST
+    return None
 
 
 def _get_resize_handle(st: MinimapState, corner: str, rx: int, ry: int, ui_scale: float) -> ResizeHandle | None:
@@ -327,6 +347,10 @@ class NODEMAP_OT_navigate(Operator):
     _resize_handle: str | None = None
     _resize_start_mouse: tuple[int, int] | None = None
     _resize_start_values: tuple[int, int] | None = None
+    _list_width_dragging: bool = False
+    _list_width_start_x: int = 0
+    _list_width_start_pct: int = 0
+    _list_width_start_mw: float = 0.0
     _last_cursor: str = ""
     _pan_acc: list[float]
     _redirect_acc: list[float]
@@ -390,6 +414,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._mmb_dragging
             or self._list_mmb_dragging
             or self._resize_handle is not None
+            or self._list_width_dragging
             or self._drag_start is not None
             or self._list_scroll_pressed
             or self._anim_active
@@ -533,6 +558,15 @@ class NODEMAP_OT_navigate(Operator):
         st, addon, settings, in_minimap = self._minimap_event_context(context)
         # --- Release ---
         if event.value == "RELEASE":
+            if self._list_width_dragging:
+                self._list_width_dragging = False
+                st.interaction.resize_active = None
+                st.interaction.hovered_handle = None
+                context.window.cursor_modal_set("DEFAULT")
+                self._last_cursor = ""
+                st.cache.invalidate_batches_only()
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
             if st.interaction.pressed:
                 st.interaction.pressed = False
                 self._redraw_ui()
@@ -642,6 +676,21 @@ class NODEMAP_OT_navigate(Operator):
             if armed:
                 self._armed_btn = armed
                 return {"RUNNING_MODAL"}
+            # List/map divider — same style as outer resize borders, percent width.
+            ui_scale = _get_ui_scale()
+            divider_handle = _get_list_divider_handle(st, self._mx, self._my, ui_scale)
+            if divider_handle:
+                self._list_width_dragging = True
+                st.interaction.resize_active = divider_handle
+                self._redraw_ui()
+                self._list_width_start_x = self._mx
+                self._list_width_start_pct = getattr(settings, "type_list_width_pct", 35) if settings else 35
+                _mx, _my, _mw, _mh = st.view.rect
+                self._list_width_start_mw = _mw
+                cursor = _CURSOR_MAP[divider_handle]
+                context.window.cursor_modal_set(cursor)
+                self._last_cursor = cursor
+                return {"RUNNING_MODAL"}
             if _in_list_zone(self._mx, self._my, st):
                 track = st.list.scrollbar_track
                 thumb = st.list.scrollbar_thumb
@@ -721,6 +770,15 @@ class NODEMAP_OT_navigate(Operator):
         st, addon, settings, in_minimap = self._minimap_event_context(context)
         # --- Release ---
         if event.value == "RELEASE":
+            if self._list_width_dragging:
+                self._list_width_dragging = False
+                st.interaction.resize_active = None
+                st.interaction.hovered_handle = None
+                context.window.cursor_modal_set("DEFAULT")
+                self._last_cursor = ""
+                st.cache.invalidate_batches_only()
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
             if st.interaction.pressed:
                 st.interaction.pressed = False
                 self._redraw_ui()
@@ -772,6 +830,20 @@ class NODEMAP_OT_navigate(Operator):
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
             self._cancel_smooth(context)
+            ui_scale_div = _get_ui_scale()
+            divider_handle_r = _get_list_divider_handle(st, self._mx, self._my, ui_scale_div)
+            if divider_handle_r:
+                self._list_width_dragging = True
+                st.interaction.resize_active = divider_handle_r
+                self._redraw_ui()
+                self._list_width_start_x = self._mx
+                self._list_width_start_pct = getattr(settings, "type_list_width_pct", 35) if settings else 35
+                _mx, _my, _mw, _mh = st.view.rect
+                self._list_width_start_mw = _mw
+                cursor = _CURSOR_MAP[divider_handle_r]
+                context.window.cursor_modal_set(cursor)
+                self._last_cursor = cursor
+                return {"RUNNING_MODAL"}
             if _in_list_zone(self._mx, self._my, st):
                 if _list_scrollbar_hit(self._mx, self._my, st):
                     # Scrollbar owns the press; no row selection or pan.
@@ -865,6 +937,10 @@ class NODEMAP_OT_navigate(Operator):
 
     def _handle_mouse_move(self, context: Context, event: Event) -> set[str]:
         st, addon, settings, in_minimap = self._minimap_event_context(context)
+        if self._list_width_dragging:
+            self._apply_list_width_drag(context)
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
         if self._resize_handle:
             self._resize_apply_delta(context, event)
             self._redraw_ui()
@@ -875,7 +951,7 @@ class NODEMAP_OT_navigate(Operator):
             return {"RUNNING_MODAL"}
         if not self._dragging and not self._mmb_dragging and not self._drag_start:
             self._update_cursor(context, event)
-        if not self._dragging and not self._mmb_dragging and not self._resize_handle:
+        if not self._dragging and not self._mmb_dragging and not self._resize_handle and not self._list_width_dragging:
             in_list = _in_list_zone(self._mx, self._my, st)
             # The scrollbar gutter suppresses row hovers so the bar can
             # be approached without flashing the rows underneath.
@@ -1521,6 +1597,13 @@ class NODEMAP_OT_navigate(Operator):
                 st.view.height_clamped = False
                 st.interaction.hovered_handle = None
                 st.interaction.resize_active = None
+        if self._list_width_dragging:
+            self._list_width_dragging = False
+            st = self._st
+            if st:
+                st.interaction.hovered_handle = None
+                st.interaction.resize_active = None
+                st.cache.invalidate_batches_only()
         context.window.cursor_modal_set("DEFAULT")
         self._last_cursor = ""
         self._armed_btn = None
@@ -1888,6 +1971,19 @@ class NODEMAP_OT_navigate(Operator):
             if old_handle:
                 self._redraw_ui()
             return
+        # Divider takes precedence over outer borders and list hover.
+        ui_scale = _get_ui_scale()
+        divider = _get_list_divider_handle(st, self._mx, self._my, ui_scale)
+        if divider:
+            old_handle = st.interaction.hovered_handle
+            st.interaction.hovered_handle = divider
+            if divider != old_handle:
+                self._redraw_ui()
+            cursor = _CURSOR_MAP.get(divider, "MOVE_X")
+            if cursor != self._last_cursor:
+                context.window.cursor_modal_set(cursor)
+                self._last_cursor = cursor
+            return
         handle = self._get_handle_at(context, event)
         old_handle = st.interaction.hovered_handle
         st.interaction.hovered_handle = handle
@@ -1967,6 +2063,36 @@ class NODEMAP_OT_navigate(Operator):
         st.view.width_clamped = settings.minimap_width >= max_w or settings.minimap_width <= MIN_MAP_WIDTH
         st.view.height_clamped = settings.minimap_height >= max_h or settings.minimap_height <= MIN_MAP_HEIGHT
 
+    def _apply_list_width_drag(self, context: Context) -> None:
+        """Update the type-list percent width from the current mouse delta."""
+        st = self._st
+        addon = context.preferences.addons.get(__package__)
+        if not st or not addon:
+            return
+        settings = addon.preferences.settings
+        if self._list_width_start_mw <= 0:
+            return
+        dx = self._mx - self._list_width_start_x
+        mw = self._list_width_start_mw
+        ui_scale = _get_ui_scale()
+        min_w = _TYPE_LIST_MIN_WIDTH * ui_scale
+        max_w = mw * _TYPE_LIST_MAX_WIDTH_PCT
+        start_w = mw * (self._list_width_start_pct / 100.0)
+        start_w = min(max(start_w, min_w), max_w)
+        new_w = min(max(start_w + dx, min_w), max_w)
+        new_pct = int(round(new_w / max(mw, 1.0) * 100.0))
+        new_pct = min(max(new_pct, 15), 50)
+        from . import preferences as _pref_mod
+
+        _pref_mod._suppress_update = True
+        try:
+            settings.type_list_width_pct = new_pct
+        finally:
+            _pref_mod._suppress_update = False
+        # Keep state hover in sync so the pill draws during drag.
+        st.interaction.hovered_handle = ResizeHandle.LIST
+        st.interaction.resize_active = ResizeHandle.LIST
+
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":
             logger.debug("invoke: cancelled — area type is %s", context.area.type)
@@ -1979,6 +2105,10 @@ class NODEMAP_OT_navigate(Operator):
         self._list_scroll_pressed = False
         self._list_scroll_grab = 0.0
         self._list_last_row_index = -1
+        self._list_width_dragging = False
+        self._list_width_start_x = 0
+        self._list_width_start_pct = 35
+        self._list_width_start_mw = 0.0
         self._smooth_timer = None
         self._inertia_active = False
         self._inertia_mode = None
@@ -2029,6 +2159,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_scroll_pressed = False
         self._list_scroll_grab = 0.0
         self._list_last_row_index = -1
+        self._list_width_dragging = False
 
 
 class NODEMAP_OT_OpenPreferences(Operator):
