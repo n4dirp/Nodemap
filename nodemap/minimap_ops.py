@@ -1415,13 +1415,12 @@ class NODEMAP_OT_navigate(Operator):
         st = self._st
         if st:
             st.buttons.hovered = None
-        st.list.hovered_type_label = None
-        st.list.hovered_node = None
-        st.interaction.hovered_node = None
-        st.list.hovered_scrollbar = False
-        st.list.scrollbar_dragging = False
-        if st.interaction.pressed:
-            st.interaction.pressed = False
+            st.list.hovered_type_label = None
+            st.interaction.hovered_node = None
+            st.list.hovered_scrollbar = False
+            st.list.scrollbar_dragging = False
+            if st.interaction.pressed:
+                st.interaction.pressed = False
         self._redraw_ui()
 
     def _cancel_smooth(self, context: Context) -> None:
