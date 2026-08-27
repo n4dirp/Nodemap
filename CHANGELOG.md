@@ -1,9 +1,9 @@
 # Changelog
 
-## [1.6.0] - 2026-08-20
+## [2.0.0] - 2026-08-26
 
 ### Added
-- New node list grouped by type with per-type counts and labels
+- Interactive node-type list with per-type counts
 - New Presets menu in the Nodemap popup
 - Added group markers beneath group nodes
 - Added Smooth animation for frame actions
@@ -12,6 +12,13 @@
 
 ### Changed
 - Frame Selected now adjusts the zoom to fit multiple nodes or a frame
+- Renamed the "Smooth Pan" preference to "Animations"; it now also gates the type-list show/hide animation
+
+
+### Fixed
+- Selecting a node from the type list no longer forces a full EEVEE material rebuild (now uses the native node.select operator like the minimap)
+- Minimap redraws now target only the interacted Node Editor instead of refreshing all open Node Editors
+
 
 ## [1.5.0] - 2026-08-14
 
