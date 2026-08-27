@@ -308,6 +308,7 @@ def _draw_type_list(
     st.list.node_rects = []
     st.list.toggle_rects = {}
     st.list.scroll_max = 0.0
+    st.list.visible_row_keys = []
     # Drawn whenever the zone has width, including while it animates shut,
     # so the content slides out with the panel instead of vanishing.
     if st.list.width <= 0:
@@ -435,6 +436,11 @@ def _draw_type_list(
             if s_top <= view_b or s_bottom >= view_t:
                 continue
             visible_rows.append((kind, label, node_name, s_top, s_bottom, row_idx))
+
+        st.list.visible_row_keys = [
+            ("header", label) if kind == "header" else ("child", label, node_name)
+            for kind, label, node_name, *_rest in visible_rows
+        ]
 
         # Zebra bands keyed on the absolute layout index so they stay attached
         # to rows while scrolling; drawn beneath pills, text, and icons.

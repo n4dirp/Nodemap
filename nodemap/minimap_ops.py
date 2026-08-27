@@ -338,6 +338,7 @@ class NODEMAP_OT_navigate(Operator):
     _list_scroll_grab: float = 0.0
     _list_mmb_dragging: bool = False
     _list_mmb_drag_start: tuple[int, int] | None = None
+    _list_last_row_index: int = -1
 
     _smooth_timer: str | None = None
     _inertia_active: bool = False
@@ -550,7 +551,12 @@ class NODEMAP_OT_navigate(Operator):
                 still_over = _list_child_at(self._mx, self._my, st) == (label, node_name)
                 if _in_list_zone(self._mx, self._my, st) and still_over:
                     st.cache.force_immediate = True
-                    self._select_single_node(context, node_name)
+                    if event.shift:
+                        self._apply_list_range(context, st, ("child", label, node_name))
+                    elif event.ctrl:
+                        self._select_single_node(context, node_name, toggle=True)
+                    else:
+                        self._select_single_node(context, node_name)
                 return {"RUNNING_MODAL"}
             if self._list_toggle_pressed:
                 label = self._list_toggle_pressed
@@ -570,7 +576,12 @@ class NODEMAP_OT_navigate(Operator):
                 self._list_row_pressed = None
                 if _in_list_zone(self._mx, self._my, st) and _list_row_at(self._mx, self._my, st) == label:
                     st.cache.force_immediate = True
-                    self._select_type_nodes(context, label)
+                    if event.shift:
+                        self._apply_list_range(context, st, ("header", label))
+                    elif event.ctrl:
+                        self._select_type_nodes(context, label, toggle=True)
+                    else:
+                        self._select_type_nodes(context, label)
                 return {"RUNNING_MODAL"}
             if self._resize_handle:
                 self._resize_handle = None
@@ -659,6 +670,13 @@ class NODEMAP_OT_navigate(Operator):
                 child = _list_child_at(self._mx, self._my, st)
                 if child:
                     self._list_child_pressed = child
+                    if not event.shift and not event.ctrl:
+                        _label, _node_name = child
+                        key = ("child", _label, _node_name)
+                        try:
+                            self._list_last_row_index = st.list.visible_row_keys.index(key)
+                        except ValueError:
+                            self._list_last_row_index = -1
                 else:
                     label = _list_row_at(self._mx, self._my, st)
                     if label:
@@ -667,6 +685,12 @@ class NODEMAP_OT_navigate(Operator):
                             self._list_toggle_pressed = label
                         else:
                             self._list_row_pressed = label
+                            if not event.shift and not event.ctrl:
+                                key = ("header", label)
+                                try:
+                                    self._list_last_row_index = st.list.visible_row_keys.index(key)
+                                except ValueError:
+                                    self._list_last_row_index = -1
                 return {"RUNNING_MODAL"}
             if addon:
                 handle = self._get_handle_at(context, event)
@@ -756,13 +780,24 @@ class NODEMAP_OT_navigate(Operator):
                 if child:
                     _label, node_name = child
                     st.cache.force_immediate = True
-                    self._select_single_node(context, node_name)
-                    if not self._view_selected_animated(context, settings):
+                    if event.shift:
+                        self._apply_list_range(context, st, ("child", _label, node_name))
+                    elif event.ctrl:
+                        self._select_single_node(context, node_name, toggle=True)
+                    else:
+                        self._select_single_node(context, node_name)
+                        key = ("child", _label, node_name)
                         try:
-                            with self._override_ctx(context):
-                                bpy.ops.node.view_selected()
-                        except RuntimeError:
-                            pass
+                            self._list_last_row_index = st.list.visible_row_keys.index(key)
+                        except ValueError:
+                            self._list_last_row_index = -1
+                    if not (event.shift or event.ctrl):
+                        if not self._view_selected_animated(context, settings):
+                            try:
+                                with self._override_ctx(context):
+                                    bpy.ops.node.view_selected()
+                            except RuntimeError:
+                                pass
                     self._was_in_minimap = False
                     return {"RUNNING_MODAL"}
                 label = _list_row_at(self._mx, self._my, st)
@@ -779,13 +814,24 @@ class NODEMAP_OT_navigate(Operator):
                         self._was_in_minimap = False
                         return {"RUNNING_MODAL"}
                     st.cache.force_immediate = True
-                    self._select_type_nodes(context, label)
-                    if not self._view_selected_animated(context, settings):
+                    if event.shift:
+                        self._apply_list_range(context, st, ("header", label))
+                    elif event.ctrl:
+                        self._select_type_nodes(context, label, toggle=True)
+                    else:
+                        self._select_type_nodes(context, label)
+                        key = ("header", label)
                         try:
-                            with self._override_ctx(context):
-                                bpy.ops.node.view_selected()
-                        except RuntimeError:
-                            pass
+                            self._list_last_row_index = st.list.visible_row_keys.index(key)
+                        except ValueError:
+                            self._list_last_row_index = -1
+                    if not (event.shift or event.ctrl):
+                        if not self._view_selected_animated(context, settings):
+                            try:
+                                with self._override_ctx(context):
+                                    bpy.ops.node.view_selected()
+                            except RuntimeError:
+                                pass
                 self._was_in_minimap = False
                 return {"RUNNING_MODAL"}
             if addon:
@@ -1123,8 +1169,56 @@ class NODEMAP_OT_navigate(Operator):
         st.interaction.hovered_node = None
         self._redraw_ui()
 
-    def _select_type_nodes(self, context: Context, label: str) -> None:
-        """Select all editor nodes whose compiled type label matches *label*."""
+    def _apply_list_range(self, context: Context, st: MinimapState, target_key: tuple) -> None:
+        """Select all visible rows between the last-clicked and *target_key*.
+
+        Replaces the current selection with the contiguous range, matching
+        standard file-explorer Shift-click behaviour.  The anchor
+        (``_list_last_row_index``) is **not** moved — it stays at the last
+        plain-clicked row so repeated Shift-clicks expand from the same origin.
+        """
+        keys = st.list.visible_row_keys
+        try:
+            target_idx = keys.index(target_key)
+        except ValueError:
+            return
+        last = self._list_last_row_index
+        if last < 0 or last >= len(keys):
+            lo, hi = target_idx, target_idx
+        else:
+            lo, hi = min(last, target_idx), max(last, target_idx)
+
+        # Deselect everything first so the range *replaces* the selection.
+        space = self._space
+        node_tree = space.edit_tree if space else None
+        if not node_tree:
+            return
+        try:
+            with self._override_ctx(context):
+                bpy.ops.node.select_all(action="DESELECT")
+        except RuntimeError:
+            pass
+
+        # Select every row in the range.
+        for idx in range(lo, hi + 1):
+            key = keys[idx]
+            if key[0] == "header":
+                self._select_type_nodes(context, key[1], extend=True)
+            elif key[0] == "child":
+                node = node_tree.nodes.get(key[2])
+                if node:
+                    if not self._select_node_via_operator(context, node, extend=True, deselect_all=False):
+                        node.select = True
+        self._redraw_ui()
+
+    def _select_type_nodes(self, context: Context, label: str, extend: bool = False, toggle: bool = False) -> None:
+        """Select all editor nodes whose compiled type label matches *label*.
+
+        When *extend* is True the current selection is preserved and the
+        matching nodes are added.  When *toggle* is True the behaviour
+        depends on the current state: if every matching node is already
+        selected they are all deselected, otherwise they are all selected.
+        """
         space = self._space
         st = self._st
         if not space or space.type != "NODE_EDITOR" or not st:
@@ -1137,22 +1231,39 @@ class NODEMAP_OT_navigate(Operator):
         if not names:
             return
 
-        try:
-            with self._override_ctx(context):
-                bpy.ops.node.select_all(action="DESELECT")
-        except RuntimeError:
-            pass
+        if toggle:
+            all_sel = all((node_tree.nodes.get(n) is not None and node_tree.nodes[n].select) for n in names)
+            if all_sel:
+                deselect = True
+                extend = False
+            else:
+                deselect = False
+                extend = True
+        else:
+            deselect = not extend
+
+        if deselect:
+            try:
+                with self._override_ctx(context):
+                    bpy.ops.node.select_all(action="DESELECT")
+            except RuntimeError:
+                pass
         for name in names:
             node = node_tree.nodes.get(name)
             if node:
                 # Native operator keeps selection/additive state and sets the
                 # active node without tagging the NodeTree for an EEVEE rebuild.
-                if not self._select_node_via_operator(context, node, extend=True, deselect_all=False):
+                if not self._select_node_via_operator(context, node, extend=extend, deselect_all=False):
                     node.select = True
         self._redraw_ui()
 
-    def _select_single_node(self, context: Context, node_name: str) -> None:
-        """Select only the editor node whose compiled name matches *node_name*."""
+    def _select_single_node(self, context: Context, node_name: str, extend: bool = False, toggle: bool = False) -> None:
+        """Select only the editor node whose compiled name matches *node_name*.
+
+        When *extend* is True the current selection is preserved and the
+        node is added.  When *toggle* is True the node's selection state
+        is flipped instead of replaced.
+        """
         space = self._space
         st = self._st
         if not space or space.type != "NODE_EDITOR" or not st:
@@ -1163,14 +1274,20 @@ class NODEMAP_OT_navigate(Operator):
         node = node_tree.nodes.get(node_name)
         if not node:
             return
-        try:
-            with self._override_ctx(context):
-                bpy.ops.node.select_all(action="DESELECT")
-        except RuntimeError:
-            pass
-        if not self._select_node_via_operator(context, node, extend=False, deselect_all=False):
-            node.select = True
-            node_tree.nodes.active = node
+        if toggle:
+            node.select = not node.select
+            if node.select:
+                node_tree.nodes.active = node
+        else:
+            if not extend:
+                try:
+                    with self._override_ctx(context):
+                        bpy.ops.node.select_all(action="DESELECT")
+                except RuntimeError:
+                    pass
+            if not self._select_node_via_operator(context, node, extend=extend, deselect_all=False):
+                node.select = True
+                node_tree.nodes.active = node
         self._redraw_ui()
 
     def _activate_armed_button(self, context: Context, settings) -> None:
@@ -1861,6 +1978,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_row_pressed = None
         self._list_scroll_pressed = False
         self._list_scroll_grab = 0.0
+        self._list_last_row_index = -1
         self._smooth_timer = None
         self._inertia_active = False
         self._inertia_mode = None
@@ -1910,6 +2028,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_toggle_pressed = None
         self._list_scroll_pressed = False
         self._list_scroll_grab = 0.0
+        self._list_last_row_index = -1
 
 
 class NODEMAP_OT_OpenPreferences(Operator):

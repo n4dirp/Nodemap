@@ -68,6 +68,7 @@ class ListState:
     scrollbar_thumb: Rect | None = None
     scrollbar_track: Rect | None = None
     zone_rect: Rect | None = None
+    visible_row_keys: list = field(default_factory=list)
     anim_active: bool = False
     anim_from: float = 0.0
     anim_target: float = -1.0
