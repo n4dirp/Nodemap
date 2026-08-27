@@ -62,7 +62,9 @@ def _ensure_minimap_batches(
     the scale drifts past the bucket width (radius/thickness/font buckets),
     styling keys change, or the anchor drifts too far for culling to stay
     conservative. When *highlight_border* is an RGBA color, nodes whose type
-    matches ``st.list.hovered_type_label`` get a highlighted border.
+    matches ``st.list.hovered_type_label`` (or whose name matches
+    ``st.interaction.hovered_node``) get a separate outside outline instead
+    of recolouring their own border.
     """
     tree_data = st.cache.tree_data
     if tree_data is None:
@@ -111,9 +113,11 @@ def _ensure_minimap_batches(
     node_infos = tree_data["node_infos"]
     hovered_type = st.list.hovered_type_label
     hovered_node_name = st.interaction.hovered_node
-    hl_color = None
+    hl_outline = None
     if (hovered_type or hovered_node_name) and highlight_border is not None:
-        hl_color = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
+        hl_outline = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
+    hl_margin = 4.0 * ui_scale
+    hl_line_w = 2.0
 
     # Cull window in baked space: the map interior plus slack for anchor
     # drift between rebuilds (nodes outside never reach the GPU batches).
@@ -136,6 +140,13 @@ def _ensure_minimap_batches(
     all_radius_border = []
     all_color_border = []
     all_line_width_border = []
+
+    hl_pos_border = []
+    hl_uv_border = []
+    hl_half_size_border = []
+    hl_radius_border = []
+    hl_color_border = []
+    hl_line_width_border = []
 
     frame_pos_fill = []
     frame_uv_fill = []
@@ -174,15 +185,17 @@ def _ensure_minimap_batches(
 
         border_color = info["border_color"]
         border_w = info["border_w"]
-        if hl_color:
-            # Guard on hovered_type so a hidden type list (infos without
-            # "type_label") can't match None == None for every node.
+        # The normal node border is left as-is (active/selection styling);
+        # list hover instead gets a separate outside outline (see below).
+        if hl_outline:
             if hovered_type is not None and info.get("type_label") == hovered_type:
-                border_color = hl_color
-                border_w = 1.25
+                is_hovered = True
             elif hovered_node_name is not None and info.get("name") == hovered_node_name:
-                border_color = hl_color
-                border_w = 1.25
+                is_hovered = True
+            else:
+                is_hovered = False
+        else:
+            is_hovered = False
 
         # Borders always emit vertices regardless of on-screen size so they
         # stay visible at any zoom (hover and normal alike); the SDF shader
@@ -221,6 +234,27 @@ def _ensure_minimap_batches(
                 all_radius_border.extend([node_r] * 4)
                 all_color_border.extend([border_color] * 4)
                 all_line_width_border.extend([border_w] * 4)
+
+            if is_hovered:
+                hbw = bw_final + hl_margin * 2
+                hbh = bh_final + hl_margin * 2
+                hhw = hbw / 2
+                hhh = hbh / 2
+                hl_ox = bx - hl_margin
+                hl_oy = by - hl_margin
+                hl_pos_border.extend(
+                    [
+                        (hl_ox, hl_oy, 0.0),
+                        (hl_ox + hbw, hl_oy, 0.0),
+                        (hl_ox + hbw, hl_oy + hbh, 0.0),
+                        (hl_ox, hl_oy + hbh, 0.0),
+                    ]
+                )
+                hl_uv_border.extend([(-hhw, -hhh), (hhw, -hhh), (hhw, hhh), (-hhw, hhh)])
+                hl_half_size_border.extend([(hhw, hhh)] * 4)
+                hl_radius_border.extend([node_r] * 4)
+                hl_color_border.extend([hl_outline] * 4)
+                hl_line_width_border.extend([hl_line_w] * 4)
         else:
             hw = bw / 2
             hh = bh / 2
@@ -263,6 +297,27 @@ def _ensure_minimap_batches(
                 rb.extend([node_r] * 4)
                 cb.extend([border_color] * 4)
                 lwb.extend([border_w] * 4)
+
+            if is_hovered:
+                hbw = bw + hl_margin * 2
+                hbh = bh + hl_margin * 2
+                hhw = hbw / 2
+                hhh = hbh / 2
+                hl_ox = bx - hl_margin
+                hl_oy = by - hl_margin
+                hl_pos_border.extend(
+                    [
+                        (hl_ox, hl_oy, 0.0),
+                        (hl_ox + hbw, hl_oy, 0.0),
+                        (hl_ox + hbw, hl_oy + hbh, 0.0),
+                        (hl_ox, hl_oy + hbh, 0.0),
+                    ]
+                )
+                hl_uv_border.extend([(-hhw, -hhh), (hhw, -hhh), (hhw, hhh), (-hhw, hhh)])
+                hl_half_size_border.extend([(hhw, hhh)] * 4)
+                hl_radius_border.extend([node_r] * 4)
+                hl_color_border.extend([hl_outline] * 4)
+                hl_line_width_border.extend([hl_line_w] * 4)
 
             # Labels
             if is_frame:
@@ -355,6 +410,25 @@ def _ensure_minimap_batches(
         )
     else:
         st.cache.borders_batch = None
+
+    num_hl_borders = len(hl_pos_border) // 4
+    if num_hl_borders > 0:
+        shader = _get_batch_rect_border_shader()
+        st.cache.highlight_borders_batch = batch_for_shader(
+            shader,
+            "TRIS",
+            {
+                "pos": hl_pos_border,
+                "uv": hl_uv_border,
+                "halfSize": hl_half_size_border,
+                "radius": hl_radius_border,
+                "color": hl_color_border,
+                "lineWidth": hl_line_width_border,
+            },
+            indices=_create_quad_indices(num_hl_borders),
+        )
+    else:
+        st.cache.highlight_borders_batch = None
 
     num_frame_fills = len(frame_pos_fill) // 4
     if num_frame_fills > 0:

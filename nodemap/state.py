@@ -88,6 +88,7 @@ class RenderCache:
     tree_data: dict | None = None
     backdrops_batch: Any = None
     borders_batch: Any = None
+    highlight_borders_batch: Any = None
     frames_fill_batch: Any = None
     frames_border_batch: Any = None
     text: list | None = None
@@ -118,6 +119,7 @@ class RenderCache:
         self.tree_data = None
         self.backdrops_batch = None
         self.borders_batch = None
+        self.highlight_borders_batch = None
         self.frames_fill_batch = None
         self.frames_border_batch = None
         self.text = None
@@ -142,6 +144,7 @@ class RenderCache:
         """
         self.backdrops_batch = None
         self.borders_batch = None
+        self.highlight_borders_batch = None
         self.frames_fill_batch = None
         self.frames_border_batch = None
         self.text = None

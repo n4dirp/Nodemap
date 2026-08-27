@@ -304,7 +304,7 @@ def _draw_view_fill(
     fill_color = colors["node_active"]
     if settings.viewport_fill_rect:
         fill_color = settings.viewport_fill_color
-    fill_color = _alpha_mul(fill_color, 0.3 * master_alpha)
+    fill_color = _alpha_mul(fill_color, 0.2 * master_alpha)
     node_r = colors.get("node_roundness", 2.0) * ui_scale
     _draw_filled_rounded_rect_clipped(
         v_left, v_bottom, hole_w, hole_h, node_r, fill_color, mx, my, mw, mh, panel_r * 1.2
@@ -744,7 +744,7 @@ def draw_minimap() -> None:
     st.view.scale = scale
     with _Timer("ensure_batches"):
         highlight_border = (
-            _alpha_mul(colors["node_active"], 0.2)
+            _alpha_mul(colors["node_active"], 0.4)
             if (st.list.hovered_type_label or st.interaction.hovered_node)
             else None
         )
@@ -881,6 +881,18 @@ def draw_minimap() -> None:
                         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
                     )
                     borders_batch.draw(border_shader)
+
+            # List-hover outside outlines (drawn above normal borders)
+            highlight_borders_batch = st.cache.highlight_borders_batch
+            if highlight_borders_batch:
+                with _Timer("draw_highlight_borders"):
+                    border_shader = _get_batch_rect_border_shader()
+                    border_shader.bind()
+                    border_shader.uniform_float(
+                        "ModelViewProjectionMatrix",
+                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                    )
+                    highlight_borders_batch.draw(border_shader)
 
             # Group node underline markers (baked batches)
             marker_batches = st.cache.marker_batches or []

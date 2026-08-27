@@ -1312,8 +1312,13 @@ class NODEMAP_OT_navigate(Operator):
         if toggle:
             all_sel = all((node_tree.nodes.get(n) is not None and node_tree.nodes[n].select) for n in names)
             if all_sel:
-                deselect = True
-                extend = False
+                # Deselect only this type group, preserving other selections.
+                for name in names:
+                    node = node_tree.nodes.get(name)
+                    if node and node.select:
+                        node.select = False
+                self._redraw_ui()
+                return
             else:
                 deselect = False
                 extend = True
@@ -1326,12 +1331,17 @@ class NODEMAP_OT_navigate(Operator):
                     bpy.ops.node.select_all(action="DESELECT")
             except RuntimeError:
                 pass
+        # After the upfront deselect the selection is empty, so every
+        # addition must use extend to accumulate the whole group. Passing
+        # extend=False would replace the previous node on each iteration
+        # and leave only the last one selected (and framed).
+        node_extend = extend or deselect
         for name in names:
             node = node_tree.nodes.get(name)
             if node:
                 # Native operator keeps selection/additive state and sets the
                 # active node without tagging the NodeTree for an EEVEE rebuild.
-                if not self._select_node_via_operator(context, node, extend=extend, deselect_all=False):
+                if not self._select_node_via_operator(context, node, extend=node_extend, deselect_all=False):
                     node.select = True
         self._redraw_ui()
 

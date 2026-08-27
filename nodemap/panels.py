@@ -74,15 +74,13 @@ class NODEMAP_PT_popup(Panel):
 
             body.separator()
             col = body.column()
-            col.label(text="Labels")
-
             row = col.row()
-            row.prop(settings, "show_names", text="Nodes")
+            row.prop(settings, "show_names", text="Node Labels")
             sub = row.row()
             sub.active = settings.show_names
             sub.prop(settings, "node_label_mode", expand=True)
             if settings.show_frames:
-                col.prop(settings, "show_frame_labels", text="Frames")
+                col.prop(settings, "show_frame_labels", text="Frame Labels")
 
             if settings.interactive:
                 body.separator()
