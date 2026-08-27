@@ -225,7 +225,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     viewport_overlay_color: FloatVectorProperty(
         name="Viewport Overlay Color",
         description="Color of the viewport overlay",
-        default=(0.0, 0.0, 0.0, 0.5),
+        default=(0.1, 0.1, 0.1, 0.5),
         size=4,
         min=0.0,
         max=1.0,
@@ -241,7 +241,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     viewport_fill_color: FloatVectorProperty(
         name="Active View Fill Color",
         description="Color of the active view fill rect",
-        default=(0.7, 0.7, 0.7, 0.05),
+        default=(0.278, 0.447, 0.702, 0.4),
         size=4,
         min=0.0,
         max=1.0,
@@ -380,7 +380,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     type_list_font_size: IntProperty(
         name="Type List Font Size",
         description="Font size for the node-type list entries (pixels)",
-        default=8,
+        default=10,
         min=6,
         max=20,
         update=_update_invalidate_all,
