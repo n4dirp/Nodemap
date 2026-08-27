@@ -66,9 +66,8 @@ logger = logging.getLogger(__package__)
 FONT_SIZE = 11
 BTN_SIZE = 20
 BTN_MARGIN = 2
-FRAME_BTN_GAP = 0
-
 BTN_HOVER_ALPHA = 0.015
+FRAME_BTN_GAP = 0
 
 
 def _early_exit(context, space, st: MinimapState) -> bool:
@@ -98,10 +97,10 @@ def _compute_minimap_rect(
     x_margin, y_margin, margin = _get_minimap_margins(space, corner, ui_scale)
 
     # Compute desired size, capped to % of safe region (accounting for margins)
-    mw = getattr(settings, "minimap_width", 256) * ui_scale
-    mh = getattr(settings, "minimap_height", 128) * ui_scale
-    max_mw_pct = getattr(settings, "max_width_pct", 50) / 100.0
-    max_mh_pct = getattr(settings, "max_height_pct", 50) / 100.0
+    mw = settings.minimap_width * ui_scale
+    mh = settings.minimap_height * ui_scale
+    max_mw_pct = settings.max_width_pct / 100.0
+    max_mh_pct = settings.max_height_pct / 100.0
     mw = min(mw, (safe_w - x_margin) * max_mw_pct)
     mh = min(mh, (safe_h - y_margin - margin) * max_mh_pct)
 
@@ -281,8 +280,8 @@ def _draw_view_fill(
     visible: tuple[float, float, float, float] | None = None,
 ) -> None:
     """Draw a filled rect over the active view region, behind nodes and wires."""
-    if not getattr(settings, "viewport_fill_rect", False):
-        return
+    # if not settings.viewport_fill_rect:
+    #     return
     if visible is None:
         visible = _get_visible_rect(space, region)
     if not visible:
@@ -294,10 +293,6 @@ def _draw_view_fill(
     vh = round(max((visible[3] - visible[1]) * scale, 1.0))
 
     v_left = max(vx, mx)
-    # st_fill = _state()
-    # if st_fill.list_width > 0:
-    #     # Keep the fill out of the type-list zone.
-    #     v_left = max(v_left, _get_map_content_rect(st_fill)[0])
     v_bottom = max(vy, my)
     v_right = min(vx + vw, mx + mw)
     v_top = min(vy + vh, my + mh)
@@ -306,10 +301,14 @@ def _draw_view_fill(
     if hole_w <= 0 or hole_h <= 0:
         return
 
-    fill_color = getattr(settings, "viewport_fill_color", (0.28, 0.45, 0.7, 1.0))
-    fill = _alpha_mul(fill_color, master_alpha)
+    fill_color = colors["node_active"]
+    if settings.viewport_fill_rect:
+        fill_color = settings.viewport_fill_color
+    fill_color = _alpha_mul(fill_color, 0.3 * master_alpha)
     node_r = colors.get("node_roundness", 2.0) * ui_scale
-    _draw_filled_rounded_rect_clipped(v_left, v_bottom, hole_w, hole_h, node_r, fill, mx, my, mw, mh, panel_r * 1.2)
+    _draw_filled_rounded_rect_clipped(
+        v_left, v_bottom, hole_w, hole_h, node_r, fill_color, mx, my, mw, mh, panel_r * 1.2
+    )
 
 
 def _draw_viewport_overlay(
@@ -355,11 +354,9 @@ def _draw_viewport_overlay(
     hole_w = v_right - v_left
     hole_h = v_top - v_bottom
 
-    # border_alpha_mul = 0.5 if st and st.interaction.pressed else 1.0
-
-    # Darkened overlay (optional)
-    if getattr(settings, "show_viewport_overlay", True):
-        overlay_color = getattr(settings, "viewport_overlay_color", (0.0, 0.0, 0.0, 0.5))
+    # Darkened overlay
+    if settings.show_viewport_overlay:
+        overlay_color = settings.viewport_overlay_color
         overlay = _alpha_mul(overlay_color, master_alpha)
 
         scissor_overlay = scissor_active
@@ -389,14 +386,13 @@ def _draw_viewport_overlay(
 
     # Outline the viewport extent when it overlaps the minimap
     if hole_w > 0 and hole_h > 0:
-        if st and st.interaction.pressed:
-            outline_col = _alpha_mul(colors["node_active"], master_alpha)
-        else:
-            outline_col = _alpha_mul(colors["node_outline"], master_alpha)
+        outline_col = colors["node_active"]
+        if settings.viewport_fill_rect:
+            outline_col = settings.viewport_fill_color
         border = 0.5 * ui_scale
-        shadow = (0, 0, 0, 0.15 * master_alpha)
-        _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, shadow, border)
-        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, outline_col, border)
+        # shadow = (0, 0, 0, 0.15 * master_alpha)
+        # _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, shadow, border)
+        _draw_rounded_rect_border(vx, vy, vw, vh, node_r, _alpha_mul(outline_col, master_alpha), border)
 
 
 def _draw_node_count(
@@ -410,7 +406,7 @@ def _draw_node_count(
     ui_scale: float,
 ) -> None:
     """Draw the node count text centered below the minimap."""
-    if not getattr(settings, "show_node_count", True):
+    if not settings.show_node_count:
         return
 
     info_text = str(node_count)
@@ -512,7 +508,7 @@ _BUTTON_ICONS = {
 
 def _get_visible_minimap_buttons(settings) -> list[str]:
     """Return ids of enabled minimap buttons in draw order."""
-    if not settings or not getattr(settings, "interactive", True):
+    if not settings or not settings.interactive:
         return []
     return [btn_id for btn_id, pref_attr in _MINIMAP_BUTTONS if getattr(settings, pref_attr, True)]
 
@@ -556,7 +552,7 @@ def _layout_minimap_buttons(
 def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alpha):
     """Draw the interactive minimap buttons and record their hit rects."""
     addon = bpy.context.preferences.addons.get(__package__)
-    settings = getattr(addon.preferences, "settings", None) if addon else None
+    settings = addon.preferences.settings if addon else None
     st = _state()
     st.buttons.rects.clear()
 
@@ -619,15 +615,8 @@ def draw_minimap() -> None:
         win = context.window
         win_ptr = win.as_pointer() if win else 0
         has_modal = win_ptr in _minimap_window_operators if win else False
-        # logger.debug(
-        #     "draw_minimap: area=%d win=%d modal_ops=%s has_modal=%s interactive=%s",
-        #     context.area.as_pointer() if context.area else 0,
-        #     win_ptr,
-        #     list(_minimap_window_operators.keys()),
-        #     has_modal,
-        #     getattr(settings, "interactive", True),
-        # )
-        if getattr(settings, "interactive", True):
+
+        if settings.interactive:
             if win and not has_modal:
                 logger.debug("draw_minimap: invoking nodemap.navigate for window %d", win_ptr)
                 try:
@@ -648,7 +637,7 @@ def draw_minimap() -> None:
     visible = _get_visible_rect(space, region)
 
     # Single RNA pass: fingerprint, raw tree bounds, and drawable node count.
-    show_borders = getattr(settings, "show_node_borders", True)
+    show_borders = settings.show_node_borders
     with _Timer("tree_snapshot"):
         current_fingerprint, raw_bounds, content_count = _get_tree_snapshot(node_tree, show_borders)
     if raw_bounds[2] - raw_bounds[0] <= 0 or raw_bounds[3] - raw_bounds[1] <= 0:
@@ -662,21 +651,21 @@ def draw_minimap() -> None:
         "SETTINGS %d nodes | show_wires=%d show_names=%d label_mode=%s"
         " colored_nodes=%d socket_indicators=%d wire_color=%d frame_labels=%d",
         current_fingerprint[0],
-        getattr(settings, "show_wires", True),
-        getattr(settings, "show_names", True),
-        getattr(settings, "node_label_mode", "COMPACT"),
-        getattr(settings, "colored_nodes", True),
-        getattr(settings, "show_socket_indicators", False),
-        getattr(settings, "show_wire_color", True),
-        getattr(settings, "show_frame_labels", True),
+        settings.show_wires,
+        settings.show_names,
+        settings.node_label_mode,
+        settings.colored_nodes,
+        settings.show_socket_indicators,
+        settings.show_wire_color,
+        settings.show_frame_labels,
     )
 
     # Compute dimensions and layout
     with _Timer("setup"):
         ui_scale = _get_ui_scale()
         colors = _get_node_editor_theme_colors()
-        master_alpha = getattr(settings, "opacity", 0.85)
-        corner = getattr(settings, "position", "TOP_RIGHT")
+        master_alpha = settings.opacity
+        corner = settings.position
 
         rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, st)
         if rect is None:
@@ -717,7 +706,7 @@ def draw_minimap() -> None:
         # since arming; identical-fingerprint redraw streams (list animation,
         # hover) must leave the live timer alone so the settle event cannot be
         # starved by continuous redraws.
-        delay = getattr(settings, "debounce_interval", 0.15)
+        delay = settings.debounce_interval
         now = time.perf_counter()
         if st.cache.pending_timer is not None and st.cache.pending_fingerprint != current_fingerprint:
             if now < st.cache.pending_timer_deadline:
@@ -853,7 +842,7 @@ def draw_minimap() -> None:
             # Link wires (baked batches; shadow underlay first, then colors)
             wire_batches = st.cache.wire_batches or []
             wire_shadow_batch = st.cache.wire_shadow_batch
-            if getattr(settings, "show_wires", True) and (wire_shadow_batch or wire_batches):
+            if settings.show_wires and (wire_shadow_batch or wire_batches):
                 with _Timer("draw_wires"):
                     pill_shader = _get_batch_pill_shader()
                     pill_shader.bind()
@@ -909,7 +898,7 @@ def draw_minimap() -> None:
 
             # Socket indicator pills (single batch with per-vertex color)
             socket_batch = st.cache.socket_batch
-            if getattr(settings, "show_socket_indicators", False) and socket_batch:
+            if settings.show_socket_indicators and socket_batch:
                 with _Timer("draw_sockets"):
                     shader = _get_batch_rect_shader()
                     shader.bind()

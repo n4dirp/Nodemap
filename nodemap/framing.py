@@ -47,7 +47,7 @@ def _compute_frame_all_targets(
     st.view.tree_bounds = bounds
 
     addon = bpy.context.preferences.addons.get(__package__)
-    follow = addon and getattr(addon.preferences.settings, "follow_view", False)
+    follow = addon and addon.preferences.settings.follow_view
 
     if not follow:
         return 1.0, 0.0, 0.0
@@ -310,7 +310,7 @@ def frame_view(
         return
 
     addon = bpy.context.preferences.addons.get(__package__)
-    fill = addon and getattr(addon.preferences.settings, "frame_view_fill", False)
+    fill = addon and addon.preferences.settings.frame_view_fill
 
     rect = st.view.rect
     _, _, mw, mh = rect

@@ -36,8 +36,8 @@ def _update_logger_from_prefs():
     level = "INFO"
     try:
         prefs = bpy.context.preferences.addons.get(__package__).preferences
-        enabled = getattr(prefs, "logging_enabled", False)
-        level = getattr(prefs, "logging_level", "INFO")
+        enabled = prefs.logging_enabled
+        level = prefs.logging_level
     except (KeyError, AttributeError, ReferenceError):
         pass
 

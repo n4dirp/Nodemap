@@ -118,8 +118,8 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
     addon = bpy.context.preferences.addons.get(__package__)
     theme_bg = _theme_rgba("node_editor.node_backdrop", (0.22, 0.22, 0.22, 0.95))
-    if addon and getattr(addon.preferences.settings, "custom_bg_color", False):
-        bg = tuple(getattr(addon.preferences.settings, "bg_color", (0.22, 0.22, 0.22, 0.85)))
+    if addon and addon.preferences.settings.custom_bg_color:
+        bg = tuple(addon.preferences.settings.bg_color)
     else:
         bg = theme_bg
 

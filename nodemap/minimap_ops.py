@@ -388,7 +388,9 @@ class NODEMAP_OT_navigate(Operator):
     def _animations_enabled(self, settings, context, default=True) -> bool:
         if context.preferences.view.use_reduce_motion:
             return False
-        return getattr(settings, "animations", default)
+        if settings is None:
+            return default
+        return settings.animations
 
     def _override_ctx(self, context: Context):
         return context.temp_override(
@@ -454,9 +456,9 @@ class NODEMAP_OT_navigate(Operator):
             self._my = event.mouse_y
 
         addon = context.preferences.addons.get(__package__)
-        if addon and not getattr(addon.preferences.settings, "interactive", True):
-            return {"PASS_THROUGH"}
         settings = addon.preferences.settings if addon else None
+        if addon and not settings.interactive:
+            return {"PASS_THROUGH"}
 
         st = self._st
         in_minimap = _is_in_minimap(self._mx, self._my, st)
@@ -684,7 +686,7 @@ class NODEMAP_OT_navigate(Operator):
                 st.interaction.resize_active = divider_handle
                 self._redraw_ui()
                 self._list_width_start_x = self._mx
-                self._list_width_start_pct = getattr(settings, "type_list_width_pct", 35) if settings else 35
+                self._list_width_start_pct = settings.type_list_width_pct if settings else 35
                 _mx, _my, _mw, _mh = st.view.rect
                 self._list_width_start_mw = _mw
                 cursor = _CURSOR_MAP[divider_handle]
@@ -837,7 +839,7 @@ class NODEMAP_OT_navigate(Operator):
                 st.interaction.resize_active = divider_handle_r
                 self._redraw_ui()
                 self._list_width_start_x = self._mx
-                self._list_width_start_pct = getattr(settings, "type_list_width_pct", 35) if settings else 35
+                self._list_width_start_pct = settings.type_list_width_pct if settings else 35
                 _mx, _my, _mw, _mh = st.view.rect
                 self._list_width_start_mw = _mw
                 cursor = _CURSOR_MAP[divider_handle_r]
@@ -1004,7 +1006,7 @@ class NODEMAP_OT_navigate(Operator):
             _clamp_pan_to_viewport(self._space, self._region, st)
             rejected_x = dx - (st.view.pan[0] - pan_before[0])
             rejected_y = dy - (st.view.pan[1] - pan_before[1])
-            if (rejected_x != 0 or rejected_y != 0) and getattr(settings, "follow_view", False):
+            if (rejected_x != 0 or rejected_y != 0) and settings and settings.follow_view:
                 st.view.pan = (pan_before[0] + dx, pan_before[1] + dy)
                 self._redirect_to_view2d(context, -dx, -dy)
             elif rejected_x != 0 or rejected_y != 0:
@@ -1058,7 +1060,7 @@ class NODEMAP_OT_navigate(Operator):
                 return {"RUNNING_MODAL"}
 
             prefs = addon.preferences.settings if addon else None
-            scroll_mode = getattr(prefs, "scroll_wheel_mode", "MINIMAP") if prefs else "MINIMAP"
+            scroll_mode = prefs.scroll_wheel_mode if prefs else "MINIMAP"
             if event.alt:
                 scroll_mode = "NODE_EDITOR" if scroll_mode == "MINIMAP" else "MINIMAP"
 
@@ -1077,7 +1079,7 @@ class NODEMAP_OT_navigate(Operator):
                 effective_zoom = st.view.zoom
 
                 is_constrained = False
-                if addon and getattr(addon.preferences.settings, "follow_view", False):
+                if addon and addon.preferences.settings.follow_view:
                     if effective_zoom < st.view.base_zoom - 0.001:
                         is_constrained = True
 
@@ -1729,7 +1731,7 @@ class NODEMAP_OT_navigate(Operator):
             return
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
-        speed = getattr(settings, "pan_speed", "MEDIUM")
+        speed = settings.pan_speed if settings else "MEDIUM"
         frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
         self._anim_progress += 1 / frames
         if self._anim_progress >= 1.0:
@@ -1789,7 +1791,7 @@ class NODEMAP_OT_navigate(Operator):
             return
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
-        speed = getattr(settings, "pan_speed", "MEDIUM")
+        speed = settings.pan_speed if settings else "MEDIUM"
         frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
         progress = self._frame_anim_progress + 1 / frames
         self._frame_anim_progress = progress
@@ -1853,7 +1855,7 @@ class NODEMAP_OT_navigate(Operator):
             return
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
-        speed = getattr(settings, "pan_speed", "MEDIUM")
+        speed = settings.pan_speed if settings else "MEDIUM"
         frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
         progress = self._editor_anim_progress + 1 / frames
         if progress >= 1.0:
@@ -2007,7 +2009,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         if not addon:
             return None
-        corner = getattr(addon.preferences.settings, "position", "TOP_RIGHT")
+        corner = addon.preferences.settings.position
         ui_scale = _get_ui_scale()
         return _get_resize_handle(st, corner, self._mx, self._my, ui_scale)
 
@@ -2021,7 +2023,7 @@ class NODEMAP_OT_navigate(Operator):
         w0, h0 = self._resize_start_values
         dx = self._mx - self._resize_start_mouse[0]
         dy = self._my - self._resize_start_mouse[1]
-        corner = getattr(settings, "position", "TOP_RIGHT")
+        corner = settings.position
 
         ui_scale = _get_ui_scale()
         sx, sy, ex, ey = _get_safe_bounds(self._area, self._region)
@@ -2029,8 +2031,8 @@ class NODEMAP_OT_navigate(Operator):
 
         safe_w = ex - sx
         safe_h = ey - sy
-        max_mw_pct = getattr(settings, "max_width_pct", 50) / 100.0
-        max_mh_pct = getattr(settings, "max_height_pct", 50) / 100.0
+        max_mw_pct = settings.max_width_pct / 100.0
+        max_mh_pct = settings.max_height_pct / 100.0
         max_w = max(MIN_MAP_WIDTH, int((safe_w - 2 * x_margin) * max_mw_pct))
         max_h = max(MIN_MAP_HEIGHT, int((safe_h - y_margin - margin) * max_mh_pct))
 

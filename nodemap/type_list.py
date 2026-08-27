@@ -21,7 +21,6 @@ from .helpers import (
     _LIST_SWATCH,
     _LIST_SWATCH_GAP,
     STATS_FONT_ID,
-    STATS_FONT_SIZE,
     _get_type_list_width,
     _schedule_list_anim_redraw,
 )
@@ -174,7 +173,7 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
     a timeout) for the pending compile to expose measurable type stats
     before starting its clock.
     """
-    list_font_size = getattr(settings, "type_list_font_size", STATS_FONT_SIZE)
+    list_font_size = settings.type_list_font_size
     target_now = _get_type_list_width(settings, st, mw, ui_scale, list_font_size)
     if not st.list.anim_active:
         st.list.width = target_now
@@ -212,8 +211,8 @@ def _type_list_cache_key(st: MinimapState, settings, colors: dict, master_alpha:
     )
     return (
         st.cache.tree_version,
-        getattr(settings, "type_list_sort", "COUNT"),
-        getattr(settings, "colored_nodes", True),
+        settings.type_list_sort,
+        settings.colored_nodes,
         frozenset(st.list.expanded),
         ui_scale,
         master_alpha,
@@ -235,10 +234,10 @@ def _build_type_list_cache(
     type_stats = tree_data.get("type_stats") or {}
 
     font_id = STATS_FONT_ID
-    font_size = int(getattr(settings, "type_list_font_size", STATS_FONT_SIZE) * ui_scale)
+    font_size = int(settings.type_list_font_size * ui_scale)
     blf.size(font_id, font_size)
 
-    if getattr(settings, "type_list_sort", "COUNT") == "NAME":
+    if settings.type_list_sort == "NAME":
         items = sorted(type_stats.items(), key=lambda kv: kv[0].lower())
     else:
         items = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -337,7 +336,7 @@ def _draw_type_list(
         _build_type_list_cache(st, settings, key, colors, master_alpha, ui_scale)
     entries = st.cache.list_entries or []
     layout = st.cache.list_layout or {}
-    font_size = layout.get("font_size", int(getattr(settings, "type_list_font_size", STATS_FONT_SIZE) * ui_scale))
+    font_size = layout.get("font_size", int(settings.type_list_font_size * ui_scale))
     row_h = layout.get("row_h", 16.0)
     line_h = layout.get("line_h", 12.0)
     widest_count = layout.get("widest_count", 0.0)
@@ -380,7 +379,7 @@ def _draw_type_list(
     st.list.scroll = min(max(st.list.scroll, 0.0), scroll_max)
     st.list.scroll_max = scroll_max
 
-    show_type_colors = getattr(settings, "show_type_colors", True) and getattr(settings, "colored_nodes", True)
+    show_type_colors = settings.show_type_colors and settings.colored_nodes
 
     swatch_col = icon_col if show_type_colors else 0.0
 

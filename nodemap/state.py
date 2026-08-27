@@ -201,7 +201,7 @@ def _state(area_ptr: int | None = None) -> MinimapState:
         try:
             prefs = bpy.context.preferences.addons.get(__package__)
             if prefs:
-                state.enabled = getattr(prefs.preferences.settings, "show_by_default", True)
+                state.enabled = prefs.preferences.settings.show_by_default
         except (AttributeError, ReferenceError):
             pass
         _minimap_state[area_ptr] = state

@@ -244,14 +244,14 @@ def _get_type_list_width(settings, st, mw: float, ui_scale: float, font_size: in
     measurement; content clips or shows extra padding instead.
     Called before the map transform so node framing can reserve the zone.
     """
-    if not getattr(settings, "show_type_list", False):
+    if not settings or not settings.show_type_list:
         return 0.0
     tree_data = st.cache.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
         return 0.0
 
-    pct = getattr(settings, "type_list_width_pct", 35) / 100.0
+    pct = settings.type_list_width_pct / 100.0
     raw = mw * pct
     return min(max(raw, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
 
@@ -268,12 +268,12 @@ def start_list_width_animation(st, settings) -> None:
             return
     except AttributeError:
         pass
-    if not getattr(settings, "animations", True):
+    if not settings or not settings.animations:
         return
     st.list.anim_active = True
     st.list.anim_from = st.list.width
-    st.list.anim_target = 0.0 if not getattr(settings, "show_type_list", False) else -1.0
-    frames = _LIST_ANIM_FRAMES.get(getattr(settings, "pan_speed", "MEDIUM"), 24)
+    st.list.anim_target = 0.0 if not settings.show_type_list else -1.0
+    frames = _LIST_ANIM_FRAMES.get(settings.pan_speed, 24)
     st.list.anim_duration = frames / 60.0
     st.list.anim_start = time.perf_counter()
 

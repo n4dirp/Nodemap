@@ -79,7 +79,7 @@ def _get_minimap_transform(
 
     # Dynamic Auto-Zoom if follow_view is active
     addon = bpy.context.preferences.addons.get(__package__)
-    if addon and getattr(addon.preferences.settings, "follow_view", False):
+    if addon and addon.preferences.settings.follow_view:
         if space is None:
             space = bpy.context.space_data
         if region is None:
@@ -121,7 +121,7 @@ def _clamp_pan_to_viewport(
     No-op when the ``follow_view`` preference is off.
     """
     addon = bpy.context.preferences.addons.get(__package__)
-    if not addon or not getattr(addon.preferences.settings, "follow_view", False):
+    if not addon or not addon.preferences.settings.follow_view:
         return
 
     if visible is None:

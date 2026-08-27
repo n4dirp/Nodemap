@@ -76,7 +76,7 @@ def _maybe_start_profiler(st: MinimapState) -> None:
     if st._profiling_active:
         return
     prefs = bpy.context.preferences.addons[__package__].preferences
-    if not getattr(prefs, "logging_enabled", False) or getattr(prefs, "logging_level", "INFO") != "TRACE":
+    if not prefs.logging_enabled or prefs.logging_level != "TRACE":
         return
     try:
         profiler = cProfile.Profile()
@@ -138,7 +138,7 @@ def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alp
     frozen wire/marker batches snap to the already-patched positions. A
     position-only diff is patched incrementally; anything else recompiles.
     """
-    include_selection = getattr(settings, "show_node_borders", True)
+    include_selection = settings.show_node_borders
     current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
     old_fingerprint = st.cache.fingerprint
     unchanged = old_fingerprint == current_fingerprint
@@ -201,16 +201,16 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
 
     tree_data: dict = {}
 
-    # Hoisted settings lookups (avoid repeated getattr in loops)
-    show_frames = getattr(settings, "show_frames", True)
-    show_names = getattr(settings, "show_names", True)
-    show_socket_indicators = getattr(settings, "show_socket_indicators", False)
-    show_wires = getattr(settings, "show_wires", True)
-    show_wire_color = getattr(settings, "show_wire_color", True)
-    show_frame_labels = getattr(settings, "show_frame_labels", True)
-    colored_nodes = getattr(settings, "colored_nodes", True)
-    node_label_mode = getattr(settings, "node_label_mode", "COMPACT")
-    show_type_list = getattr(settings, "show_type_list", False)
+    # Hoisted settings lookups (avoid repeated attribute lookups in loops)
+    show_frames = settings.show_frames
+    show_names = settings.show_names
+    show_socket_indicators = settings.show_socket_indicators
+    show_wires = settings.show_wires
+    show_wire_color = settings.show_wire_color
+    show_frame_labels = settings.show_frame_labels
+    colored_nodes = settings.colored_nodes
+    node_label_mode = settings.node_label_mode
+    show_type_list = settings.show_type_list
 
     # Single pre-pass: classify nodes + cache dims/location + compute bounds
     frames = []
