@@ -177,11 +177,9 @@ def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alp
     st.cache.pending_settle_flush = False
     if trace:
         logger.trace("SETTLE %s", path)
-    screen = bpy.context.screen
-    if screen:
-        for area in screen.areas:
-            if area.type == "NODE_EDITOR":
-                area.tag_redraw()
+    from .helpers import redraw_ui
+
+    redraw_ui("NODE_EDITOR")
     return None
 
 
