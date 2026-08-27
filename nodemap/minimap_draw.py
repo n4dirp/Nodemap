@@ -250,14 +250,17 @@ def _draw_resize_handles(
             _draw_pill(mx + margin, hy, mw - 2 * margin, thick, col_warn if h_clamped else col_base)
         case ResizeHandle.LIST:
             zone = st.list.zone_rect
-            if not zone:
+            if not zone or not st.view.rect:
                 return
-            zx, zy, zw, zh = zone
-            # Divider centered in the 6*scale gap between list zone and map content.
-            divider_cx = zx + zw + 3.0 * ui_scale - thick / 2.0
+            zy, zh = zone[1], zone[3]
+            # Derive the divider x from the live zone width so the pill tracks
+            # per-pixel during a drag instead of lagging one frame behind.
+            mx0 = st.view.rect[0]
+            divider_cx = mx0 + st.view.padding + st.list.width - 2.0 * ui_scale + 3.0 * ui_scale - thick / 2.0
             # Clamp to zone vertical extent with small margin so pill stays inside.
             z_margin = 2 * ui_scale
-            _draw_pill(divider_cx, zy + z_margin, thick, max(zh - 2 * z_margin, 1.0), col_base)
+            col = col_warn if st.list.width_clamped else col_base
+            _draw_pill(divider_cx, zy + z_margin, thick, max(zh - 2 * z_margin, 1.0), col)
 
 
 def _draw_view_fill(
@@ -744,7 +747,7 @@ def draw_minimap() -> None:
     st.view.scale = scale
     with _Timer("ensure_batches"):
         highlight_border = (
-            _alpha_mul(colors["node_active"], 0.4)
+            _alpha_mul(colors["node_active"], 0.3)
             if (st.list.hovered_type_label or st.interaction.hovered_node)
             else None
         )

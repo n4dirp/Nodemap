@@ -116,7 +116,7 @@ def _ensure_minimap_batches(
     hl_outline = None
     if (hovered_type or hovered_node_name) and highlight_border is not None:
         hl_outline = _srgb_to_linear(_alpha_mul(highlight_border, master_alpha))
-    hl_margin = 4.0 * ui_scale
+    hl_margin = 2.0 * ui_scale
     hl_line_w = 2.0
 
     # Cull window in baked space: the map interior plus slack for anchor

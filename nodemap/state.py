@@ -55,6 +55,8 @@ class InteractionState:
 @dataclass
 class ListState:
     width: float = 0.0
+    drag_width: float | None = None
+    width_clamped: bool = False
     scroll: float = 0.0
     scroll_max: float = 0.0
     row_height: float = 16.0

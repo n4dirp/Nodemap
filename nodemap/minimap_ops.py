@@ -178,9 +178,11 @@ def _get_list_divider_handle(st: MinimapState, rx: int, ry: int, ui_scale: float
     if st.list.width <= 0 or not st.list.zone_rect or not st.view.rect:
         return None
     zx, zy, zw, zh = st.list.zone_rect
-    divider_cx = zx + zw + 3.0 * ui_scale
+    # Hit zone starts at the zone's right edge (never reaching into the
+    # scrollbar) and extends right into the map gutter for reachability.
+    z_right = zx + zw
     hw = _HANDLE_THICKNESS * ui_scale
-    if divider_cx - hw <= rx <= divider_cx + hw and zy <= ry <= zy + zh:
+    if z_right <= rx <= z_right + 2 * hw and zy <= ry <= zy + zh:
         return ResizeHandle.LIST
     return None
 
@@ -562,6 +564,8 @@ class NODEMAP_OT_navigate(Operator):
         if event.value == "RELEASE":
             if self._list_width_dragging:
                 self._list_width_dragging = False
+                st.list.drag_width = None
+                st.list.width_clamped = False
                 st.interaction.resize_active = None
                 st.interaction.hovered_handle = None
                 context.window.cursor_modal_set("DEFAULT")
@@ -774,6 +778,8 @@ class NODEMAP_OT_navigate(Operator):
         if event.value == "RELEASE":
             if self._list_width_dragging:
                 self._list_width_dragging = False
+                st.list.drag_width = None
+                st.list.width_clamped = False
                 st.interaction.resize_active = None
                 st.interaction.hovered_handle = None
                 context.window.cursor_modal_set("DEFAULT")
@@ -1613,6 +1619,8 @@ class NODEMAP_OT_navigate(Operator):
             self._list_width_dragging = False
             st = self._st
             if st:
+                st.list.drag_width = None
+                st.list.width_clamped = False
                 st.interaction.hovered_handle = None
                 st.interaction.resize_active = None
                 st.cache.invalidate_batches_only()
@@ -1991,7 +1999,7 @@ class NODEMAP_OT_navigate(Operator):
             st.interaction.hovered_handle = divider
             if divider != old_handle:
                 self._redraw_ui()
-            cursor = _CURSOR_MAP.get(divider, "MOVE_X")
+            cursor = "HAND" if st.list.width_clamped else _CURSOR_MAP.get(divider, "MOVE_X")
             if cursor != self._last_cursor:
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
@@ -2101,6 +2109,11 @@ class NODEMAP_OT_navigate(Operator):
             settings.type_list_width_pct = new_pct
         finally:
             _pref_mod._suppress_update = False
+        # Drive the zone width live (per-pixel) so the pill tracks the cursor
+        # without the integer-percent quantization or a one-frame zone lag.
+        st.list.drag_width = new_w
+        st.list.width = new_w
+        st.list.width_clamped = new_w <= min_w + 0.5 or new_w >= max_w - 0.5
         # Keep state hover in sync so the pill draws during drag.
         st.interaction.hovered_handle = ResizeHandle.LIST
         st.interaction.resize_active = ResizeHandle.LIST

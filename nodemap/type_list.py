@@ -175,6 +175,12 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
     """
     list_font_size = settings.type_list_font_size
     target_now = _get_type_list_width(settings, st, mw, ui_scale, list_font_size)
+    # During an interactive width drag the live pixel width wins so the zone
+    # tracks the cursor per-pixel; percent derivation and animation resume
+    # after the drag releases (drag_width cleared in the operator).
+    if st.list.drag_width is not None:
+        st.list.width = st.list.drag_width
+        return
     if not st.list.anim_active:
         st.list.width = target_now
         return
@@ -265,6 +271,20 @@ def _build_type_list_cache(
         "widest_count": widest_count,
     }
     st.cache.list_swatches_batch = None
+
+
+def _child_label_text(node_name: str, node) -> str:
+    """Return the child row text: ``name (label)`` when the node has a label.
+
+    Falls back to the bare node name when *node* is unavailable or has no label.
+    """
+    try:
+        label = getattr(node, "label", "")
+    except Exception:
+        label = ""
+    if label:
+        return f"{node_name} ({label})"
+    return node_name
 
 
 def _iter_type_list_layout(
@@ -588,9 +608,10 @@ def _draw_type_list(
                         swatch / 2,
                         _alpha_mul(type_colors.get(label, colors["node"]), master_alpha),
                     )
+                label_text = _child_label_text(node_name, node)
                 blf.position(font_id, child_label_x, text_y, 0)
                 blf.color(font_id, *label_col)
-                blf.draw(font_id, node_name)
+                blf.draw(font_id, label_text)
                 blf.enable(font_id, blf.CLIPPING)
         blf.disable(font_id, blf.CLIPPING)
         blf.disable(font_id, blf.SHADOW)
