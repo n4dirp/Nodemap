@@ -273,6 +273,21 @@ def _build_type_list_cache(
     st.cache.list_swatches_batch = None
 
 
+def _header_type_color(label: str, children: dict, node_colors: dict, type_colors: dict, colors: dict) -> tuple:
+    """Return the header swatch color: the first child's own node color.
+
+    *children* are the alphabetically sorted sub-lists for the type, so the
+    first entry is the first row shown under the expanded header. Falls back
+    to the type color and then the default node color.
+    """
+    first_names = children.get(label) or ()
+    if first_names:
+        first_color = node_colors.get(label, {}).get(first_names[0])
+        if first_color is not None:
+            return first_color
+    return type_colors.get(label, colors["node"])
+
+
 def _child_label_text(node_name: str, node) -> str:
     """Return the child row text: ``name (label)`` when the node has a label.
 
@@ -446,6 +461,7 @@ def _draw_type_list(
 
     # Per-type selection state (compiled) drives font (not icon) recoloring.
     type_colors = tree_data.get("type_colors") or {}
+    type_node_colors = tree_data.get("type_node_colors") or {}
     type_selected = tree_data.get("type_selected_counts") or {}
     type_active = tree_data.get("type_active_label")
     hover_col = _alpha_mul(colors["text"], 0.025 * master_alpha)
@@ -517,6 +533,18 @@ def _draw_type_list(
             header_rects.append((pill_x, s_bottom, pill_w, row_h, label))
             if entry_map.get(label, ("", 0.0, 1))[2] > 1:
                 toggle_rects[label] = (content_x, s_bottom, swatch + swatch_gap, row_h)
+                if label in expanded:
+                    child_count = len(_children.get(label, ()))
+                    if child_count > 0:
+                        header_color = _header_type_color(label, _children, type_node_colors, type_colors, colors)
+                        line_color = (
+                            _alpha_mul(header_color, master_alpha)
+                            if show_type_colors
+                            else _alpha_mul(colors["text"], 0.1 * master_alpha)
+                        )
+                        _draw_expand_guide_line(
+                            content_x + swatch / 2, s_bottom - 1, child_count * row_h - 2, ui_scale, line_color
+                        )
         st.list.row_rects = header_rects
         st.list.toggle_rects = toggle_rects
 
@@ -558,9 +586,11 @@ def _draw_type_list(
         # helper per row would redo this setup twice per visible row.
         font_id = STATS_FONT_ID
         blf.size(font_id, font_size)
-        blf.enable(font_id, blf.SHADOW)
-        blf.shadow(font_id, 3, 0, 0, 0, 255)
-        blf.shadow_offset(font_id, 0, -1)
+        with_shadow = settings.show_text_shadow
+        if with_shadow:
+            blf.enable(font_id, blf.SHADOW)
+            blf.shadow(font_id, 3, 0, 0, 0, 255)
+            blf.shadow_offset(font_id, 0, -1)
 
         # Child rows: indented by one column/tab relative to headers.
         # When swatches are enabled, the child swatch sits indented under the
@@ -609,7 +639,8 @@ def _draw_type_list(
                 # Restore alpha blending after BLF.
                 gpu.state.blend_set("ALPHA")
 
-                icon_color = type_colors.get(label, colors["node"])
+                header_color = _header_type_color(label, _children, type_node_colors, type_colors, colors)
+                icon_color = header_color
                 icon_rgba = _alpha_mul(icon_color, master_alpha)
                 if entry_map.get(label, ("", 0.0, 1))[2] > 1:
                     _paint_expand_icon(
@@ -650,7 +681,10 @@ def _draw_type_list(
                         swatch,
                         swatch,
                         swatch / 2,
-                        _alpha_mul(type_colors.get(label, colors["node"]), master_alpha),
+                        _alpha_mul(
+                            type_node_colors.get(label, {}).get(node_name, type_colors.get(label, colors["node"])),
+                            master_alpha,
+                        ),
                     )
                 label_text = _child_label_text(node_name, node)
                 blf.position(font_id, child_label_x, text_y, 0)
@@ -658,7 +692,8 @@ def _draw_type_list(
                 blf.draw(font_id, label_text)
                 blf.enable(font_id, blf.CLIPPING)
         blf.disable(font_id, blf.CLIPPING)
-        blf.disable(font_id, blf.SHADOW)
+        if with_shadow:
+            blf.disable(font_id, blf.SHADOW)
     finally:
         try:
             was_active, old_rect = saved_scissor or (False, None)
@@ -694,6 +729,12 @@ def _draw_type_list(
         )
         st.list.scrollbar_thumb = thumb_rect
         st.list.scrollbar_track = track_rect
+
+
+def _draw_expand_guide_line(x: float, top: float, height: float, ui_scale: float, color) -> None:
+    """Draw a vertical guide under the expand icon, spanning the child rows."""
+    t = max(1.0, 1.0 * ui_scale)
+    _draw_filled_rounded_rect(x - t / 2, top - height, t, height, t / 2, color)
 
 
 def _paint_expand_icon(x: float, y: float, size: float, color, ui_scale: float, expanded: bool) -> None:

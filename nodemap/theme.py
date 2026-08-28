@@ -123,6 +123,10 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     else:
         bg = theme_bg
 
+    text = _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0))
+    if addon and addon.preferences.settings.custom_text_color:
+        text = tuple(addon.preferences.settings.text_color)
+
     return {
         "bg": bg,
         "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
@@ -134,7 +138,7 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
         "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 0.37, 0.34, 0.9)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
-        "text": _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0)),
+        "text": text,
         "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,

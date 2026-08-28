@@ -120,6 +120,15 @@ class NODEMAP_PT_popup(Panel):
             sub.active = settings.custom_bg_color
             sub.prop(settings, "bg_color", text="")
 
+            row = col.row(align=True)
+            row.prop(settings, "custom_text_color", text="Custom Text Color")
+            sub = row.row(align=True)
+            sub.active = settings.custom_text_color
+            sub.prop(settings, "text_color", text="")
+
+            row = col.row(align=True)
+            row.prop(settings, "show_text_shadow", text="Text Shadows")
+
             row = col.row()
             row.prop(settings, "colored_nodes", text="Node Colors")
             sub = row.row()

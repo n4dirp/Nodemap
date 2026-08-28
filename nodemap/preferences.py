@@ -216,6 +216,31 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
+    custom_text_color: BoolProperty(
+        name="Custom Text Color",
+        description="Override the Blender theme text color with a custom color",
+        default=False,
+        update=_update_invalidate_batches,
+    )
+
+    text_color: FloatVectorProperty(
+        name="Text Color",
+        description="Custom text color for minimap labels and the type list",
+        default=(1.0, 1.0, 1.0, 1.0),
+        size=4,
+        min=0.0,
+        max=1.0,
+        subtype="COLOR_GAMMA",
+        update=_update_invalidate_batches,
+    )
+
+    show_text_shadow: BoolProperty(
+        name="Text Shadows",
+        description="Draw a shadow behind minimap and type-list text",
+        default=True,
+        update=_update_invalidate_batches,
+    )
+
     show_viewport_overlay: BoolProperty(
         name="Viewport Overlay",
         description="Show darkened overlay with viewport cutout in the minimap",

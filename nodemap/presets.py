@@ -50,6 +50,9 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.viewport_overlay_color",
         "settings.custom_bg_color",
         "settings.bg_color",
+        "settings.custom_text_color",
+        "settings.text_color",
+        "settings.show_text_shadow",
         "settings.colored_nodes",
         "settings.show_wire_color",
         # Options

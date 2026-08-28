@@ -519,17 +519,21 @@ def _get_theme_colors():
     }
 
 
-def _draw_text_with_shadow(font_id: int, text: str, x: float, y: float, color: tuple[float, ...], size: int):
+def _draw_text_with_shadow(
+    font_id: int, text: str, x: float, y: float, color: tuple[float, ...], size: int, with_shadow: bool = True
+):
     if len(color) == 3:
         color = color + (1.0,)
     blf.size(font_id, size)
-    blf.enable(font_id, blf.SHADOW)
-    blf.shadow(font_id, 3, 0, 0, 0, 255)
-    blf.shadow_offset(font_id, 0, -1)
+    if with_shadow:
+        blf.enable(font_id, blf.SHADOW)
+        blf.shadow(font_id, 3, 0, 0, 0, 255)
+        blf.shadow_offset(font_id, 0, -1)
     blf.position(font_id, x, y, 0)
     blf.color(font_id, *color)
     blf.draw(font_id, text)
-    blf.disable(font_id, blf.SHADOW)
+    if with_shadow:
+        blf.disable(font_id, blf.SHADOW)
 
 
 def _draw_filled_rounded_rect(x, y, w, h, r, color):

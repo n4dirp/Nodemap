@@ -1,6 +1,7 @@
 """Minimap rendering in the Node Editor."""
 
 import logging
+import math
 import time
 
 import blf
@@ -14,7 +15,6 @@ from .gpu_draw import (
     _draw_filled_rounded_rect_clipped,
     _draw_filled_rounded_rect_with_hole,
     _draw_pill,
-    _draw_pill_border,
     _draw_rounded_rect_border,
     _draw_text_with_shadow,
     _get_batch_pill_shader,
@@ -22,6 +22,7 @@ from .gpu_draw import (
     _get_batch_rect_shader,
 )
 from .helpers import (
+    _HANDLE_THICKNESS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     _expand_bounds_margin,
@@ -65,9 +66,9 @@ logger = logging.getLogger(__package__)
 # Variables
 FONT_SIZE = 11
 BTN_SIZE = 20
-BTN_MARGIN = 2
+BTN_MARGIN = 0
 BTN_HOVER_ALPHA = 0.015
-FRAME_BTN_GAP = 0
+FRAME_BTN_GAP = 1
 
 
 def _early_exit(context, space, st: MinimapState) -> bool:
@@ -232,7 +233,7 @@ def _draw_resize_handles(
 
     col_base = _alpha_mul(colors["text"], 0.5 * master_alpha)
     col_warn = _alpha_mul(colors["indicator"], master_alpha)
-    thick = 3.0 * ui_scale
+    thick = 2.0 * ui_scale
     margin = 6 * ui_scale
 
     match handle:
@@ -418,9 +419,8 @@ def _draw_node_count(
     blf.size(font_id, font_size)
     text_w, _ = blf.dimensions(font_id, info_text)
 
-    pad = 1
-    tx = mx + (mw - text_w) - 10 * ui_scale
-    ty = my + (FONT_SIZE * ui_scale) - 3
+    tx = mx + (mw - text_w) - _HANDLE_THICKNESS * ui_scale
+    ty = my + (_HANDLE_THICKNESS * ui_scale)
 
     st = _state()
     btn_bottoms = [rect[1] for rect in st.buttons.rects.values() if rect]
@@ -429,7 +429,7 @@ def _draw_node_count(
 
     text_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
 
-    _draw_text_with_shadow(font_id, info_text, tx + pad, ty + pad, text_color, font_size)
+    _draw_text_with_shadow(font_id, info_text, tx, ty, text_color, font_size, settings.show_text_shadow)
 
 
 def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
@@ -489,16 +489,34 @@ def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale:
     _draw_filled_rounded_rect(box_x, box_y, box_w, box_h, 1.5 * ui_scale, color)
 
 
-def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
-    """Draw the list-toggle three horizontal bars icon."""
+def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: float, active: bool = False) -> None:
+    """Draw the list-toggle icon: three horizontal bars, or an X when active."""
     t = max(1, int(1.5 * ui_scale))
-    bar_w = size * 0.5
-    bar_gap = 2.0 * ui_scale
-    bar_x = x + (size - bar_w) / 2
-    bar_y = y + (size - (3 * t + 2 * bar_gap)) / 2 - 0.5
+    if not active:
+        bar_w = size * 0.5
+        bar_gap = 2.0 * ui_scale
+        bar_x = x + (size - bar_w) / 2
+        bar_y = y + (size - (3 * t + 2 * bar_gap)) / 2 - 0.5
 
-    for i in range(3):
-        _draw_filled_rounded_rect(bar_x, bar_y + i * (t + bar_gap), bar_w, t, t * 0.5, color)
+        for i in range(3):
+            _draw_filled_rounded_rect(bar_x, bar_y + i * (t + bar_gap), bar_w, t, t * 0.5, color)
+        return
+
+    # Active state: an X crossing two diagonal rounded bars about the center.
+    arm = size * 0.25
+    cx = x + size / 2
+    cy = y + size / 2
+
+    gpu.matrix.push()
+    try:
+        gpu.matrix.translate((cx, cy))
+        for sign in (-1, 1):
+            gpu.matrix.push()
+            gpu.matrix.multiply_matrix(Matrix.Rotation(math.radians(sign * 45.0), 4, "Z"))
+            _draw_filled_rounded_rect(-arm, -t / 2.0, 2 * arm, t, t / 2.0, color)
+            gpu.matrix.pop()
+    finally:
+        gpu.matrix.pop()
 
 
 _BUTTON_ICONS = {
@@ -565,30 +583,55 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
     rects = _layout_minimap_buttons(st, visible_ids, mx, my, mw, mh, padding, ui_scale)
 
     bg_color = _alpha_mul(colors["bg"], master_alpha)
-    border_color = _alpha_mul(colors["bg"], master_alpha * 0.25)
+    border_color = _alpha_mul(colors["bg_border"], master_alpha)
 
-    # Shared capsule behind the right-edge stack, anchored at its bottom button
+    # Frame buttons merge into one combined background when two or more are
+    # shown, with a separator line in the gaps; the list toggle stays standalone.
     stack = [btn_id for btn_id in visible_ids if btn_id != "LIST"]
-    if stack:
-        sx, sy, size = rects[stack[-1]]
-        span_h = len(stack) * size + (len(stack) - 1) * FRAME_BTN_GAP * ui_scale
-        _draw_pill(sx, sy, size, span_h, bg_color)
-        _draw_pill_border(sx, sy, size, span_h, border_color, 0.5)
+    combined = len(stack) >= 2
+    if combined:
+        s_top_btn, s_bot_btn = stack[0], stack[-1]
+        sx, _, size = rects[s_top_btn]
+        s_top = rects[s_top_btn][1] + size
+        s_bottom = rects[s_bot_btn][1]
+        radius = max(3.0, size * 0.25)
+        _draw_filled_rounded_rect(sx, s_bottom, size, s_top - s_bottom, radius, bg_color)
+        _draw_rounded_rect_border(sx, s_bottom, size, s_top - s_bottom, radius, border_color, 0.5)
+
+        line_t = max(1.0, 1.0 * ui_scale)
+        sep_inset = 0 * ui_scale
+        for i in range(len(stack) - 1):
+            sep_y = rects[stack[i]][1]
+            _draw_filled_rounded_rect(
+                sx + sep_inset, sep_y - line_t, size - 2 * sep_inset, line_t, line_t / 2, border_color
+            )
 
     for btn_id, _pref_attr in _MINIMAP_BUTTONS:
         if btn_id not in rects:
             continue
         bx, by, size = rects[btn_id]
-        if btn_id == "LIST":
-            # Standalone capsule outside the shared stack
-            _draw_pill(bx, by, size, size, bg_color)
-            _draw_pill_border(bx, by, size, size, border_color, 0.5)
+        radius = max(3.0, size * 0.25)
+        if btn_id == "LIST" or not combined:
+            _draw_filled_rounded_rect(bx, by, size, size, radius, bg_color)
+            _draw_rounded_rect_border(bx, by, size, size, radius, border_color, 0.5)
         hovered = st.buttons.hovered == btn_id
         ico_color = _alpha_mul(colors["text"], master_alpha * 0.7)
         if hovered:
-            _draw_pill(bx + 1, by + 1, size - 2, size - 2, _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha))
+            _draw_filled_rounded_rect(
+                bx + 1,
+                by + 1,
+                size - 2,
+                size - 2,
+                max(2.0, radius - 1),
+                _alpha_mul(colors["text"], BTN_HOVER_ALPHA * master_alpha),
+            )
             ico_color = _alpha_mul(colors["text"], master_alpha)
-        _BUTTON_ICONS[btn_id](bx, by, size, ico_color, ui_scale)
+        if btn_id == "LIST":
+            _paint_list_toggle_icon(
+                bx, by, size, ico_color, ui_scale, active=bool(settings and settings.show_type_list)
+            )
+        else:
+            _BUTTON_ICONS[btn_id](bx, by, size, ico_color, ui_scale)
         st.buttons.rects[btn_id] = (bx, by, size, size)
 
 
@@ -940,6 +983,7 @@ def draw_minimap() -> None:
                     round(content_k * ly + off_y),
                     text_color,
                     font_size,
+                    settings.show_text_shadow,
                 )
             gpu.state.blend_set("ALPHA")
 

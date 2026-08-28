@@ -220,6 +220,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     type_counts: dict[str, int] = {}
     type_colors: dict[str, tuple[float, float, float, float]] = {}
     type_nodes: dict[str, list[str]] = {}
+    type_node_colors: dict[str, dict[str, tuple[float, float, float, float]]] = {}
     type_selected_counts: dict[str, int] = {}
     type_active_label: str | None = None
 
@@ -350,6 +351,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     info["type_label"] = "Frame"
                     type_counts["Frame"] = type_counts.get("Frame", 0) + 1
                     type_nodes.setdefault("Frame", []).append(node.name)
+                    type_node_colors.setdefault("Frame", {})[node.name] = frame_color
                     if node.select:
                         type_selected_counts["Frame"] = type_selected_counts.get("Frame", 0) + 1
                     if node == active_node:
@@ -372,6 +374,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                     info["type_label"] = label
                     type_counts[label] = type_counts.get(label, 0) + 1
                     type_nodes.setdefault(label, []).append(node.name)
+                    type_node_colors.setdefault(label, {})[node.name] = node_color
                     if node.select:
                         type_selected_counts[label] = type_selected_counts.get(label, 0) + 1
                     if node == active_node:
@@ -525,6 +528,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
         tree_data["group_markers"] = group_markers
         tree_data["type_stats"] = type_counts
         tree_data["type_colors"] = type_colors
+        tree_data["type_node_colors"] = type_node_colors
         # Stable child order (by name) so selecting a node — which recompiles
         # and re-iterates node_tree.nodes — never reshuffles the sub-list.
         for _lbl in type_nodes:
