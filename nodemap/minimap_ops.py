@@ -181,8 +181,8 @@ def _get_list_divider_handle(st: MinimapState, rx: int, ry: int, ui_scale: float
     # Hit zone starts at the zone's right edge (never reaching into the
     # scrollbar) and extends right into the map gutter for reachability.
     z_right = zx + zw
-    hw = _HANDLE_THICKNESS * ui_scale
-    if z_right <= rx <= z_right + 2 * hw and zy <= ry <= zy + zh:
+    hw = (_HANDLE_THICKNESS - 1) * ui_scale
+    if z_right <= rx <= z_right + hw and zy <= ry <= zy + zh:
         return ResizeHandle.LIST
     return None
 

@@ -4,11 +4,6 @@ from typing import Any
 
 import bpy
 
-LUMINANCE_R: float = 0.299
-LUMINANCE_G: float = 0.587
-LUMINANCE_B: float = 0.114
-OUTLINE_ALPHA: float = 0.8
-
 _COLOR_TAG_TO_THEME_ATTR: dict[str, str] = {
     "INPUT": "input_node",
     "OUTPUT": "output_node",
@@ -46,14 +41,6 @@ def _rgba(value: tuple[float, ...], alpha: float) -> tuple[float, float, float, 
 def _alpha_mul(color: tuple[float, ...], alpha: float) -> tuple[float, float, float, float]:
     """Return RGBA with the original alpha multiplied by alpha."""
     return (float(color[0]), float(color[1]), float(color[2]), float(color[3] * alpha))
-
-
-def _compute_outline_color(rgb: tuple[float, ...]) -> tuple[float, float, float, float]:
-    """Compute black or white outline based on luminance of the given color."""
-    luminance = rgb[0] * LUMINANCE_R + rgb[1] * LUMINANCE_G + rgb[2] * LUMINANCE_B
-    if luminance > 0.5:
-        return (0.0, 0.0, 0.0, OUTLINE_ALPHA)
-    return (1.0, 1.0, 1.0, OUTLINE_ALPHA)
 
 
 def _color_contrast(color: tuple[float, ...], factor: float = 0.85) -> tuple[float, float, float, float]:
@@ -124,8 +111,9 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         bg = theme_bg
 
     text = _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0))
+    label = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     if addon and addon.preferences.settings.custom_text_color:
-        text = tuple(addon.preferences.settings.text_color)
+        text = label = tuple(addon.preferences.settings.text_color)
 
     return {
         "bg": bg,
@@ -139,6 +127,7 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 0.37, 0.34, 0.9)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
         "text": text,
+        "label": label,
         "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,

@@ -55,8 +55,6 @@ from .tree_compile import (
     _apply_move_updates,
     _debounced_compile,
     _is_move_only_diff,
-    _maybe_start_profiler,
-    _maybe_stop_profiler,
     _Timer,
 )
 from .type_list import _draw_minimap_scrollbars, _draw_type_list, _step_list_width
@@ -233,7 +231,7 @@ def _draw_resize_handles(
 
     col_base = _alpha_mul(colors["text"], 0.5 * master_alpha)
     col_warn = _alpha_mul(colors["indicator"], master_alpha)
-    thick = 2.0 * ui_scale
+    thick = 3.0 * ui_scale
     margin = 6 * ui_scale
 
     match handle:
@@ -581,7 +579,7 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
     if not visible_ids:
         return
     rects = _layout_minimap_buttons(st, visible_ids, mx, my, mw, mh, padding, ui_scale)
-
+    radius = colors["node_roundness"] * ui_scale
     bg_color = _alpha_mul(colors["bg"], master_alpha)
     border_color = _alpha_mul(colors["bg_border"], master_alpha)
 
@@ -594,7 +592,6 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
         sx, _, size = rects[s_top_btn]
         s_top = rects[s_top_btn][1] + size
         s_bottom = rects[s_bot_btn][1]
-        radius = max(3.0, size * 0.25)
         _draw_filled_rounded_rect(sx, s_bottom, size, s_top - s_bottom, radius, bg_color)
         _draw_rounded_rect_border(sx, s_bottom, size, s_top - s_bottom, radius, border_color, 0.5)
 
@@ -610,7 +607,6 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
         if btn_id not in rects:
             continue
         bx, by, size = rects[btn_id]
-        radius = max(3.0, size * 0.25)
         if btn_id == "LIST" or not combined:
             _draw_filled_rounded_rect(bx, by, size, size, radius, bg_color)
             _draw_rounded_rect_border(bx, by, size, size, radius, border_color, 0.5)
@@ -684,22 +680,18 @@ def draw_minimap() -> None:
 
     # Single RNA pass: fingerprint, raw tree bounds, and drawable node count.
     show_borders = settings.show_node_borders
-    with _Timer("tree_snapshot"):
-        current_fingerprint, raw_bounds, content_count = _get_tree_snapshot(node_tree, show_borders)
+    current_fingerprint, raw_bounds, content_count = _get_tree_snapshot(node_tree, show_borders)
     if raw_bounds[2] - raw_bounds[0] <= 0 or raw_bounds[3] - raw_bounds[1] <= 0:
         return
 
-    # Start cProfile for this area (only when TRACE logging is on)
-    _maybe_start_profiler(st)
-
     # Log active settings every frame at TRACE level
     logger.trace(
-        "SETTINGS %d nodes | show_wires=%d show_names=%d label_mode=%s"
+        "SETTINGS %d nodes | show_wires=%d show_names=%d compact_labels=%d"
         " colored_nodes=%d socket_indicators=%d wire_color=%d frame_labels=%d",
         current_fingerprint[0],
         settings.show_wires,
         settings.show_names,
-        settings.node_label_mode,
+        settings.compact_node_labels,
         settings.colored_nodes,
         settings.show_socket_indicators,
         settings.show_wire_color,
@@ -707,30 +699,29 @@ def draw_minimap() -> None:
     )
 
     # Compute dimensions and layout
-    with _Timer("setup"):
-        ui_scale = _get_ui_scale()
-        colors = _get_node_editor_theme_colors()
-        master_alpha = settings.opacity
-        corner = settings.position
+    ui_scale = _get_ui_scale()
+    colors = _get_node_editor_theme_colors()
+    master_alpha = settings.opacity
+    corner = settings.position
 
-        rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, st)
-        if rect is None:
-            return
-        mx, my, mw, mh, padding, y_margin = rect
+    rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, st)
+    if rect is None:
+        return
+    mx, my, mw, mh, padding, y_margin = rect
 
-        bounds = _expand_bounds_margin(raw_bounds, ui_scale, mh, padding)
+    bounds = _expand_bounds_margin(raw_bounds, ui_scale, mh, padding)
 
-        st.view.rect = (mx, my, mw, mh)
-        st.view.tree_bounds = bounds
-        st.view.margin = y_margin
-        st.view.padding = padding
+    st.view.rect = (mx, my, mw, mh)
+    st.view.tree_bounds = bounds
+    st.view.margin = y_margin
+    st.view.padding = padding
 
-        # Reserve the type-list zone before computing the map transform so
-        # node framing and panning never place tree content behind the list.
-        with _Timer("type_list_width"):
-            _step_list_width(st, settings, mw, ui_scale)
+    # Reserve the type-list zone before computing the map transform so
+    # node framing and panning never place tree content behind the list.
+    with _Timer("type_list_width"):
+        _step_list_width(st, settings, mw, ui_scale)
 
-        _clamp_pan_to_viewport(space, region, st, visible)
+    _clamp_pan_to_viewport(space, region, st, visible)
 
     # Refresh tree data: pure position changes (node drags) patch the cached
     # tables immediately; anything else schedules a debounced full compile.
@@ -739,8 +730,7 @@ def draw_minimap() -> None:
         move_only = _is_move_only_diff(old_fingerprint, current_fingerprint)
         applied = False
         if move_only and (time.perf_counter() - st.cache.last_move_refresh) >= _MOVE_REFRESH_MIN_INTERVAL:
-            with _Timer("apply_move_updates"):
-                applied = _apply_move_updates(st, node_tree)
+            applied = _apply_move_updates(st, node_tree)
             if applied:
                 st.cache.last_move_refresh = time.perf_counter()
                 st.cache.pending_settle_flush = True
@@ -788,28 +778,25 @@ def draw_minimap() -> None:
         st.cache.position_version += 1
     cx, cy, scale, tree_cx, tree_cy = _get_minimap_transform(st, space, region, visible)
     st.view.scale = scale
-    with _Timer("ensure_batches"):
-        highlight_border = (
-            _alpha_mul(colors["node_active"], 0.3)
-            if (st.list.hovered_type_label or st.interaction.hovered_node)
-            else None
-        )
-        _ensure_minimap_batches(
-            st,
-            mx,
-            my,
-            mw,
-            mh,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            ui_scale,
-            master_alpha,
-            show_borders,
-            highlight_border,
-        )
+    highlight_border = (
+        _alpha_mul(colors["node_active"], 0.3) if (st.list.hovered_type_label or st.interaction.hovered_node) else None
+    )
+    _ensure_minimap_batches(
+        st,
+        mx,
+        my,
+        mw,
+        mh,
+        cx,
+        cy,
+        scale,
+        tree_cx,
+        tree_cy,
+        ui_scale,
+        master_alpha,
+        show_borders,
+        highlight_border,
+    )
 
     # Draw minimap panel
     try:
@@ -818,35 +805,32 @@ def draw_minimap() -> None:
         original_blend = None
     gpu.state.blend_set("ALPHA")
 
-    with _Timer("draw_background"):
-        bg_color, panel_r = _draw_background(mx, my, mw, mh, colors, master_alpha)
+    bg_color, panel_r = _draw_background(mx, my, mw, mh, colors, master_alpha)
 
     # Clip node/wire content to the minimap interior
-    with _Timer("setup_scissor"):
-        scissor_state = _setup_scissor(mx, my, mw, mh)
-        scissor_active = scissor_state[0]
+    scissor_state = _setup_scissor(mx, my, mw, mh)
+    scissor_active = scissor_state[0]
 
     # Editor View fill
-    with _Timer("draw_view_fill"):
-        _draw_view_fill(
-            settings,
-            space,
-            region,
-            mx,
-            my,
-            mw,
-            mh,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            colors,
-            panel_r,
-            master_alpha,
-            ui_scale,
-            visible,
-        )
+    _draw_view_fill(
+        settings,
+        space,
+        region,
+        mx,
+        my,
+        mw,
+        mh,
+        cx,
+        cy,
+        scale,
+        tree_cx,
+        tree_cy,
+        colors,
+        panel_r,
+        master_alpha,
+        ui_scale,
+        visible,
+    )
 
     # Content batches are baked in map-local space; place them with one
     # matrix transform (translate -> scale about the view pivot) instead of
@@ -872,175 +856,162 @@ def draw_minimap() -> None:
             frames_fill_batch = st.cache.frames_fill_batch
             frames_border_batch = st.cache.frames_border_batch
             if frames_fill_batch or frames_border_batch:
-                with _Timer("draw_frames"):
-                    fill_shader = _get_batch_rect_shader()
-                    border_shader = _get_batch_rect_border_shader()
-                    mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-                    if frames_fill_batch:
-                        fill_shader.bind()
-                        fill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-                        frames_fill_batch.draw(fill_shader)
-                    if frames_border_batch:
-                        border_shader.bind()
-                        border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-                        frames_border_batch.draw(border_shader)
+                fill_shader = _get_batch_rect_shader()
+                border_shader = _get_batch_rect_border_shader()
+                mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+                if frames_fill_batch:
+                    fill_shader.bind()
+                    fill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                    frames_fill_batch.draw(fill_shader)
+                if frames_border_batch:
+                    border_shader.bind()
+                    border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                    frames_border_batch.draw(border_shader)
 
             # Link wires (baked batches; shadow underlay first, then colors)
             wire_batches = st.cache.wire_batches or []
             wire_shadow_batch = st.cache.wire_shadow_batch
             if settings.show_wires and (wire_shadow_batch or wire_batches):
-                with _Timer("draw_wires"):
-                    pill_shader = _get_batch_pill_shader()
-                    pill_shader.bind()
-                    pill_shader.uniform_float(
-                        "ModelViewProjectionMatrix",
-                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                    )
-                    shadow_alpha = 0.35 * master_alpha
-                    if wire_shadow_batch is not None and shadow_alpha > 0:
-                        pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
-                        wire_shadow_batch.draw(pill_shader)
-                    for wire_color, batch in wire_batches:
-                        pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
-                        batch.draw(pill_shader)
+                pill_shader = _get_batch_pill_shader()
+                pill_shader.bind()
+                pill_shader.uniform_float(
+                    "ModelViewProjectionMatrix",
+                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                )
+                shadow_alpha = 0.35 * master_alpha
+                if wire_shadow_batch is not None and shadow_alpha > 0:
+                    pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
+                    wire_shadow_batch.draw(pill_shader)
+                for wire_color, batch in wire_batches:
+                    pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
+                    batch.draw(pill_shader)
 
             # Node fill backgrounds
             backdrops_batch = st.cache.backdrops_batch
             if backdrops_batch:
-                with _Timer("draw_backdrops"):
-                    fill_shader = _get_batch_rect_shader()
-                    fill_shader.bind()
-                    fill_shader.uniform_float(
-                        "ModelViewProjectionMatrix",
-                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                    )
-                    backdrops_batch.draw(fill_shader)
+                fill_shader = _get_batch_rect_shader()
+                fill_shader.bind()
+                fill_shader.uniform_float(
+                    "ModelViewProjectionMatrix",
+                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                )
+                backdrops_batch.draw(fill_shader)
 
             # Node borders
             borders_batch = st.cache.borders_batch
             if borders_batch:
-                with _Timer("draw_borders"):
-                    border_shader = _get_batch_rect_border_shader()
-                    border_shader.bind()
-                    border_shader.uniform_float(
-                        "ModelViewProjectionMatrix",
-                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                    )
-                    borders_batch.draw(border_shader)
+                border_shader = _get_batch_rect_border_shader()
+                border_shader.bind()
+                border_shader.uniform_float(
+                    "ModelViewProjectionMatrix",
+                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                )
+                borders_batch.draw(border_shader)
 
             # List-hover outside outlines (drawn above normal borders)
             highlight_borders_batch = st.cache.highlight_borders_batch
             if highlight_borders_batch:
-                with _Timer("draw_highlight_borders"):
-                    border_shader = _get_batch_rect_border_shader()
-                    border_shader.bind()
-                    border_shader.uniform_float(
-                        "ModelViewProjectionMatrix",
-                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                    )
-                    highlight_borders_batch.draw(border_shader)
+                border_shader = _get_batch_rect_border_shader()
+                border_shader.bind()
+                border_shader.uniform_float(
+                    "ModelViewProjectionMatrix",
+                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                )
+                highlight_borders_batch.draw(border_shader)
 
             # Group node underline markers (baked batches)
             marker_batches = st.cache.marker_batches or []
             if marker_batches:
-                with _Timer("draw_group_markers"):
-                    pill_shader = _get_batch_pill_shader()
-                    pill_shader.bind()
-                    pill_shader.uniform_float(
-                        "ModelViewProjectionMatrix",
-                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                    )
-                    for marker_color, batch in marker_batches:
-                        pill_shader.uniform_float("color", _srgb_to_linear(marker_color))
-                        batch.draw(pill_shader)
+                pill_shader = _get_batch_pill_shader()
+                pill_shader.bind()
+                pill_shader.uniform_float(
+                    "ModelViewProjectionMatrix",
+                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                )
+                for marker_color, batch in marker_batches:
+                    pill_shader.uniform_float("color", _srgb_to_linear(marker_color))
+                    batch.draw(pill_shader)
 
             # Socket indicator pills (single batch with per-vertex color)
             socket_batch = st.cache.socket_batch
             if settings.show_socket_indicators and socket_batch:
-                with _Timer("draw_sockets"):
-                    shader = _get_batch_rect_shader()
-                    shader.bind()
-                    shader.uniform_float(
-                        "ModelViewProjectionMatrix",
-                        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                    )
-                    socket_batch.draw(shader)
+                shader = _get_batch_rect_shader()
+                shader.bind()
+                shader.uniform_float(
+                    "ModelViewProjectionMatrix",
+                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                )
+                socket_batch.draw(shader)
         finally:
             gpu.matrix.pop()
 
     # Text labels — mapped manually so BLF never sees the content matrix
     cached_text = st.cache.text or []
     if cached_text and origin:
-        with _Timer("draw_text"):
-            gpu.state.blend_set("ALPHA")
-            off_x = cx - content_k * piv_x
-            off_y = cy - content_k * piv_y
-            for font_id, text, lx, ly, text_color, font_size in cached_text:
-                _draw_text_with_shadow(
-                    font_id,
-                    text,
-                    round(content_k * lx + off_x),
-                    round(content_k * ly + off_y),
-                    text_color,
-                    font_size,
-                    settings.show_text_shadow,
-                )
-            gpu.state.blend_set("ALPHA")
+        gpu.state.blend_set("ALPHA")
+        off_x = cx - content_k * piv_x
+        off_y = cy - content_k * piv_y
+        for font_id, text, lx, ly, text_color, font_size in cached_text:
+            _draw_text_with_shadow(
+                font_id,
+                text,
+                round(content_k * lx + off_x),
+                round(content_k * ly + off_y),
+                text_color,
+                font_size,
+                settings.show_text_shadow,
+            )
+        gpu.state.blend_set("ALPHA")
 
     # Viewport overlay with cutout hole
-    with _Timer("draw_viewport"):
-        _draw_viewport_overlay(
-            settings,
-            space,
-            region,
-            mx,
-            my,
-            mw,
-            mh,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            colors,
-            master_alpha,
-            panel_r,
-            ui_scale,
-            scissor_active,
-            st,
-            visible=visible,
-        )
+    _draw_viewport_overlay(
+        settings,
+        space,
+        region,
+        mx,
+        my,
+        mw,
+        mh,
+        cx,
+        cy,
+        scale,
+        tree_cx,
+        tree_cy,
+        colors,
+        master_alpha,
+        panel_r,
+        ui_scale,
+        scissor_active,
+        st,
+        visible=visible,
+    )
 
     # Minimap Scrollbars
-    with _Timer("draw_scrollbars"):
-        _draw_minimap_scrollbars(
-            mx,
-            my,
-            mw,
-            mh,
-            padding,
-            cx,
-            cy,
-            scale,
-            tree_cx,
-            tree_cy,
-            bounds,
-            colors,
-            ui_scale,
-            master_alpha,
-        )
+    _draw_minimap_scrollbars(
+        mx,
+        my,
+        mw,
+        mh,
+        padding,
+        cx,
+        cy,
+        scale,
+        tree_cx,
+        tree_cy,
+        bounds,
+        colors,
+        ui_scale,
+        master_alpha,
+    )
 
     # Minimap buttons
-    with _Timer("draw_buttons"):
-        _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
+    _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alpha)
 
     # Edge resize handle pills
-    with _Timer("draw_resize_handles"):
-        _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
+    _draw_resize_handles(mx, my, mw, mh, colors, master_alpha, ui_scale, corner, st)
 
     # Node count overlay text
-    with _Timer("draw_node_count"):
-        _draw_node_count(settings, content_count, mx, my, mw, colors, master_alpha, ui_scale)
+    _draw_node_count(settings, content_count, mx, my, mw, colors, master_alpha, ui_scale)
 
     # Restore GPU state
     _teardown_scissor(scissor_state)
@@ -1059,6 +1030,3 @@ def draw_minimap() -> None:
             gpu.state.blend_set(original_blend if original_blend else "NONE")
         except Exception:
             gpu.state.blend_set("NONE")
-
-    # Stop & dump profile stats after N frames
-    _maybe_stop_profiler(st)

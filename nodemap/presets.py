@@ -40,7 +40,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_frame_selected_btn",
         "settings.show_list_toggle_btn",
         "settings.show_names",
-        "settings.node_label_mode",
+        "settings.compact_node_labels",
         "settings.show_frame_labels",
         # Theme
         "settings.opacity",

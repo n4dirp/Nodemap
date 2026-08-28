@@ -8,6 +8,7 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProp
 from bpy.types import AddonPreferences, PropertyGroup
 
 from .helpers import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
+from .panels import NODEMAP_PT_presets
 
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, "TRACE")
@@ -220,7 +221,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Custom Text Color",
         description="Override the Blender theme text color with a custom color",
         default=False,
-        update=_update_invalidate_batches,
+        update=_update_invalidate_all,
     )
 
     text_color: FloatVectorProperty(
@@ -231,7 +232,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         min=0.0,
         max=1.0,
         subtype="COLOR_GAMMA",
-        update=_update_invalidate_batches,
+        update=_update_invalidate_all,
     )
 
     show_text_shadow: BoolProperty(
@@ -329,14 +330,10 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
-    node_label_mode: EnumProperty(
-        name="Node Labels",
-        description="How labels appear in the minimap",
-        items=[
-            ("COMPACT", "Initials", "Display abbreviated initials"),
-            ("FULL", "Name", "Display full name split across lines"),
-        ],
-        default="COMPACT",
+    compact_node_labels: BoolProperty(
+        name="Compact Node Labels",
+        description="Display abbreviated initials instead of full node names",
+        default=True,
         update=_update_invalidate_all,
     )
 
@@ -527,34 +524,18 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.use_property_decorate = False
         settings = self.settings
 
-        layout.label(text="Nodemap")
+        row = layout.row()
+        row.label(text="General")
+
+        NODEMAP_PT_presets.draw_panel_header(row)
+
         layout.prop(settings, "show_by_default", text="Show in New Editors")
 
         layout.separator()
-        sub_body = layout.column()
-        sub_body.active = settings.interactive
-        col = sub_body.column()
-        col.label(text="Navigation")
-
-        col = sub_body.column(heading="Animations")
-        _reduce_motion = context.preferences.view.use_reduce_motion
-        col.active = not _reduce_motion
-        row = col.row(align=True, heading="")
-        row.prop(settings, "animations", text="")
-        sub = row.row(align=True)
-        sub.active = settings.animations
-        sub.row().prop(settings, "pan_speed", expand=True)
-
-        col.separator()
-        col.prop(settings, "left_click_action", text="Left Click")
-        col.prop(settings, "right_click_action", text="Right Click")
-        col.row().prop(settings, "scroll_wheel_mode", expand=True)
-
-        col.separator()
-        split = col.split(factor=0.4)
+        split = layout.split(factor=0.39)
         sub = split.column()
         sub.alignment = "RIGHT"
-        sub.label(text="Keymap")
+        sub.label(text="Shortcuts")
         col = split.column()
         wm = context.window_manager
         kc = wm.keyconfigs.user
@@ -575,18 +556,104 @@ class NODEMAP_AddonPreferences(AddonPreferences):
                 layout.operator("nodemap.restore_keymap", text="Restore")
 
         layout.separator()
-        layout.label(text="Layout")
-        col = layout.column(align=True)
+        col = layout.column(heading="Animations")
+        _reduce_motion = context.preferences.view.use_reduce_motion
+        col.active = not _reduce_motion
+        row = col.row(align=True, heading="")
+        row.prop(settings, "animations", text="")
+        sub = row.row(align=True)
+        sub.active = settings.animations
+        sub.row().prop(settings, "pan_speed", expand=True)
+
+        box = layout.box().column()
+        box.label(text="Navigation")
+        row = box.row()
+        row.prop(settings, "interactive", text="Interactive Map")
+        row.prop(settings, "follow_view", text="Follow View")
+
+        box.separator()
+        int_col = box.column()
+        int_col.active = settings.interactive
+        int_col.prop(settings, "left_click_action", text="Left Click")
+        int_col.prop(settings, "right_click_action", text="Right Click")
+        int_col.row().prop(settings, "scroll_wheel_mode", expand=True)
+
+        box = layout.box()
+        box.label(text="Layout")
+
+        split = box.split(factor=0.4)
+        split.use_property_split = False
+        sub = split.column()
+        sub.alignment = "RIGHT"
+        sub.label(text="Position")
+
+        grid = split.grid_flow(
+            row_major=True,
+            columns=2,
+            even_columns=True,
+            even_rows=True,
+            align=True,
+        )
+        for item in settings.bl_rna.properties["position"].enum_items:
+            grid.prop_enum(settings, "position", item.identifier)
+
+        col = box.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
         col.prop(settings, "minimap_height", text="Y")
 
-        col = layout.column(align=True)
+        col = box.column(align=True)
         col.prop(settings, "max_width_pct", text="Max Region X")
         col.prop(settings, "max_height_pct", text="Y")
 
-        layout.separator()
-        layout.label(text="Type List")
-        col = layout.column()
+        box = layout.box().column()
+        box.label(text="Objects")
+
+        split = box.split(factor=0.4)
+        split.use_property_split = False
+        sub = split.column()
+        sub.alignment = "RIGHT"
+        sub.label(text="")
+        col = split.column()
+        grid = col.grid_flow(
+            row_major=True,
+            columns=4,
+            even_columns=True,
+            even_rows=True,
+            align=True,
+        )
+
+        grid.prop(settings, "show_wires", text="Link Wires")
+
+        grid.prop(settings, "show_node_borders", text="Node Borders")
+        grid.prop(settings, "show_frames", text="Node Frames")
+        grid.prop(settings, "show_names", text="Node Labels")
+        grid.prop(settings, "show_socket_indicators", text="Node Sockets")
+
+        grid.prop(settings, "show_node_count", text="Total Count")
+
+        sub = col.row()
+        sub.active = settings.show_names
+        sub.prop(settings, "compact_node_labels", text="Compact Labels")
+
+        sub = grid.row()
+        sub.active = settings.show_frames
+        sub.prop(settings, "show_frame_labels", text="Frame Labels")
+
+        box.separator()
+        if settings.interactive:
+            col = box.column(heading="Buttons")
+            row = col.row()
+            row.prop(settings, "show_frame_all_btn", text="Frame All")
+            row.prop(settings, "show_frame_view_btn", text="Frame View")
+            row.prop(settings, "show_frame_selected_btn", text="Frame Selected")
+            col.prop(settings, "show_list_toggle_btn", text="List Toggle")
+
+        box.separator()
+        box = box.box().column()
+        box.label(text="Type List")
+        box.prop(settings, "show_type_list", text="Show Type List")
+        box.separator()
+        col = box.column()
         col.active = settings.show_type_list
         row = col.row()
         row.prop(settings, "type_list_sort", text="Sort", expand=True)
@@ -595,13 +662,50 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = settings.colored_nodes
         sub.prop(settings, "show_type_colors", text="Type Colors")
 
-        layout.separator()
-        layout.label(text="Performance")
-        layout.prop(self.settings, "debounce_interval", text="Update Delay")
+        box = layout.box().column()
+        box.label(text="Theme")
+        col = box.column()
+        col.prop(self.settings, "opacity", text="Opacity")
 
-        layout.separator()
-        layout.label(text="Development")
-        row = layout.row(align=True, heading="Console Logging")
+        row = col.row(align=True)
+        row.prop(self.settings, "viewport_fill_rect", text="View Highlight")
+        sub = row.row(align=True)
+        sub.active = self.settings.viewport_fill_rect
+        sub.prop(self.settings, "viewport_fill_color", text="")
+
+        row = col.row(align=True)
+        row.prop(self.settings, "show_viewport_overlay", text="View Dimming")
+        sub = row.row(align=True)
+        sub.active = self.settings.show_viewport_overlay
+        sub.prop(self.settings, "viewport_overlay_color", text="")
+
+        row = col.row(align=True)
+        row.prop(self.settings, "custom_bg_color", text="Custom Backdrop")
+        sub = row.row(align=True)
+        sub.active = self.settings.custom_bg_color
+        sub.prop(self.settings, "bg_color", text="")
+
+        row = col.row(align=True)
+        row.prop(self.settings, "custom_text_color", text="Custom Text Color")
+        sub = row.row(align=True)
+        sub.active = self.settings.custom_text_color
+        sub.prop(self.settings, "text_color", text="")
+
+        col.prop(self.settings, "show_text_shadow", text="Text Shadows")
+
+        row = col.row()
+        row.prop(settings, "colored_nodes", text="Node Colors")
+        sub = row.row()
+        sub.active = settings.show_wires | settings.show_socket_indicators
+        sub.prop(settings, "show_wire_color", text="Wire Colors")
+
+        box = layout.box().column()
+        box.label(text="Performance")
+        box.prop(self.settings, "debounce_interval", text="Update Delay")
+
+        box = layout.box().column()
+        box.label(text="Development")
+        row = box.row(align=True, heading="Console Logging")
         row.prop(self, "logging_enabled", text="")
         sub = row.row(align=True)
         sub.active = self.logging_enabled

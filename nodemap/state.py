@@ -103,6 +103,7 @@ class RenderCache:
     list_entries: list | None = None
     list_layout: dict | None = None
     list_children: dict = field(default_factory=dict)
+    list_nodes_by_name: dict = field(default_factory=dict)
     list_swatches_batch: Any = None
     tree_version: int = 0
     position_version: int = 0
@@ -136,6 +137,7 @@ class RenderCache:
         self.list_entries = None
         self.list_layout = None
         self.list_children = {}
+        self.list_nodes_by_name = {}
         self.list_swatches_batch = None
 
     def invalidate_batches_only(self) -> None:
@@ -172,9 +174,6 @@ class MinimapState:
     list: ListState = field(default_factory=ListState)
     cache: RenderCache = field(default_factory=RenderCache)
     buttons: ButtonState = field(default_factory=ButtonState)
-    _profiler: Any = field(default=None, repr=False)
-    _profiling_active: bool = field(default=False, repr=False)
-    _profiling_frame_count: int = field(default=0, repr=False)
 
 
 # Socket indicator pill size multiplier (in tree units).
