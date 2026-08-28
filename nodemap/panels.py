@@ -87,19 +87,14 @@ class NODEMAP_PT_popup(Panel):
                 col = body.column()
                 col.label(text="Buttons")
 
-                grid = col.grid_flow(
-                    row_major=True,
-                    columns=2,
-                    even_columns=True,
-                    even_rows=True,
-                    align=True,
-                )
+                row = col.row()
 
-                grid.prop(settings, "show_frame_all_btn", text="Frame All")
-                grid.prop(settings, "show_frame_view_btn", text="Frame View")
-                grid.prop(settings, "show_frame_selected_btn", text="Frame Selected")
+                col = row.column()
+                col.prop(settings, "show_frame_all_btn", text="Frame All")
+                col.prop(settings, "show_frame_view_btn", text="Frame View")
+                col.prop(settings, "show_frame_selected_btn", text="Frame Selected")
 
-                grid.prop(settings, "show_list_toggle_btn", text="Type List")
+                row.prop(settings, "show_list_toggle_btn", text="Toggle List")
 
         header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
         header.label(text="Theme")

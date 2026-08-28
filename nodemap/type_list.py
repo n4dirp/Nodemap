@@ -276,7 +276,9 @@ def _build_type_list_cache(
 def _child_label_text(node_name: str, node) -> str:
     """Return the child row text: ``name (label)`` when the node has a label.
 
-    Falls back to the bare node name when *node* is unavailable or has no label.
+    For a group node without a label, falls back to the linked node-tree's name
+    (matching what Blender and the minimap display); otherwise falls back to
+    the bare node name when *node* is unavailable or has no label.
     """
     try:
         label = getattr(node, "label", "")
@@ -284,6 +286,12 @@ def _child_label_text(node_name: str, node) -> str:
         label = ""
     if label:
         return f"{node_name} ({label})"
+    try:
+        tree = getattr(node, "node_tree", None)
+    except Exception:
+        tree = None
+    if tree is not None and getattr(tree, "name", ""):
+        return tree.name
     return node_name
 
 
@@ -362,6 +370,19 @@ def _draw_type_list(
     widest_count = layout.get("widest_count", 0.0)
     st.list.row_height = row_h
 
+    # 1px visual separation between rows: row fills/borders are shrunk by the
+    # gap and centered in the slot, leaving hit-testing and layout pitch intact.
+    row_gap = 1.0
+    row_gap_half = row_gap / 2.0
+    row_draw_h = row_h - row_gap
+
+    def _row_y(s_bottom: float) -> float:
+        return round(s_bottom + row_gap_half)
+
+    # Text baseline sits centered in the drawn (rounded) row so it stays aligned
+    # with the row fill instead of drifting up to 0.5px off from the slot.
+    text_y_off = (row_draw_h - line_h) / 2
+
     pad_x = _LIST_PAD_X * ui_scale
     swatch = _LIST_SWATCH * ui_scale
     swatch_gap = _LIST_SWATCH_GAP * ui_scale
@@ -417,13 +438,17 @@ def _draw_type_list(
     text_col = _alpha_mul(colors["text"], 0.65 * master_alpha)
     count_col = _alpha_mul(colors["text"], 0.3 * master_alpha)
     sel_col = _alpha_mul(colors["node_selected"], 0.95 * master_alpha)
-    active_col = _alpha_mul(colors["node_active"], master_alpha)
+    active_col = _alpha_mul(colors["indicator"], master_alpha)
+    # Light fill under selected/active rows; selection color at low alpha (drawn
+    # before text so BLF's alpha-disable cannot clobber the SDF fill blend).
+    sel_fill_col = _alpha_mul(colors["node_selected"], 0.05 * master_alpha)
+    active_fill_col = _alpha_mul(colors["indicator"], 0.05 * master_alpha)
 
     # Per-type selection state (compiled) drives font (not icon) recoloring.
     type_colors = tree_data.get("type_colors") or {}
     type_selected = tree_data.get("type_selected_counts") or {}
     type_active = tree_data.get("type_active_label")
-    hover_col = _alpha_mul(colors["text"], 0.02 * master_alpha)
+    hover_col = _alpha_mul(colors["text"], 0.025 * master_alpha)
 
     pill_x = zone_x + 2 * ui_scale
     pill_w = zone_w - 4 * ui_scale
@@ -466,7 +491,7 @@ def _draw_type_list(
         band_col = (0.0, 0.0, 0.0, 0.15 * master_alpha)
         for _kind, _label, _node_name, s_top, s_bottom, row_idx in visible_rows:
             if row_idx % 2 == 1:
-                _draw_filled_rounded_rect(pill_x, s_bottom, pill_w, row_h, 0.0, band_col)
+                _draw_filled_rounded_rect(pill_x, _row_y(s_bottom), pill_w, row_draw_h, 0.0, band_col)
 
         # Header hover pills + hit rects (rows + expand toggle slots)
         header_rects = []
@@ -474,12 +499,21 @@ def _draw_type_list(
         for kind, label, _node_name, _s_top, s_bottom, _row_idx in visible_rows:
             if kind != "header":
                 continue
+
+            if label == type_active:
+                _draw_filled_rounded_rect(pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, active_fill_col)
+            elif type_selected.get(label, 0) > 0:
+                _draw_filled_rounded_rect(pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, sel_fill_col)
+
             if hovered == label:
-                _draw_filled_rounded_rect(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, hover_col)
+                _draw_filled_rounded_rect(pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, hover_col)
+
             if label == type_active:
                 # Active outline drawn here (pre-text) so BLF cannot clobber the
                 # alpha blend state the SDF fill relies on.
-                _draw_rounded_rect_border(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, sel_col, 0.5 * ui_scale)
+                _draw_rounded_rect_border(
+                    pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, sel_col, 0.5 * ui_scale
+                )
             header_rects.append((pill_x, s_bottom, pill_w, row_h, label))
             if entry_map.get(label, ("", 0.0, 1))[2] > 1:
                 toggle_rects[label] = (content_x, s_bottom, swatch + swatch_gap, row_h)
@@ -496,17 +530,27 @@ def _draw_type_list(
         for kind, label, node_name, _s_top, s_bottom, _row_idx in visible_rows:
             if kind != "child":
                 continue
-            if hovered_child == (label, node_name):
-                _draw_filled_rounded_rect(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, hover_col)
-            # else:
+            child_selected = False
             child_active = False
             try:
                 node = node_tree.nodes.get(node_name) if node_tree else None
                 child_active = bool(active_node and node == active_node)
+                child_selected = bool(node and node.select)
             except Exception:
                 node = None
+
             if child_active:
-                _draw_rounded_rect_border(pill_x, s_bottom, pill_w, row_h, 4.0 * ui_scale, sel_col, 0.5 * ui_scale)
+                _draw_filled_rounded_rect(pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, active_fill_col)
+            elif child_selected:
+                _draw_filled_rounded_rect(pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, sel_fill_col)
+            if child_active:
+                _draw_rounded_rect_border(
+                    pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, sel_col, 0.5 * ui_scale
+                )
+
+            if hovered_child == (label, node_name):
+                _draw_filled_rounded_rect(pill_x, _row_y(s_bottom), pill_w, row_draw_h, 4.0 * ui_scale, hover_col)
+
             child_rects.append((pill_x, s_bottom, pill_w, row_h, label, node_name))
         st.list.node_rects = child_rects
 
@@ -534,7 +578,7 @@ def _draw_type_list(
         child_swatch_x = content_x + icon_col + swatch_col
 
         for kind, label, node_name, _s_top, s_bottom, _row_idx in visible_rows:
-            text_y = s_bottom + text_y_off
+            text_y = _row_y(s_bottom) + text_y_off
             if kind == "header":
                 # Icons keep the type color; selection/active state shows in the
                 # row text color instead (active brightest, then selected).
