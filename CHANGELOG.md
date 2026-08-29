@@ -9,15 +9,20 @@
 - Added Smooth animation for frame actions
 - Added Frame Selected button in the minimap
 - Smooth editor animation when framing selected nodes
+- Curved wires in the minimap that match Blender's link curves
+- More theme customization options for colors and appearance
+- All extension options now available in the addon preferences panel
 
 ### Changed
 - Frame Selected now adjusts the zoom to fit multiple nodes or a frame
 - Renamed the "Smooth Pan" preference to "Animations"; it now also gates the type-list show/hide animation
-
+- Moved advanced options from the popup panel to the addon preferences for a cleaner interface
+- Performance improvements when working with large node graphs
 
 ### Fixed
 - Selecting a node from the type list no longer forces a full EEVEE material rebuild (now uses the native node.select operator like the minimap)
 - Minimap redraws now target only the interacted Node Editor instead of refreshing all open Node Editors
+- Scrollbars now appear only when nodes actually go out of view
 
 
 ## [1.5.0] - 2026-08-14
