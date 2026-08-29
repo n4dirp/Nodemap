@@ -43,6 +43,7 @@ from .state import (
 from .theme import (
     _alpha_mul,
     _get_node_editor_theme_colors,
+    _get_wire_curvature,
     _srgb_to_linear,
 )
 from .transforms import (
@@ -151,15 +152,14 @@ def _draw_background(
     bg_color = _alpha_mul(colors["bg"], master_alpha)
     panel_r = colors.get("panel_roundness", 4.0)
     shadow_w = 1
-
-    _draw_filled_rounded_rect(mx, my, mw, mh, panel_r * 1.2, bg_color)
     border_color = _alpha_mul(colors["bg_border"], master_alpha)
 
+    _draw_filled_rounded_rect(mx, my, mw, mh, panel_r * 1.2, bg_color)
     _draw_rounded_rect_border(
         mx - shadow_w, my - shadow_w, mw + shadow_w * 2, mh + shadow_w * 2, panel_r, (0, 0, 0, 0.15 * master_alpha), 0.5
     )
-
     _draw_rounded_rect_border(mx, my, mw, mh, panel_r, border_color, 0.5)
+
     return bg_color, panel_r
 
 
@@ -834,6 +834,7 @@ def draw_minimap() -> None:
     highlight_border = (
         _alpha_mul(colors["node_active"], 0.3) if (st.list.hovered_type_label or st.interaction.hovered_node) else None
     )
+    wire_curvature = _get_wire_curvature(settings)
     _ensure_minimap_batches(
         st,
         mx,
@@ -849,7 +850,7 @@ def draw_minimap() -> None:
         master_alpha,
         show_borders,
         highlight_border,
-        wire_curvature=settings.wire_curvature,
+        wire_curvature=wire_curvature,
     )
 
     # Draw minimap panel
@@ -926,7 +927,7 @@ def draw_minimap() -> None:
             wire_batches = st.cache.wire_batches or []
             wire_shadow_batch = st.cache.wire_shadow_batch
             if settings.show_wires and (wire_shadow_batch or wire_batches):
-                wire_curved = int(settings.wire_curvature) > 0
+                wire_curved = int(wire_curvature) > 0
                 shadow_alpha = 0.35 * master_alpha
                 mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
                 if wire_curved:
@@ -1079,7 +1080,7 @@ def draw_minimap() -> None:
         scale,
         tree_cx,
         tree_cy,
-        bounds,
+        raw_bounds,
         colors,
         ui_scale,
         master_alpha,

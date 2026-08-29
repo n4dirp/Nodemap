@@ -217,21 +217,21 @@ _BATCH_NOODLE_VERT_SRC = """
 void main() {
     vT = uv.x;
     vPos = pos.xy;
-    vP0 = p0;
-    vP1 = p1;
-    vP2 = p2;
-    vP3 = p3;
+    vSegA = segA;
+    vSegB = segB;
     gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
 }
 """
 
 _BATCH_NOODLE_FRAG_SRC = """
 void main() {
-    float t = clamp(vT, 0.0, 1.0);
-    vec2 m0 = mix(vP0, vP1, t);
-    vec2 m1 = mix(vP1, vP2, t);
-    vec2 m2 = mix(vP2, vP3, t);
-    vec2 q = mix(mix(m0, m1, t), mix(m1, m2, t), t);
+    // Per-quad capsule: the fragment measures distance to the quad's own chord
+    // (segA->segB), interpolated by the along-chord fraction vT. Each rect is a
+    // true spatial capsule around a chord that sits on the curve, so no curve
+    // parameter matching is needed and the tube stays continuous across
+    // segments. Adaptive subdivision keeps every chord within the AA band.
+    float u = clamp(vT, 0.0, 1.0);
+    vec2 q = mix(vSegA, vSegB, u);
     float d = length(vPos - q);
     float sd = d - halfThick;
     float alpha = 1.0 - smoothstep(-0.5, 0.5, sd);
@@ -463,27 +463,23 @@ def _get_batch_rect_border_shader() -> gpu.types.GPUShader:
 
 
 def _get_batch_noodle_shader() -> gpu.types.GPUShader:
-    """Batched curved noodle shader evaluating distance to a cubic Bezier."""
+    """Batched curved noodle shader measuring distance to each quad's chord."""
 
     global _BATCH_NOODLE_SHADER
     if _BATCH_NOODLE_SHADER is None:
         vert_out = GPUStageInterfaceInfo("batch_noodle_iface")
         vert_out.smooth("FLOAT", "vT")
         vert_out.smooth("VEC2", "vPos")
-        vert_out.smooth("VEC2", "vP0")
-        vert_out.smooth("VEC2", "vP1")
-        vert_out.smooth("VEC2", "vP2")
-        vert_out.smooth("VEC2", "vP3")
+        vert_out.smooth("VEC2", "vSegA")
+        vert_out.smooth("VEC2", "vSegB")
         info = GPUShaderCreateInfo()
         info.push_constant("MAT4", "ModelViewProjectionMatrix")
         info.push_constant("VEC4", "color")
         info.push_constant("FLOAT", "halfThick")
         info.vertex_in(0, "VEC3", "pos")
         info.vertex_in(1, "VEC2", "uv")
-        info.vertex_in(2, "VEC2", "p0")
-        info.vertex_in(3, "VEC2", "p1")
-        info.vertex_in(4, "VEC2", "p2")
-        info.vertex_in(5, "VEC2", "p3")
+        info.vertex_in(2, "VEC2", "segA")
+        info.vertex_in(3, "VEC2", "segB")
         info.vertex_out(vert_out)
         info.fragment_out(0, "VEC4", "fragColor")
         info.vertex_source(_BATCH_NOODLE_VERT_SRC)
@@ -569,9 +565,12 @@ def _build_noodle_batch(
 
     Each *wire* is ``(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y)`` in baked space
     defining a cubic Bezier with horizontal handles (Blender's ease-in /
-    ease-out style). Geometry per wire is a strip following the cubic, with
-    ``half_thick`` baked as the strip half-width (plus AA pad). Color
-    stays as a draw-time uniform.
+    ease-out style). The wire is subdivided so every chord stays within the AA
+    band of the cubic; each chord emits a rectangle. The fragment resolves each
+    rectangle as a capsule SDF against its own chord (``segA``/``segB`` shared
+    by all four corners), with round end caps emitted as endpoint squares. This
+    measures true spatial distance, so the tube is continuous and follows the
+    curve without parametric mismatch. Color stays as a draw-time uniform.
     """
 
     if not wires:
@@ -583,10 +582,8 @@ def _build_noodle_batch(
 
     all_pos: list[tuple[float, float, float]] = []
     all_uv: list[tuple[float, float]] = []
-    all_p0: list[tuple[float, float]] = []
-    all_p1: list[tuple[float, float]] = []
-    all_p2: list[tuple[float, float]] = []
-    all_p3: list[tuple[float, float]] = []
+    all_segA: list[tuple[float, float]] = []
+    all_segB: list[tuple[float, float]] = []
 
     indices: list[tuple[int, int, int]] = []
     base_vert = 0
@@ -597,82 +594,138 @@ def _build_noodle_batch(
         d12 = math.hypot(p2x - p1x, p2y - p1y)
         d23 = math.hypot(p3x - p2x, p3y - p2y)
         est = d01 + d12 + d23
-        # Fragment shader resolves the analytic cubic; a coarse silhouette is enough at minimap scale.
-        # One sample per ~20 baked units, capped very low. Shadows are
-        # temporarily disabled, so extra coarseness is acceptable.
-        n = int(est / 20.0) + 2
-        n = max(4, min(n, 8))
+        # Per-chord capsule SDF is spatially exact, but a curved segment's tube
+        # bulges beyond its chord by the sagitta. Subdivide while that sagitta
+        # exceeds a tolerance so the tube follows the curve; the coarser 1.5
+        # tolerance keeps the chord count low at the cost of a sub-pixel thinning
+        # on the inside of only the tightest turns. Caps bound worst-case cost.
+        n = int(est / 10.0) + 2
+        n = max(2, min(n, 16))
 
-        # Extension beyond endpoints to fully cover round caps.
-        len0 = math.hypot(p1x - p0x, p1y - p0y) * 3.0
-        len1 = math.hypot(p3x - p2x, p3y - p2y) * 3.0
-        ext_lo = lateral / max(len0, 1e-6) if len0 > 1e-6 else 0.06
-        ext_hi = lateral / max(len1, 1e-6) if len1 > 1e-6 else 0.06
-        ext_lo = min(ext_lo, 0.18)
-        ext_hi = min(ext_hi, 0.18)
-        # Build t samples: extended endpoints + uniform interior.
-        step = 1.0 / n
-        t_vals: list[float] = [-ext_lo]
-        for i in range(n + 1):
-            t_vals.append(i * step)
-        t_vals.append(1.0 + ext_hi)
-
-        num_rows = len(t_vals)
-        # Track previous normal for degenerate tangents.
-        prev_nx, prev_ny = 0.0, 1.0
-        for t in t_vals:
+        def _bezier_at(t):
             om = 1.0 - t
             om2 = om * om
             t2 = t * t
-            # Cubic Bezier position valid for any t (extrapolates).
-            qx = om2 * om * p0x + 3.0 * om2 * t * p1x + 3.0 * om * t2 * p2x + t2 * t * p3x
-            qy = om2 * om * p0y + 3.0 * om2 * t * p1y + 3.0 * om * t2 * p2y + t2 * t * p3y
-            # Cubic derivative.
-            dqx = 3.0 * om2 * (p1x - p0x) + 6.0 * om * t * (p2x - p1x) + 3.0 * t2 * (p3x - p2x)
-            dqy = 3.0 * om2 * (p1y - p0y) + 6.0 * om * t * (p2y - p1y) + 3.0 * t2 * (p3y - p2y)
-            dlen = math.hypot(dqx, dqy)
-            if dlen > 1e-6:
-                tx = dqx / dlen
-                ty = dqy / dlen
-                nx = -ty
-                ny = tx
-                prev_nx, prev_ny = nx, ny
+            return (
+                om2 * om * p0x + 3.0 * om2 * t * p1x + 3.0 * om * t2 * p2x + t2 * t * p3x,
+                om2 * om * p0y + 3.0 * om2 * t * p1y + 3.0 * om * t2 * p2y + t2 * t * p3y,
+            )
+
+        step = 1.0 / n
+        t_list = [i * step for i in range(n + 1)]
+        i = 0
+        while i < len(t_list) - 1 and len(t_list) < 32:
+            t0 = t_list[i]
+            t1 = t_list[i + 1]
+            if t1 - t0 <= 1.0 / 32.0:
+                i += 1
+                continue
+            ca = _bezier_at(t0)
+            cb = _bezier_at(t1)
+            cm = _bezier_at((t0 + t1) * 0.5)
+            dev = math.hypot(cm[0] - (ca[0] + cb[0]) * 0.5, cm[1] - (ca[1] + cb[1]) * 0.5)
+            if dev > 1.5:
+                t_list.insert(i + 1, (t0 + t1) * 0.5)
             else:
-                nx, prev_nx = prev_nx, prev_nx
-                ny, prev_ny = prev_ny, prev_ny
+                i += 1
+
+        centers = [_bezier_at(t) for t in t_list]
+        n = len(t_list) - 1
+
+        def _unit(a, b):
+            dx_ = b[0] - a[0]
+            dy_ = b[1] - a[1]
+            dl_ = math.hypot(dx_, dy_)
+            if dl_ > 1e-9:
+                return (dx_ / dl_, dy_ / dl_)
+            return (1.0, 0.0)
+
+        dchord = _unit(centers[0], centers[1])
+        dchord_n = (-dchord[1], dchord[0])
+
+        # Emit one rectangle for a chord. All four vertices share the same
+        # segA/segB anchors (the chord endpoints) so the fragment measures a
+        # true capsule around exactly that chord; uv.x interpolates the
+        # along-chord fraction u.
+        def _emit_rect(ax_, ay_, bx_, by_, nx, ny):
+            nonlocal base_vert
+            lx0 = ax_ + nx * lateral
+            ly0 = ay_ + ny * lateral
+            rx0 = ax_ - nx * lateral
+            ry0 = ay_ - ny * lateral
+            lx1 = bx_ + nx * lateral
+            ly1 = by_ + ny * lateral
+            rx1 = bx_ - nx * lateral
+            ry1 = by_ - ny * lateral
+            base = base_vert
+            all_pos.extend([(lx0, ly0, 0.0), (rx0, ry0, 0.0), (lx1, ly1, 0.0), (rx1, ry1, 0.0)])
+            all_uv.extend([(0.0, 0.0), (0.0, 0.0), (1.0, 0.0), (1.0, 0.0)])
+            all_segA.extend([(ax_, ay_)] * 4)
+            all_segB.extend([(bx_, by_)] * 4)
+            indices.append((base, base + 1, base + 2))
+            indices.append((base + 2, base + 1, base + 3))
+            base_vert += 4
+
+        # End-cap squares: a full disk around each endpoint collapses both segA
+        # and segB to the endpoint, so every fragment inside resolves distance to
+        # that point (a round cap) regardless of direction. Robust for tiny/steep
+        # wires where lateral dwarfs the chord.
+        def _emit_square(cx, cy):
+            nonlocal base_vert
+            base = base_vert
+            corners = [
+                (cx + dchord[0] * lateral, cy + dchord[1] * lateral),
+                (cx + dchord_n[0] * lateral, cy + dchord_n[1] * lateral),
+                (cx - dchord[0] * lateral, cy - dchord[1] * lateral),
+                (cx - dchord_n[0] * lateral, cy - dchord_n[1] * lateral),
+            ]
+            for c in corners:
+                all_pos.append((c[0], c[1], 0.0))
+                all_uv.append((0.0, 0.0))
+                all_segA.append((cx, cy))
+                all_segB.append((cx, cy))
+            indices.append((base, base + 1, base + 2))
+            indices.append((base + 2, base + 3, base))
+            base_vert += 4
+
+        _emit_square(centers[0][0], centers[0][1])
+
+        # Interior quads: one rectangle per chord, aligned to that chord's own
+        # normal so the capsule follows the curve (the cap squares already cover
+        # the first/last endpoint disks). Each chord extends past its shared
+        # joints by `extend` so adjacent capsules overlap their straight sides,
+        # filling the small rounded wedge that shows on the outside of a turn.
+        # The wire's first and last ends stay at the true endpoints.
+        extend = 0.175
+        prev_nx, prev_ny = 0.0, 1.0
+        for qi in range(len(centers) - 1):
+            ax_, ay_ = centers[qi]
+            bx_, by_ = centers[qi + 1]
+            vx = bx_ - ax_
+            vy = by_ - ay_
+            cl = math.hypot(vx, vy)
+            if cl > 1e-9:
+                nx = -vy / cl
+                ny = vx / cl
+                prev_nx, prev_ny = nx, ny
+                ux, uy = vx / cl, vy / cl
+            else:
                 nx, ny = prev_nx, prev_ny
+                ux, uy = 0.0, 0.0
+            if qi > 0:
+                ax_ -= ux * extend
+                ay_ -= uy * extend
+            if qi < len(centers) - 2:
+                bx_ += ux * extend
+                by_ += uy * extend
+            _emit_rect(ax_, ay_, bx_, by_, nx, ny)
 
-            lx = qx + nx * lateral
-            ly = qy + ny * lateral
-            rx = qx - nx * lateral
-            ry = qy - ny * lateral
-
-            all_pos.append((lx, ly, 0.0))
-            all_pos.append((rx, ry, 0.0))
-            all_uv.append((t, 0.0))
-            all_uv.append((t, 0.0))
-            all_p0.append((p0x, p0y))
-            all_p0.append((p0x, p0y))
-            all_p1.append((p1x, p1y))
-            all_p1.append((p1x, p1y))
-            all_p2.append((p2x, p2y))
-            all_p2.append((p2x, p2y))
-            all_p3.append((p3x, p3y))
-            all_p3.append((p3x, p3y))
-
-        for i in range(num_rows - 1):
-            a = base_vert + i * 2
-            b = a + 1
-            c = a + 2
-            d = a + 3
-            indices.append((a, b, c))
-            indices.append((c, b, d))
-        base_vert += num_rows * 2
+        _emit_square(centers[n][0], centers[n][1])
 
     batch = batch_for_shader(
         shader,
         "TRIS",
-        {"pos": all_pos, "uv": all_uv, "p0": all_p0, "p1": all_p1, "p2": all_p2, "p3": all_p3},
+        {"pos": all_pos, "uv": all_uv, "segA": all_segA, "segB": all_segB},
         indices=indices,
     )
     return shader, batch

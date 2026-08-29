@@ -55,6 +55,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_text_shadow",
         "settings.colored_nodes",
         "settings.show_wire_color",
+        "settings.use_custom_wire_curvature",
         "settings.wire_curvature",
         # Options
         "settings.interactive",

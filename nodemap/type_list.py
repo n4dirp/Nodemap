@@ -104,9 +104,14 @@ def _draw_scrollbar_thumb(
 
 
 def _draw_minimap_scrollbars(
-    mx, my, mw, mh, padding, cx, cy, scale, tree_cx, tree_cy, bounds, colors, ui_scale, master_alpha
+    mx, my, mw, mh, padding, cx, cy, scale, tree_cx, tree_cy, content_bounds, colors, ui_scale, master_alpha
 ):
-    """Draw horizontal/vertical scrollbar thumbs when zoomed in."""
+    """Draw horizontal/vertical scrollbar thumbs when zoomed in.
+
+    *content_bounds* should be the raw node bounds (not the inflated
+    ``tree_bounds``) so that scrollbars appear only when actual node
+    content leaves the visible minimap interior.
+    """
     inner_l = mx + padding
     inner_r = mx + mw - padding
     inner_b = my + padding
@@ -114,7 +119,7 @@ def _draw_minimap_scrollbars(
     inner_w = mw - 2 * padding
     inner_h = mh - 2 * padding
 
-    bbox_l, bbox_b, bbox_r, bbox_t = bounds
+    bbox_l, bbox_b, bbox_r, bbox_t = content_bounds
     bbox_w = bbox_r - bbox_l
     bbox_h = bbox_t - bbox_b
     if bbox_w <= 0 or bbox_h <= 0:
@@ -126,7 +131,7 @@ def _draw_minimap_scrollbars(
     tree_b = tree_cy + (inner_b - cy) / scale
     tree_t = tree_cy + (inner_t - cy) / scale
 
-    # Clamp visible area to bbox (viewport cannot extend past tree bounds)
+    # Clamp visible area to content bounds
     v_left = max(bbox_l, min(bbox_r, tree_l))
     v_right = max(bbox_l, min(bbox_r, tree_r))
     v_bottom = max(bbox_b, min(bbox_t, tree_b))

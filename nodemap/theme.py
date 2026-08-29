@@ -81,6 +81,31 @@ def _theme_float(path: str, default: float) -> float:
         return default
 
 
+def _theme_int(path: str, default: int) -> int:
+    """Resolve a dotted theme attribute path to an int value, falling back to default."""
+    prefs = bpy.context.preferences
+    if not prefs.themes:
+        return default
+    value = prefs.themes[0]
+    try:
+        for part in path.split("."):
+            value = getattr(value, part)
+        return int(value)
+    except (AttributeError, TypeError, ValueError):
+        return default
+
+
+def _get_wire_curvature(settings) -> int:
+    """Return the effective level of curved-wire rendering (0 = straight).
+
+    Uses the add-on's custom value when enabled, otherwise the Blender theme's
+    ``node_editor.noodle_curving`` so the minimap follows the node-graph look.
+    """
+    if settings.use_custom_wire_curvature:
+        return int(settings.wire_curvature)
+    return _theme_int("node_editor.noodle_curving", 0)
+
+
 def _theme_rgba(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
     """Resolve a dotted theme attribute path to an RGBA tuple, ensuring 4 channels."""
     result = _theme(path, default)
@@ -104,13 +129,13 @@ def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> 
 def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
     addon = bpy.context.preferences.addons.get(__package__)
-    theme_bg = _theme_rgba("node_editor.node_backdrop", (0.22, 0.22, 0.22, 0.95))
+    theme_bg = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
     if addon and addon.preferences.settings.custom_bg_color:
         bg = tuple(addon.preferences.settings.bg_color)
     else:
         bg = theme_bg
 
-    text = _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0))
+    text = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     label = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     if addon and addon.preferences.settings.custom_text_color:
         text = label = tuple(addon.preferences.settings.text_color)
@@ -118,13 +143,12 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     return {
         "bg": bg,
         "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
-        "node": _theme_rgba("user_interface.wcol_regular.inner", (0.25, 0.25, 0.25, 1.0)),
+        "node": _theme_rgba("node_editor.node_backdrop", (0.4, 0.4, 0.4, 1.0)),
         "node_selected": _theme_rgba("node_editor.node_selected", (0.28, 0.45, 0.7, 1.0)),
         "node_active": _theme_rgba("node_editor.node_active", (1.0, 1.0, 1.0, 1.0)),
-        "node_border": _theme_rgba("user_interface.wcol_regular.outline", (1.0, 1.0, 1.0, 0.12)),
+        "node_border": _theme_rgba("node_editor.node_outline", (1.0, 1.0, 1.0, 0.149)),
         "wire": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
         "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
-        "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 0.37, 0.34, 0.9)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
         "text": text,
         "label": label,

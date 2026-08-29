@@ -561,7 +561,7 @@ def _rebuild_wire_marker_batches(
     """
 
     # Wires — cubic noodle strips when curvature is on, straight pills at 0
-    thickness = max(2.0, 4.0 * sb)
+    thickness = max(1.6, 2.0 * sb)
     curb = float(wire_curvature)
     use_curve = curb > 1e-6
     wire_batches: list[tuple[Any, Any, float]] = []
@@ -654,8 +654,8 @@ def _rebuild_wire_marker_batches(
     marker_batches = []
     group_markers = tree_data.get("group_markers")
     if group_markers:
-        marker_offset = 3 * ui_scale
-        marker_thick = max(1.0, 1.5 * ui_scale)
+        marker_offset = 10 * sb
+        marker_thick = max(2.0, 2.0 * ui_scale)
         for marker_color, items in group_markers.items():
             group = []
             for x_mid, y_bot, length in items:
