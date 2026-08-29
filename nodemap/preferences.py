@@ -162,7 +162,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_height: IntProperty(
         name="Size Y",
         description="Minimap height in pixels",
-        default=128,
+        default=100,
         min=MIN_MAP_HEIGHT,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -298,7 +298,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_selected_btn: BoolProperty(
         name="Frame Selected Button",
         description="Show a Frame-selected button inside the minimap",
-        default=True,
+        default=False,
         update=_update_invalidate_batches,
     )
 
@@ -350,9 +350,15 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
         update=_update_invalidate_all,
     )
+    use_custom_wire_curvature: BoolProperty(
+        name="Custom Noodle Curving",
+        description="Use the custom noodle curving value below instead of the Blender theme value",
+        default=False,
+        update=_update_invalidate_batches,
+    )
     wire_curvature: IntProperty(
-        name="Wire Curvature",
-        description="Wire curve strength, matching Blender's Noodle Curving (0 straight, 5 default, 10 maximum)",
+        name="Nodle Curving",
+        description="Curving of the noddle",
         default=5,
         min=0,
         max=10,
@@ -418,7 +424,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     type_list_width_pct: IntProperty(
         name="Type List Width %",
         description="Width of the node-type list as a percentage of the minimap width",
-        default=35,
+        default=40,
         min=15,
         max=50,
         subtype="PERCENTAGE",
@@ -692,7 +698,12 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         col.prop(settings, "show_text_shadow", text="Text Shadows")
 
-        col.prop(settings, "wire_curvature", text="Noodle Curving")
+        col = box.column(heading="Noodle Curving")
+        row = col.row(align=True, heading="")
+        row.prop(settings, "use_custom_wire_curvature", text="")
+        sub = row.row(align=True)
+        sub.active = settings.use_custom_wire_curvature
+        sub.row().prop(settings, "wire_curvature", text="", expand=True)
 
         box = layout.box().column()
         box.label(text="Performance")
