@@ -183,9 +183,20 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
     # tracks the cursor per-pixel; percent derivation and animation resume
     # after the drag releases (drag_width cleared in the operator).
     if st.list.drag_width is not None:
+        old = st.list.width
+        new = st.list.drag_width
+        if abs(new - old) >= 0.5:
+            from .transforms import _preserve_view_for_list_width
+
+            _preserve_view_for_list_width(st, old, new, ui_scale)
         st.list.width = st.list.drag_width
         return
     if not st.list.anim_active:
+        old = st.list.width
+        if abs(target_now - old) >= 0.5:
+            from .transforms import _preserve_view_for_list_width
+
+            _preserve_view_for_list_width(st, old, target_now, ui_scale)
         st.list.width = target_now
         return
 
@@ -204,9 +215,16 @@ def _step_list_width(st: MinimapState, settings, mw: float, ui_scale: float) -> 
 
     progress = min((time.perf_counter() - st.list.anim_start) / max(st.list.anim_duration, 1e-4), 1.0)
     eased = 1.0 - (1.0 - progress) ** 3
-    st.list.width = st.list.anim_from + (st.list.anim_target - st.list.anim_from) * eased
+    new_width = st.list.anim_from + (st.list.anim_target - st.list.anim_from) * eased
     if progress >= 1.0:
-        st.list.width = st.list.anim_target
+        new_width = st.list.anim_target
+    old = st.list.width
+    if abs(new_width - old) >= 0.5:
+        from .transforms import _preserve_view_for_list_width
+
+        _preserve_view_for_list_width(st, old, new_width, ui_scale)
+    st.list.width = new_width
+    if progress >= 1.0:
         st.list.anim_active = False
     else:
         _schedule_list_anim_redraw(st)

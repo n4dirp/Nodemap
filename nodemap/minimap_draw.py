@@ -17,6 +17,7 @@ from .gpu_draw import (
     _draw_pill,
     _draw_rounded_rect_border,
     _draw_text_with_shadow,
+    _get_batch_noodle_shader,
     _get_batch_pill_shader,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
@@ -420,10 +421,10 @@ def _draw_node_count(
     tx = mx + (mw - text_w) - _HANDLE_THICKNESS * ui_scale
     ty = my + (_HANDLE_THICKNESS * ui_scale)
 
-    st = _state()
-    btn_bottoms = [rect[1] for rect in st.buttons.rects.values() if rect]
-    if btn_bottoms and min(btn_bottoms) <= ty + font_size:
-        return
+    # st = _state()
+    # btn_bottoms = [rect[1] for rect in st.buttons.rects.values() if rect]
+    # if btn_bottoms and min(btn_bottoms) <= ty + font_size:
+    #     return
 
     text_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
 
@@ -544,27 +545,66 @@ def _layout_minimap_buttons(
 ) -> dict[str, tuple[float, float, float]]:
     """Return hit-rect origins {id: (x, y, size)} for every visible button.
 
-    Frame buttons stack top-down along the right edge; the list toggle
-    sits at the top-left and slides right of an open type-list zone.
+    Frame buttons are laid out horizontally along the top edge (right
+    aligned); the list toggle sits at the top-left and slides right of
+    an open type-list zone.
     """
     size = BTN_SIZE * ui_scale
     margin = BTN_MARGIN * ui_scale
     gap = FRAME_BTN_GAP * ui_scale
     top_y = round(my + mh - padding - margin - size)
-    stack_x = round(mx + mw - padding - margin - size)
+
+    # Frame buttons (ALL/VIEW/SELECTED) as a horizontal row at the top-right.
+    frame_ids = [bid for bid in visible_ids if bid != "LIST"]
+    # Rightmost button touches the right padding edge; row extends leftwards.
+    right_x = round(mx + mw - padding - margin - size)
+
+    # Compute LIST x first to test overlap with frame row.
+    list_x: float | None = None
+    if "LIST" in visible_ids:
+        lx = round(mx + padding + margin)
+        if st.list.width > 0:
+            lx = max(lx, round(_get_map_content_rect(st)[0] + margin))
+        list_x = lx
+
+    # Avoid overlap between LIST and the frame row, and overflow of the
+    # row outside the minimap. When space is tight (small mw or large
+    # list), hide frame buttons progressively: SELECTED → VIEW → ALL.
+    hide_priority = ["SELECTED", "VIEW", "ALL"]
+    # Work on a copy so we can cull without affecting visible_ids order.
+    culled_frame_ids = list(frame_ids)
+    while culled_frame_ids:
+        n_frame = len(culled_frame_ids)
+        frame_left = right_x - (n_frame - 1) * (gap + size) if n_frame else right_x
+        # 1) row would overflow left padding
+        overflow_left = frame_left < (mx + padding)
+        # 2) row would overlap LIST (with one gap clearance)
+        overlap_list = False
+        if list_x is not None:
+            list_right = list_x + size
+            overlap_list = (list_right + gap) > frame_left
+        if not overflow_left and not overlap_list:
+            break
+        # Hide next priority button that is still visible.
+        to_hide: str | None = None
+        for cand in hide_priority:
+            if cand in culled_frame_ids:
+                to_hide = cand
+                break
+        if to_hide is None:
+            # Fallback: hide leftmost (first in current order)
+            to_hide = culled_frame_ids[0]
+        culled_frame_ids.remove(to_hide)
 
     rects: dict[str, tuple[float, float, float]] = {}
-    stack_index = 0
-    for btn_id in visible_ids:
-        if btn_id == "LIST":
-            lx = round(mx + padding + margin)
-            if st.list.width > 0:
-                # Slide right of the list zone: list, padding, button.
-                lx = max(lx, round(_get_map_content_rect(st)[0] + margin))
-            rects[btn_id] = (lx, top_y, size)
-        else:
-            rects[btn_id] = (stack_x, round(top_y - stack_index * (gap + size)), size)
-            stack_index += 1
+    n_frame = len(culled_frame_ids)
+    for idx, btn_id in enumerate(culled_frame_ids):
+        x = round(right_x - (n_frame - 1 - idx) * (gap + size))
+        rects[btn_id] = (x, top_y, size)
+
+    if list_x is not None:
+        rects["LIST"] = (list_x, top_y, size)
+
     return rects
 
 
@@ -584,24 +624,37 @@ def _draw_minimap_buttons(mx, my, mw, mh, padding, colors, ui_scale, master_alph
     border_color = _alpha_mul(colors["bg_border"], master_alpha)
 
     # Frame buttons merge into one combined background when two or more are
-    # shown, with a separator line in the gaps; the list toggle stays standalone.
-    stack = [btn_id for btn_id in visible_ids if btn_id != "LIST"]
+    # shown, with a vertical separator line in the gaps; the list toggle
+    # stays standalone. Row is horizontal at the top.
+    # Use culled rects for the frame row (some may have been hidden to
+    # avoid overlap with LIST on narrow minimaps).
+    stack = [bid for bid in visible_ids if bid != "LIST" and bid in rects]
+    # Fallback: derive from rects if culling removed entries not in visible_ids
+    if not stack:
+        stack = [bid for bid in rects if bid != "LIST"]
     combined = len(stack) >= 2
     if combined:
-        s_top_btn, s_bot_btn = stack[0], stack[-1]
-        sx, _, size = rects[s_top_btn]
-        s_top = rects[s_top_btn][1] + size
-        s_bottom = rects[s_bot_btn][1]
-        _draw_filled_rounded_rect(sx, s_bottom, size, s_top - s_bottom, radius, bg_color)
-        _draw_rounded_rect_border(sx, s_bottom, size, s_top - s_bottom, radius, border_color, 0.5)
+        # Horizontal capsule: from leftmost to rightmost button.
+        xs = [rects[bid][0] for bid in stack]
+        ys = [rects[bid][1] for bid in stack]
+        # All frame buttons share the same y (top row).
+        sy = ys[0]
+        left_x = min(xs)
+        # Right edge is left + size of rightmost button.
+        right_x = max(x + rects[bid][2] for x, bid in zip(xs, stack))
+        # Use size from any rect (all same).
+        _, _, size_h = rects[stack[0]]
+        _draw_filled_rounded_rect(left_x, sy, right_x - left_x, size_h, radius, bg_color)
+        _draw_rounded_rect_border(left_x, sy, right_x - left_x, size_h, radius, border_color, 0.5)
 
         line_t = max(1.0, 1.0 * ui_scale)
         sep_inset = 0 * ui_scale
-        for i in range(len(stack) - 1):
-            sep_y = rects[stack[i]][1]
-            _draw_filled_rounded_rect(
-                sx + sep_inset, sep_y - line_t, size - 2 * sep_inset, line_t, line_t / 2, border_color
-            )
+        # Vertical separators between horizontally laid out buttons.
+        # Sort by x to find neighbours left-to-right.
+        ordered = sorted(stack, key=lambda bid: rects[bid][0])
+        for i in range(len(ordered) - 1):
+            sep_x = rects[ordered[i]][0] + rects[ordered[i]][2]
+            _draw_filled_rounded_rect(sep_x, sy + sep_inset, line_t, size_h - 2 * sep_inset, line_t / 2, border_color)
 
     for btn_id, _pref_attr in _MINIMAP_BUTTONS:
         if btn_id not in rects:
@@ -796,6 +849,7 @@ def draw_minimap() -> None:
         master_alpha,
         show_borders,
         highlight_border,
+        wire_curvature=settings.wire_curvature,
     )
 
     # Draw minimap panel
@@ -872,19 +926,46 @@ def draw_minimap() -> None:
             wire_batches = st.cache.wire_batches or []
             wire_shadow_batch = st.cache.wire_shadow_batch
             if settings.show_wires and (wire_shadow_batch or wire_batches):
-                pill_shader = _get_batch_pill_shader()
-                pill_shader.bind()
-                pill_shader.uniform_float(
-                    "ModelViewProjectionMatrix",
-                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                )
+                wire_curved = int(settings.wire_curvature) > 0
                 shadow_alpha = 0.35 * master_alpha
-                if wire_shadow_batch is not None and shadow_alpha > 0:
-                    pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
-                    wire_shadow_batch.draw(pill_shader)
-                for wire_color, batch in wire_batches:
-                    pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
-                    batch.draw(pill_shader)
+                mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+                if wire_curved:
+                    noodle_shader = _get_batch_noodle_shader()
+                    noodle_shader.bind()
+                    noodle_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                    if wire_shadow_batch is not None and shadow_alpha > 0:
+                        if isinstance(wire_shadow_batch, tuple):
+                            sbatch, shalf = wire_shadow_batch
+                        else:
+                            sbatch, shalf = wire_shadow_batch, 1.0
+                        noodle_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
+                        noodle_shader.uniform_float("halfThick", float(shalf))
+                        sbatch.draw(noodle_shader)
+                    for entry in wire_batches:
+                        if len(entry) == 3:
+                            wire_color, batch, half = entry
+                        else:
+                            wire_color, batch = entry
+                            half = 1.0
+                        noodle_shader.uniform_float("color", _srgb_to_linear(wire_color))
+                        noodle_shader.uniform_float("halfThick", float(half))
+                        batch.draw(noodle_shader)
+                else:
+                    pill_shader = _get_batch_pill_shader()
+                    pill_shader.bind()
+                    pill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+                    if wire_shadow_batch is not None and shadow_alpha > 0:
+                        # Straight-wire shadow is a plain batch.
+                        sbatch = wire_shadow_batch[0] if isinstance(wire_shadow_batch, tuple) else wire_shadow_batch
+                        pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
+                        sbatch.draw(pill_shader)
+                    for entry in wire_batches:
+                        if len(entry) == 3:
+                            wire_color, batch = entry[0], entry[1]
+                        else:
+                            wire_color, batch = entry
+                        pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
+                        batch.draw(pill_shader)
 
             # Node fill backgrounds
             backdrops_batch = st.cache.backdrops_batch

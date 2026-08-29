@@ -27,7 +27,7 @@ _LIST_SWATCH_GAP = 5.0
 _LIST_COUNT_GAP = 8.0
 _SCROLLBAR_HIT_PAD = 6.0
 _EMPTY_FINGERPRINT = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
-_LIST_ANIM_FRAMES: dict[str, int] = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}
+_LIST_ANIM_FRAMES: dict[str, int] = {"FAST": 10, "MEDIUM": 20}
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:

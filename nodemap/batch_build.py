@@ -2,11 +2,13 @@
 
 import logging
 import math
+from typing import Any
 
 import blf
 from gpu_extras.batch import batch_for_shader
 
 from .gpu_draw import (
+    _build_noodle_batch,
     _build_pill_batch,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
@@ -53,6 +55,7 @@ def _ensure_minimap_batches(
     master_alpha,
     show_borders,
     highlight_border=None,
+    wire_curvature: int = 5,
 ):
     """Bake content batches in map-local space, rebuilding only when stale.
 
@@ -86,7 +89,7 @@ def _ensure_minimap_batches(
     # A settle bump changes only tree_data_version, so wire/marker freshness
     # must gate the early return too — otherwise wires stay frozen at their
     # pre-drag positions until an unrelated rebuild trigger fires.
-    wire_key = (st.cache.tree_version, round(ui_scale, 3))
+    wire_key = (st.cache.tree_version, round(ui_scale, 3), int(wire_curvature))
     wires_fresh = wire_key == st.cache.wire_key and st.cache.wire_scale == sb
     if (
         key == st.cache.batch_key
@@ -532,7 +535,7 @@ def _ensure_minimap_batches(
     # track the sticky bake scale exactly, keeping the shared matrix factor
     # consistent.
     if wire_key != st.cache.wire_key or st.cache.wire_scale != sb:
-        _rebuild_wire_marker_batches(st, tree_data, ocx, ocy, sb, ui_scale, min_dim)
+        _rebuild_wire_marker_batches(st, tree_data, ocx, ocy, sb, ui_scale, min_dim, int(wire_curvature))
         st.cache.wire_key = wire_key
         st.cache.wire_scale = sb
 
@@ -549,18 +552,27 @@ def _rebuild_wire_marker_batches(
     sb: float,
     ui_scale: float,
     min_dim: float,
+    wire_curvature: int = 5,
 ) -> None:
-    """Bake wire pill batches (per color + shadow underlay) and group markers.
+    """Bake wire batches (noodle strips when curved, pills otherwise) and group markers.
 
     Called only when tree structure, UI scale, or the scale bucket changed —
     never on position-only drag refreshes.
     """
-    # Wires — baked pill batches per color plus a merged thicker shadow underlay
-    thickness = max(1.0, 2.0 * sb)
-    wire_batches = []
-    shadow_points = []
+
+    # Wires — cubic noodle strips when curvature is on, straight pills at 0
+    thickness = max(2.0, 4.0 * sb)
+    curb = float(wire_curvature)
+    use_curve = curb > 1e-6
+    wire_batches: list[tuple[Any, Any, float]] = []
+    # Unified control-point list for the merged shadow batch.
+    shadow_wires: list[tuple[float, float, float, float, float, float, float, float]] = []
+    # Per-color control lists for the thin color batches.
+    per_color_wires: dict[Any, list[tuple[float, float, float, float, float, float, float, float]]] = {}
+
     for color, items in tree_data["wire_items"].items():
-        group = []
+        group_controls: list[tuple[float, float, float, float, float, float, float, float]] = []
+        group_pills: list[tuple[float, float, float, float]] = []
         for out_x, out_y, in_x, in_y in items:
             x1 = (out_x - ocx) * sb
             y1 = (out_y - ocy) * sb
@@ -568,23 +580,75 @@ def _rebuild_wire_marker_batches(
             y2 = (in_y - ocy) * sb
             dx = x2 - x1
             dy = y2 - y1
-            length = math.hypot(dx, dy)
-            if length < 0.5:
+            if math.hypot(dx, dy) < 0.5:
                 continue
-            angle = math.atan2(dy, dx)
-            mid_x = (x1 + x2) / 2
-            mid_y = (y1 + y2) / 2
-            group.append((mid_x, mid_y, length, angle))
-        if group:
-            _shader, batch = _build_pill_batch(group, thickness)
+            if use_curve:
+                # Cubic Bezier matching Blender's node link type (ease-out /
+                # ease-in): horizontal handles whose length scales with the
+                # horizontal span only, exactly like
+                # ``dist = curving * 0.10 * |x3 - x0|`` in
+                # ``calculate_inner_link_bezier_points``.
+                dist_h = curb * 0.10 * abs(dx)
+                p0x, p0y = x1, y1
+                p1x, p1y = x1 + dist_h, y1
+                p2x, p2y = x2 - dist_h, y2
+                p3x, p3y = x2, y2
+                group_controls.append((p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y))
+            else:
+                length = math.hypot(dx, dy)
+                angle = math.atan2(dy, dx)
+                mid_x = (x1 + x2) * 0.5
+                mid_y = (y1 + y2) * 0.5
+                group_pills.append((mid_x, mid_y, length, angle))
+
+        if use_curve and group_controls:
+            per_color_wires[color] = group_controls
+            shadow_wires.extend(group_controls)
+        elif group_pills:
+            _shader, batch = _build_pill_batch(group_pills, thickness)
             if batch is not None:
-                wire_batches.append((color, batch))
-                shadow_points.extend(group)
+                wire_batches.append((color, batch, thickness * 0.5))
+
     shadow_batch = None
-    if shadow_points:
-        _shadow_shader, shadow_batch = _build_pill_batch(shadow_points, thickness * 2.5)
-    st.cache.wire_batches = wire_batches
-    st.cache.wire_shadow_batch = shadow_batch
+    if use_curve:
+        # Wire shadows temporarily disabled for performance.
+        if False and shadow_wires:  # pragma: no cover
+            half_shadow = thickness * 2.5 * 0.5
+            _s_shader, shadow_batch = _build_noodle_batch(shadow_wires, half_shadow)
+        for color, ctrls in per_color_wires.items():
+            half_thin = thickness * 0.5
+            _shader, batch = _build_noodle_batch(ctrls, half_thin)
+            if batch is not None:
+                wire_batches.append((color, batch, half_thin))
+        # Normalize shadow cache to (batch, half) when curved.
+        st.cache.wire_batches = wire_batches
+        st.cache.wire_shadow_batch = None
+    else:
+        # Straight-pill shadow (single merged batch).
+        shadow_points: list[tuple[float, float, float, float]] = []
+        # Re-collect straight pills for shadow merging.
+        # We already filled wire_batches above with per-color pills;
+        # rebuild the merged set from the same items for shadow thickness.
+        for color, items in tree_data["wire_items"].items():
+            for out_x, out_y, in_x, in_y in items:
+                x1 = (out_x - ocx) * sb
+                y1 = (out_y - ocy) * sb
+                x2 = (in_x - ocx) * sb
+                y2 = (in_y - ocy) * sb
+                dx = x2 - x1
+                dy = y2 - y1
+                length = math.hypot(dx, dy)
+                if length < 0.5:
+                    continue
+                angle = math.atan2(dy, dx)
+                mid_x = (x1 + x2) * 0.5
+                mid_y = (y1 + y2) * 0.5
+                shadow_points.append((mid_x, mid_y, length, angle))
+        # Wire shadows temporarily disabled for performance.
+        if False and shadow_points:
+            _shadow_shader, shadow_batch = _build_pill_batch(shadow_points, thickness * 2.5)
+        st.cache.wire_batches = wire_batches
+        st.cache.wire_shadow_batch = None
 
     # Group node underline markers — baked like wires
     marker_batches = []

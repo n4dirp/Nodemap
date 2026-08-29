@@ -1750,7 +1750,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
+        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
         self._anim_progress += 1 / frames
         if self._anim_progress >= 1.0:
             remaining_x = self._anim_target[0] - self._anim_applied[0]
@@ -1810,7 +1810,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
+        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
         progress = self._frame_anim_progress + 1 / frames
         self._frame_anim_progress = progress
         if progress >= 1.0:
@@ -1874,7 +1874,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20, "SLOW": 30}.get(speed, 24)
+        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
         progress = self._editor_anim_progress + 1 / frames
         if progress >= 1.0:
             self._correct_editor_view(context, self._editor_anim_target_rect)
@@ -2109,6 +2109,13 @@ class NODEMAP_OT_navigate(Operator):
             settings.type_list_width_pct = new_pct
         finally:
             _pref_mod._suppress_update = False
+        # Preserve framing so the same world rect stays centered in the
+        # reduced/expanded available width (100→75 keeps same relative pos).
+        old_w = st.list.width
+        if abs(new_w - old_w) >= 0.5:
+            from .transforms import _preserve_view_for_list_width
+
+            _preserve_view_for_list_width(st, old_w, new_w, ui_scale)
         # Drive the zone width live (per-pixel) so the pill tracks the cursor
         # without the integer-percent quantization or a one-frame zone lag.
         st.list.drag_width = new_w

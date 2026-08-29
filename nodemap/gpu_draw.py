@@ -22,6 +22,7 @@ _PILL_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_BORDER_SHADER: gpu.types.GPUShader | None = None
+_BATCH_NOODLE_SHADER: gpu.types.GPUShader | None = None
 
 _FILL_VERT_SRC = """
 void main() {
@@ -209,6 +210,32 @@ void main() {
     float dist = max(outer, -inner);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(vColor.rgb, vColor.a * alpha);
+}
+"""
+
+_BATCH_NOODLE_VERT_SRC = """
+void main() {
+    vT = uv.x;
+    vPos = pos.xy;
+    vP0 = p0;
+    vP1 = p1;
+    vP2 = p2;
+    vP3 = p3;
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_BATCH_NOODLE_FRAG_SRC = """
+void main() {
+    float t = clamp(vT, 0.0, 1.0);
+    vec2 m0 = mix(vP0, vP1, t);
+    vec2 m1 = mix(vP1, vP2, t);
+    vec2 m2 = mix(vP2, vP3, t);
+    vec2 q = mix(mix(m0, m1, t), mix(m1, m2, t), t);
+    float d = length(vPos - q);
+    float sd = d - halfThick;
+    float alpha = 1.0 - smoothstep(-0.5, 0.5, sd);
+    fragColor = vec4(color.rgb, color.a * alpha);
 }
 """
 
@@ -435,6 +462,37 @@ def _get_batch_rect_border_shader() -> gpu.types.GPUShader:
     return _BATCH_RECT_BORDER_SHADER
 
 
+def _get_batch_noodle_shader() -> gpu.types.GPUShader:
+    """Batched curved noodle shader evaluating distance to a cubic Bezier."""
+
+    global _BATCH_NOODLE_SHADER
+    if _BATCH_NOODLE_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("batch_noodle_iface")
+        vert_out.smooth("FLOAT", "vT")
+        vert_out.smooth("VEC2", "vPos")
+        vert_out.smooth("VEC2", "vP0")
+        vert_out.smooth("VEC2", "vP1")
+        vert_out.smooth("VEC2", "vP2")
+        vert_out.smooth("VEC2", "vP3")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.push_constant("FLOAT", "halfThick")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_in(2, "VEC2", "p0")
+        info.vertex_in(3, "VEC2", "p1")
+        info.vertex_in(4, "VEC2", "p2")
+        info.vertex_in(5, "VEC2", "p3")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_BATCH_NOODLE_VERT_SRC)
+        info.fragment_source(_BATCH_NOODLE_FRAG_SRC)
+        _BATCH_NOODLE_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _BATCH_NOODLE_SHADER
+
+
 def _build_pill_batch(
     wires: list[tuple[float, float, float, float]],
     thickness: float,
@@ -498,6 +556,123 @@ def _build_pill_batch(
         shader,
         "TRIS",
         {"pos": all_pos, "uv": all_uv, "halfSize": all_half_size},
+        indices=indices,
+    )
+    return shader, batch
+
+
+def _build_noodle_batch(
+    wires: list[tuple[float, float, float, float, float, float, float, float]],
+    half_thick: float,
+) -> tuple[Any, Any]:
+    """Bake curved noodle wires as triangle strips; returns ``(shader, batch)``.
+
+    Each *wire* is ``(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y)`` in baked space
+    defining a cubic Bezier with horizontal handles (Blender's ease-in /
+    ease-out style). Geometry per wire is a strip following the cubic, with
+    ``half_thick`` baked as the strip half-width (plus AA pad). Color
+    stays as a draw-time uniform.
+    """
+
+    if not wires:
+        return None, None
+
+    shader = _get_batch_noodle_shader()
+    pad = 2.0
+    lateral = half_thick + pad
+
+    all_pos: list[tuple[float, float, float]] = []
+    all_uv: list[tuple[float, float]] = []
+    all_p0: list[tuple[float, float]] = []
+    all_p1: list[tuple[float, float]] = []
+    all_p2: list[tuple[float, float]] = []
+    all_p3: list[tuple[float, float]] = []
+
+    indices: list[tuple[int, int, int]] = []
+    base_vert = 0
+
+    for p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y in wires:
+        # Estimate length for tessellation density.
+        d01 = math.hypot(p1x - p0x, p1y - p0y)
+        d12 = math.hypot(p2x - p1x, p2y - p1y)
+        d23 = math.hypot(p3x - p2x, p3y - p2y)
+        est = d01 + d12 + d23
+        # Fragment shader resolves the analytic cubic; a coarse silhouette is enough at minimap scale.
+        # One sample per ~20 baked units, capped very low. Shadows are
+        # temporarily disabled, so extra coarseness is acceptable.
+        n = int(est / 20.0) + 2
+        n = max(4, min(n, 8))
+
+        # Extension beyond endpoints to fully cover round caps.
+        len0 = math.hypot(p1x - p0x, p1y - p0y) * 3.0
+        len1 = math.hypot(p3x - p2x, p3y - p2y) * 3.0
+        ext_lo = lateral / max(len0, 1e-6) if len0 > 1e-6 else 0.06
+        ext_hi = lateral / max(len1, 1e-6) if len1 > 1e-6 else 0.06
+        ext_lo = min(ext_lo, 0.18)
+        ext_hi = min(ext_hi, 0.18)
+        # Build t samples: extended endpoints + uniform interior.
+        step = 1.0 / n
+        t_vals: list[float] = [-ext_lo]
+        for i in range(n + 1):
+            t_vals.append(i * step)
+        t_vals.append(1.0 + ext_hi)
+
+        num_rows = len(t_vals)
+        # Track previous normal for degenerate tangents.
+        prev_nx, prev_ny = 0.0, 1.0
+        for t in t_vals:
+            om = 1.0 - t
+            om2 = om * om
+            t2 = t * t
+            # Cubic Bezier position valid for any t (extrapolates).
+            qx = om2 * om * p0x + 3.0 * om2 * t * p1x + 3.0 * om * t2 * p2x + t2 * t * p3x
+            qy = om2 * om * p0y + 3.0 * om2 * t * p1y + 3.0 * om * t2 * p2y + t2 * t * p3y
+            # Cubic derivative.
+            dqx = 3.0 * om2 * (p1x - p0x) + 6.0 * om * t * (p2x - p1x) + 3.0 * t2 * (p3x - p2x)
+            dqy = 3.0 * om2 * (p1y - p0y) + 6.0 * om * t * (p2y - p1y) + 3.0 * t2 * (p3y - p2y)
+            dlen = math.hypot(dqx, dqy)
+            if dlen > 1e-6:
+                tx = dqx / dlen
+                ty = dqy / dlen
+                nx = -ty
+                ny = tx
+                prev_nx, prev_ny = nx, ny
+            else:
+                nx, prev_nx = prev_nx, prev_nx
+                ny, prev_ny = prev_ny, prev_ny
+                nx, ny = prev_nx, prev_ny
+
+            lx = qx + nx * lateral
+            ly = qy + ny * lateral
+            rx = qx - nx * lateral
+            ry = qy - ny * lateral
+
+            all_pos.append((lx, ly, 0.0))
+            all_pos.append((rx, ry, 0.0))
+            all_uv.append((t, 0.0))
+            all_uv.append((t, 0.0))
+            all_p0.append((p0x, p0y))
+            all_p0.append((p0x, p0y))
+            all_p1.append((p1x, p1y))
+            all_p1.append((p1x, p1y))
+            all_p2.append((p2x, p2y))
+            all_p2.append((p2x, p2y))
+            all_p3.append((p3x, p3y))
+            all_p3.append((p3x, p3y))
+
+        for i in range(num_rows - 1):
+            a = base_vert + i * 2
+            b = a + 1
+            c = a + 2
+            d = a + 3
+            indices.append((a, b, c))
+            indices.append((c, b, d))
+        base_vert += num_rows * 2
+
+    batch = batch_for_shader(
+        shader,
+        "TRIS",
+        {"pos": all_pos, "uv": all_uv, "p0": all_p0, "p1": all_p1, "p2": all_p2, "p3": all_p3},
         indices=indices,
     )
     return shader, batch

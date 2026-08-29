@@ -184,11 +184,12 @@ _minimap_window_operators: dict[int, Any] = {}
 _registration_state: dict[str, bool] = {"done": False}
 
 # Interactive minimap buttons as (id, show-preference attr).
-# Order defines the right-edge capsule stack; "LIST" renders standalone.
+# Order defines the top-edge horizontal capsule (right-aligned); "LIST" renders standalone.
+# Frame order left-to-right: SELECTED, VIEW, ALL.
 _MINIMAP_BUTTONS: tuple[tuple[str, str], ...] = (
-    ("ALL", "show_frame_all_btn"),
-    ("VIEW", "show_frame_view_btn"),
     ("SELECTED", "show_frame_selected_btn"),
+    ("VIEW", "show_frame_view_btn"),
+    ("ALL", "show_frame_all_btn"),
     ("LIST", "show_list_toggle_btn"),
 )
 
