@@ -267,7 +267,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     viewport_fill_color: FloatVectorProperty(
         name="Active View Fill Color",
         description="Color of the active view fill rect",
-        default=(0.278, 0.447, 0.702, 0.4),
+        default=(0.278, 0.447, 0.702, 1.0),
         size=4,
         min=0.0,
         max=1.0,
@@ -350,7 +350,14 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
         update=_update_invalidate_all,
     )
-
+    wire_curvature: IntProperty(
+        name="Wire Curvature",
+        description="Wire curve strength, matching Blender's Noodle Curving (0 straight, 5 default, 10 maximum)",
+        default=5,
+        min=0,
+        max=10,
+        update=_update_invalidate_batches,
+    )
     show_wire_color: BoolProperty(
         name="Socket Wire Colors",
         description="Color wires by the output socket type",
@@ -487,7 +494,6 @@ class NODEMAP_PG_settings(PropertyGroup):
         items=[
             ("FAST", "Fast", "Quick snap (0.2s)"),
             ("MEDIUM", "Medium", "Balanced (0.4s)"),
-            ("SLOW", "Slow", "Leisurely (0.67s)"),
         ],
         default="FAST",
     )
@@ -531,7 +537,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         layout.prop(settings, "show_by_default", text="Show in New Editors")
 
-        layout.separator()
+        # layout.separator()
         split = layout.split(factor=0.39)
         sub = split.column()
         sub.alignment = "RIGHT"
@@ -555,7 +561,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             else:
                 layout.operator("nodemap.restore_keymap", text="Restore")
 
-        layout.separator()
+        # layout.separator()
         col = layout.column(heading="Animations")
         _reduce_motion = context.preferences.view.use_reduce_motion
         col.active = not _reduce_motion
@@ -581,21 +587,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         box = layout.box()
         box.label(text="Layout")
 
-        split = box.split(factor=0.4)
-        split.use_property_split = False
-        sub = split.column()
-        sub.alignment = "RIGHT"
-        sub.label(text="Position")
-
-        grid = split.grid_flow(
-            row_major=True,
-            columns=2,
-            even_columns=True,
-            even_rows=True,
-            align=True,
-        )
-        for item in settings.bl_rna.properties["position"].enum_items:
-            grid.prop_enum(settings, "position", item.identifier)
+        box.prop(settings, "position", text="Position")
 
         col = box.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
@@ -631,13 +623,14 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         grid.prop(settings, "show_node_count", text="Total Count")
 
-        sub = col.row()
-        sub.active = settings.show_names
-        sub.prop(settings, "compact_node_labels", text="Compact Labels")
-
         sub = grid.row()
         sub.active = settings.show_frames
         sub.prop(settings, "show_frame_labels", text="Frame Labels")
+
+        box.separator()
+        sub = box.row(heading="Node Labels")
+        sub.active = settings.show_names
+        sub.prop(settings, "compact_node_labels", text="Compact")
 
         box.separator()
         if settings.interactive:
@@ -667,7 +660,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = box.column()
         col.prop(self.settings, "opacity", text="Opacity")
 
-        row = col.row(align=True)
+        row = col.row(align=True, heading="Colors")
         row.prop(self.settings, "viewport_fill_rect", text="View Highlight")
         sub = row.row(align=True)
         sub.active = self.settings.viewport_fill_rect
@@ -691,13 +684,15 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = self.settings.custom_text_color
         sub.prop(self.settings, "text_color", text="")
 
-        col.prop(self.settings, "show_text_shadow", text="Text Shadows")
-
         row = col.row()
         row.prop(settings, "colored_nodes", text="Node Colors")
         sub = row.row()
         sub.active = settings.show_wires | settings.show_socket_indicators
         sub.prop(settings, "show_wire_color", text="Wire Colors")
+
+        col.prop(settings, "show_text_shadow", text="Text Shadows")
+
+        col.prop(settings, "wire_curvature", text="Noodle Curving")
 
         box = layout.box().column()
         box.label(text="Performance")
