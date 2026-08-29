@@ -7,5 +7,5 @@ maintainer = "Nadir Perazzo"
 website = "https://github.com/n4dirp/Nodemap"
 type = "add-on"
 tags = ["Node", "User Interface"]
-blender_version_min = "5.1.0"
+blender_version_min = "5.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
