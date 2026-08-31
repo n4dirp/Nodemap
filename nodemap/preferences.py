@@ -112,12 +112,12 @@ class AddonLogFormatter(logging.Formatter):
         rel_time = record.created - self.start_time
         minutes, seconds = divmod(rel_time, 60)
         timestamp = f"{int(minutes):02d}:{seconds:06.3f}"
-        short_name = __package__.rsplit(".", 1)[-1]
+        package_short_name = __package__.rsplit(".", 1)[-1]
 
         if self.with_level:
-            return f"{timestamp}  {short_name:<16} | {record.levelname.title()}: {record.getMessage()}"
+            return f"{timestamp}  {package_short_name:<16} | {record.levelname.title()}: {record.getMessage()}"
 
-        return f"{timestamp}  {short_name:<16} | {record.getMessage()}"
+        return f"{timestamp}  {package_short_name:<16} | {record.getMessage()}"
 
 
 _CLICK_ACTION_ITEMS = [
@@ -146,7 +146,7 @@ class NODEMAP_PG_settings(PropertyGroup):
             ("BOTTOM_LEFT", "Bottom Left", "Display in the bottom-left corner"),
             ("BOTTOM_RIGHT", "Bottom Right", "Display in the bottom-right corner"),
         ],
-        default="BOTTOM_RIGHT",
+        default="TOP_LEFT",
         update=_update_invalidate_batches,
     )
 
@@ -196,7 +196,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         max=1.0,
         precision=3,
         subtype="FACTOR",
-        update=_update_invalidate_batches,
+        update=_update_invalidate_all,
     )
 
     custom_bg_color: BoolProperty(
@@ -309,7 +309,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    show_names: BoolProperty(
+    show_node_labels: BoolProperty(
         name="Show Node Labels",
         description="Display labels inside minimap nodes",
         default=True,
@@ -337,7 +337,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
-    colored_nodes: BoolProperty(
+    show_node_colors: BoolProperty(
         name="Colored Nodes",
         description="Use custom node colors and color tags",
         default=True,
@@ -364,6 +364,27 @@ class NODEMAP_PG_settings(PropertyGroup):
         max=10,
         update=_update_invalidate_batches,
     )
+    wire_thickness: FloatProperty(
+        name="Wire Thickness",
+        description="Multiplier applied to the minimap wire thickness",
+        default=0.5,
+        min=0.25,
+        soft_max=2.0,
+        max=3.0,
+        precision=2,
+        step=0.1,
+        update=_update_invalidate_batches,
+    )
+    wire_opacity: FloatProperty(
+        name="Wire Color Alpha",
+        description="Multiplier applied to the alpha of minimap wire colors",
+        default=1.0,
+        min=0.0,
+        max=1.0,
+        precision=3,
+        step=0.1,
+        update=_update_invalidate_all,
+    )
     show_wire_color: BoolProperty(
         name="Socket Wire Colors",
         description="Color wires by the output socket type",
@@ -378,8 +399,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
-    show_node_borders: BoolProperty(
-        name="Node Borders",
+    show_node_outline: BoolProperty(
+        name="Node Outline",
         description="Display borders around nodes, highlighting selection and active state",
         default=True,
         update=_update_invalidate_batches,
@@ -543,127 +564,115 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         layout.prop(settings, "show_by_default", text="Show in New Editors")
 
-        # layout.separator()
-        split = layout.split(factor=0.39)
-        sub = split.column()
+        split = layout.split(factor=0.4)
+        sub = split.column(align=True)
         sub.alignment = "RIGHT"
-        sub.label(text="Shortcuts")
-        col = split.column()
-        wm = context.window_manager
-        kc = wm.keyconfigs.user
-        from . import addon_keymaps
+        sub.label(text="Shortcut")
+        col = split.column(align=True)
+        window_manager = context.window_manager
+        user_keyconfig = window_manager.keyconfigs.user
+        from . import addon_keymap_bindings
 
-        row = col.row()
+        row = col.row(align=True)
         row.use_property_split = False
-        for km_addon, kmi_addon in addon_keymaps:
-            km = kc.keymaps.get(km_addon.name)
-            if not km:
+        for km_addon, kmi_addon in addon_keymap_bindings:
+            user_keymap = user_keyconfig.keymaps.get(km_addon.name)
+            if not user_keymap:
                 continue
-            kmi = km.keymap_items.get(kmi_addon.idname)
-            if kmi:
+            user_keymap_item = user_keymap.keymap_items.get(kmi_addon.idname)
+            if user_keymap_item:
                 from rna_keymap_ui import draw_kmi
 
-                draw_kmi([], kc, km, kmi, row, 0)
+                draw_kmi([], user_keyconfig, user_keymap, user_keymap_item, row, 0)
             else:
-                layout.operator("nodemap.restore_keymap", text="Restore")
+                col.operator("nodemap.restore_keymap", text="Restore")
 
-        # layout.separator()
         col = layout.column(heading="Animations")
-        _reduce_motion = context.preferences.view.use_reduce_motion
-        col.active = not _reduce_motion
+        reduce_motion = context.preferences.view.use_reduce_motion
+        col.active = not reduce_motion
         row = col.row(align=True, heading="")
         row.prop(settings, "animations", text="")
         sub = row.row(align=True)
         sub.active = settings.animations
         sub.row().prop(settings, "pan_speed", expand=True)
 
-        box = layout.box().column()
-        box.label(text="Navigation")
-        row = box.row()
-        row.prop(settings, "interactive", text="Interactive Map")
-        row.prop(settings, "follow_view", text="Follow View")
+        layout.separator()
+        group = layout.column()
+        group.label(text="Navigation")
+        col = group.column()
+        col.prop(settings, "interactive", text="Interactive Map")
+        col.prop(settings, "follow_view", text="Follow View")
 
-        box.separator()
-        int_col = box.column()
-        int_col.active = settings.interactive
-        int_col.prop(settings, "left_click_action", text="Left Click")
-        int_col.prop(settings, "right_click_action", text="Right Click")
-        int_col.row().prop(settings, "scroll_wheel_mode", expand=True)
+        group.separator()
+        interaction_column = group.column()
+        interaction_column.active = settings.interactive
+        interaction_column.prop(settings, "left_click_action", text="Left Click")
+        interaction_column.prop(settings, "right_click_action", text="Right Click")
+        interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
 
-        box = layout.box()
-        box.label(text="Layout")
+        layout.separator()
+        group = layout.column()
+        group.label(text="Layout")
 
-        box.prop(settings, "position", text="Position")
+        group.prop(settings, "position", text="Position")
 
-        col = box.column(align=True)
+        col = group.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
         col.prop(settings, "minimap_height", text="Y")
 
-        col = box.column(align=True)
+        col = group.column(align=True)
         col.prop(settings, "max_width_pct", text="Max Region X")
         col.prop(settings, "max_height_pct", text="Y")
 
-        box = layout.box().column()
-        box.label(text="Objects")
+        layout.separator()
+        group = layout.column()
+        group.label(text="Objects")
+        col = group.column()
+        col.prop(settings, "show_frames", text="Frames")
+        col.prop(settings, "show_node_colors", text="Node Colors")
+        col.prop(settings, "show_node_outline", text="Node Outline")
+        col.prop(settings, "show_socket_indicators", text="Node Sockets")
+        col.prop(settings, "show_node_count", text="Total Count")
+        col.prop(settings, "show_type_list", text="Type List")
+        col.prop(settings, "show_wires", text="Wires")
+        col.prop(settings, "show_wire_color", text="Wire Colors")
 
-        split = box.split(factor=0.4)
-        split.use_property_split = False
-        sub = split.column()
-        sub.alignment = "RIGHT"
-        sub.label(text="")
-        col = split.column()
-        grid = col.grid_flow(
-            row_major=True,
-            columns=4,
-            even_columns=True,
-            even_rows=True,
-            align=True,
-        )
-
-        grid.prop(settings, "show_wires", text="Link Wires")
-
-        grid.prop(settings, "show_node_borders", text="Node Borders")
-        grid.prop(settings, "show_frames", text="Node Frames")
-        grid.prop(settings, "show_names", text="Node Labels")
-        grid.prop(settings, "show_socket_indicators", text="Node Sockets")
-
-        grid.prop(settings, "show_node_count", text="Total Count")
-
-        sub = grid.row()
+        group.separator()
+        col = group.column(heading="Labels")
+        col.prop(settings, "show_node_labels", text="Node Labels")
+        sub = col.row()
         sub.active = settings.show_frames
         sub.prop(settings, "show_frame_labels", text="Frame Labels")
-
-        box.separator()
-        sub = box.row(heading="Node Labels")
-        sub.active = settings.show_names
+        sub = col.row()
+        sub.active = settings.show_node_labels
         sub.prop(settings, "compact_node_labels", text="Compact")
 
-        box.separator()
-        if settings.interactive:
-            col = box.column(heading="Buttons")
-            row = col.row()
-            row.prop(settings, "show_frame_all_btn", text="Frame All")
-            row.prop(settings, "show_frame_view_btn", text="Frame View")
-            row.prop(settings, "show_frame_selected_btn", text="Frame Selected")
-            col.prop(settings, "show_list_toggle_btn", text="List Toggle")
+        group.separator()
+        sub = group.column(heading="Buttons")
+        sub.active = settings.interactive
+        sub.prop(settings, "show_frame_all_btn", text="Frame All")
+        sub.prop(settings, "show_frame_view_btn", text="Frame View")
+        if not settings.follow_view:
+            sub.prop(settings, "show_frame_selected_btn", text="Frame Selected")
+        sub.prop(settings, "show_list_toggle_btn", text="List Toggle")
 
-        box.separator()
-        box = box.box().column()
+        group.separator()
+        box = group.box().column()
         box.label(text="Type List")
-        box.prop(settings, "show_type_list", text="Show Type List")
-        box.separator()
+        box.active = settings.interactive
         col = box.column()
         col.active = settings.show_type_list
         row = col.row()
         row.prop(settings, "type_list_sort", text="Sort", expand=True)
         col.prop(settings, "type_list_font_size", text="Font Size")
         sub = col.row()
-        sub.active = settings.colored_nodes
+        sub.active = settings.show_node_colors
         sub.prop(settings, "show_type_colors", text="Type Colors")
 
-        box = layout.box().column()
-        box.label(text="Theme")
-        col = box.column()
+        layout.separator()
+        group = layout.column()
+        group.label(text="Theme")
+        col = group.column()
         col.prop(self.settings, "opacity", text="Opacity")
 
         row = col.row(align=True, heading="Colors")
@@ -690,14 +699,12 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = self.settings.custom_text_color
         sub.prop(self.settings, "text_color", text="")
 
-        row = col.row()
-        row.prop(settings, "colored_nodes", text="Node Colors")
-        sub = row.row()
-        sub.active = settings.show_wires | settings.show_socket_indicators
-        sub.prop(settings, "show_wire_color", text="Wire Colors")
-
         col.prop(settings, "show_text_shadow", text="Text Shadows")
 
+        group.separator()
+        box = group.box().column()
+        box.active = settings.show_wires
+        box.label(text="Wires")
         col = box.column(heading="Noodle Curving")
         row = col.row(align=True, heading="")
         row.prop(settings, "use_custom_wire_curvature", text="")
@@ -705,13 +712,18 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = settings.use_custom_wire_curvature
         sub.row().prop(settings, "wire_curvature", text="", expand=True)
 
-        box = layout.box().column()
-        box.label(text="Performance")
-        box.prop(self.settings, "debounce_interval", text="Update Delay")
+        box.prop(settings, "wire_thickness", text="Thickness")
+        box.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
-        box = layout.box().column()
-        box.label(text="Development")
-        row = box.row(align=True, heading="Console Logging")
+        layout.separator()
+        group = layout.column()
+        group.label(text="Performance")
+        group.prop(self.settings, "debounce_interval", text="Update Delay")
+
+        layout.separator()
+        group = layout.column()
+        group.label(text="Development")
+        row = group.row(align=True, heading="Console Logging")
         row.prop(self, "logging_enabled", text="")
         sub = row.row(align=True)
         sub.active = self.logging_enabled

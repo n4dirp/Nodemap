@@ -57,49 +57,50 @@ def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
     return old is not None and len(old) == len(current) and old[:1] == current[:1] and old[2:] == current[2:]
 
 
-def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
+def _debounced_compile(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
     """Timer callback: compile tree data after fingerprint settles, then force redraw.
 
-    When ``st.cache.pending_settle_flush`` is set (drag position refreshes happened),
-    an unchanged fingerprint only needs the tree-data generation bumped so
-    frozen wire/marker batches snap to the already-patched positions. A
-    position-only diff is patched incrementally; anything else recompiles.
+    When ``minimap_state.cache.pending_settle_flush`` is set (drag position
+    refreshes happened), an unchanged fingerprint only needs the tree-data
+    generation bumped so frozen wire/marker batches snap to the
+    already-patched positions. A position-only diff is patched
+    incrementally; anything else recompiles.
     """
-    include_selection = settings.show_node_borders
+    include_selection = settings.show_node_outline
     current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
-    old_fingerprint = st.cache.fingerprint
+    old_fingerprint = minimap_state.cache.fingerprint
     unchanged = old_fingerprint == current_fingerprint
     trace = logger.isEnabledFor(TRACE_LEVEL)
-    if unchanged and not st.cache.pending_settle_flush:
-        st.cache.pending_timer = None
-        st.cache.pending_timer_deadline = 0.0
-        st.cache.pending_fingerprint = None
+    if unchanged and not minimap_state.cache.pending_settle_flush:
+        minimap_state.cache.pending_timer = None
+        minimap_state.cache.pending_timer_deadline = 0.0
+        minimap_state.cache.pending_fingerprint = None
         if trace:
             logger.trace("SETTLE skip: fingerprint unchanged, nothing pending")
         return None
     applied = False
     path = "compile"
-    if unchanged and st.cache.tree_data:
+    if unchanged and minimap_state.cache.tree_data:
         # Positions were fully patched by _apply_move_updates; rebaking the
         # frozen wire/marker generation skips the full recompile.
-        st.cache.tree_version += 1
+        minimap_state.cache.tree_version += 1
         applied = True
         path = "settle_bump"
-    elif _is_move_only_diff(old_fingerprint, current_fingerprint) and st.cache.tree_data:
-        applied = _apply_move_updates(st, node_tree)
+    elif _is_move_only_diff(old_fingerprint, current_fingerprint) and minimap_state.cache.tree_data:
+        applied = _apply_move_updates(minimap_state, node_tree)
         if applied:
-            st.cache.fingerprint = current_fingerprint
+            minimap_state.cache.fingerprint = current_fingerprint
             # Movement settled: unfreeze wire/marker batches so they snap to
             # the patched positions without a full recompile.
-            st.cache.tree_version += 1
+            minimap_state.cache.tree_version += 1
             path = "move_patch"
     if not applied:
-        _compile_tree_data(st, node_tree, colors, settings, master_alpha, ui_scale)
-        st.cache.fingerprint = current_fingerprint
-    st.cache.pending_timer = None
-    st.cache.pending_timer_deadline = 0.0
-    st.cache.pending_fingerprint = None
-    st.cache.pending_settle_flush = False
+        _compile_tree_data(minimap_state, node_tree, colors, settings, master_alpha, ui_scale)
+        minimap_state.cache.fingerprint = current_fingerprint
+    minimap_state.cache.pending_timer = None
+    minimap_state.cache.pending_timer_deadline = 0.0
+    minimap_state.cache.pending_fingerprint = None
+    minimap_state.cache.pending_settle_flush = False
     if trace:
         logger.trace("SETTLE %s", path)
     from .helpers import redraw_ui
@@ -108,7 +109,7 @@ def _debounced_compile(st: MinimapState, node_tree, colors, settings, master_alp
     return None
 
 
-def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
+def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
     """Compute tree-space data for nodes, wires, sockets, and labels.
 
     Called only when the node tree fingerprint changes (tree topology,
@@ -116,24 +117,24 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     are NOT applied here — content batches are baked in map-local space
     by ``_ensure_minimap_batches()`` and placed with a matrix transform.
 
-    Stores result in ``st.cache.tree_data``.
+    Stores result in ``minimap_state.cache.tree_data``.
     """
     nodes = node_tree.nodes
     active_node = nodes.active
-    zoom = st.view.zoom
 
     tree_data: dict = {}
 
     # Hoisted settings lookups (avoid repeated attribute lookups in loops)
     show_frames = settings.show_frames
-    show_names = settings.show_names
+    show_node_labels = settings.show_node_labels
     show_socket_indicators = settings.show_socket_indicators
     show_wires = settings.show_wires
     show_wire_color = settings.show_wire_color
+    wire_opacity_mult = settings.wire_opacity
     show_frame_labels = settings.show_frame_labels
-    colored_nodes = settings.colored_nodes
+    show_node_colors = settings.show_node_colors
     compact_labels = settings.compact_node_labels
-    show_type_list = settings.show_type_list
+    show_type_list = settings.show_type_list and settings.interactive
 
     # Single pre-pass: classify nodes + cache dims/location + compute bounds
     frames = []
@@ -155,24 +156,23 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     bounds_max_y = float("-inf")
 
     for node in nodes:
-        ptr = node.as_pointer()
-        w, h = _get_node_dims(node, ui_scale)
-        loc = node.location_absolute
-        loc_x, loc_y = loc.x, loc.y
+        node_ptr = node.as_pointer()
+        node_w, node_h = _get_node_dims(node, ui_scale)
+        node_loc_abs = node.location_absolute
+        loc_x, loc_y = node_loc_abs.x, node_loc_abs.y
 
-        node_data[ptr] = {"dims": (w, h), "loc": (loc_x, loc_y)}
+        node_data[node_ptr] = {"dims": (node_w, node_h), "loc": (loc_x, loc_y)}
 
-        # Track bounding box
         if loc_x < bounds_min_x:
             bounds_min_x = loc_x
         if loc_y > bounds_max_y:
             bounds_max_y = loc_y
-        rx = loc_x + w
-        if rx > bounds_max_x:
-            bounds_max_x = rx
-        ty = loc_y - h
-        if ty < bounds_min_y:
-            bounds_min_y = ty
+        right_x = loc_x + node_w
+        if right_x > bounds_max_x:
+            bounds_max_x = right_x
+        bottom_y = loc_y - node_h
+        if bottom_y < bounds_min_y:
+            bounds_min_y = bottom_y
 
         if node.type == "FRAME":
             if show_frames:
@@ -199,7 +199,6 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
         (bounds_min_y + bounds_max_y) / 2,
     )
 
-    # Build sorted Z-order (frames first, then unselected, selected, active)
     sorted_items = []
     for node in frames:
         sorted_items.append((node, True))
@@ -221,38 +220,44 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
 
     node_infos: list[dict] = []
     default_socket_color = (*colors["wire"][:3], master_alpha)
-    default_wire_color = _alpha_mul(colors["wire"], master_alpha)
+    wire_alpha = master_alpha * wire_opacity_mult
+    default_wire_color = _alpha_mul(colors["wire"], wire_alpha)
     out_pos: dict[str, dict] = {}
     in_pos: dict[str, dict] = {}
     # Socket draw colors keyed by socket pointer, shared across nodes and
     # persisted so position-only refreshes skip draw_color() calls.
-    sock_color_cache: dict[int, tuple[float, float, float, float]] = {}
+    socket_color_cache: dict[int, tuple[float, float, float, float]] = {}
     # Per-node socket dots so drag refreshes rebuild only the moved nodes;
     # grouped by color afterwards via _group_socket_dots().
     socket_items_by_node: dict[int, list[tuple[tuple, float, float]]] = {}
 
     for node, is_frame in sorted_items:
-        ptr = node.as_pointer()
-        w, h = node_data[ptr]["dims"]
-        loc_x, loc_y_top = node_data[ptr]["loc"]
-        ty = loc_y_top - h
+        node_ptr = node.as_pointer()
+        node_w, node_h = node_data[node_ptr]["dims"]
+        top_x, top_y = node_data[node_ptr]["loc"]
+        ty = top_y - node_h
 
         info: dict = {
-            "ptr": ptr,
-            "tree_x": loc_x,
+            "ptr": node_ptr,
+            "tree_x": top_x,
             "tree_y": ty,
-            "tree_w": w,
-            "tree_h": h,
+            "tree_w": node_w,
+            "tree_h": node_h,
             "is_frame": is_frame,
             "border_w": 0.5,
         }
 
         if is_frame:
             frame_alpha = 0.6 * master_alpha
-            if colored_nodes:
+            if show_node_colors:
                 if getattr(node, "use_custom_color", False):
-                    nc = node.color
-                    frame_color = (float(nc[0]), float(nc[1]), float(nc[2]), colors["node"][3])
+                    custom_color = node.color
+                    frame_color = (
+                        float(custom_color[0]),
+                        float(custom_color[1]),
+                        float(custom_color[2]),
+                        colors["node"][3],
+                    )
                 else:
                     tag = getattr(node, "color_tag", "NONE")
                     frame_color = color_tag_cache.get(tag, colors.get("frame_node", colors["node"]))
@@ -260,11 +265,11 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 frame_color = colors.get("frame_node", colors["node"])
             info["fill_color"] = _srgb_to_linear((frame_color[0], frame_color[1], frame_color[2], frame_alpha))
 
-            border_col = frame_color
+            border_color = frame_color
             if node.select:
-                border_col = colors["node_active"] if node == active_node else colors["node_selected"]
+                border_color = colors["node_active"] if node == active_node else colors["node_selected"]
             frame_border_alpha = master_alpha if node.select else master_alpha * 0.9
-            info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, frame_border_alpha))
+            info["border_color"] = _srgb_to_linear(_alpha_mul(border_color, frame_border_alpha))
             info["frame_color"] = frame_color
             info["name"] = node.name
             info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT
@@ -280,16 +285,20 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                 if node == active_node:
                     type_active_label = "Frame"
         else:
-            if colored_nodes:
+            if show_node_colors:
                 if getattr(node, "use_custom_color", False):
-                    nc = node.color
-                    node_color = (float(nc[0]), float(nc[1]), float(nc[2]), colors["node"][3])
+                    custom_color = node.color
+                    node_color = (
+                        float(custom_color[0]),
+                        float(custom_color[1]),
+                        float(custom_color[2]),
+                        colors["node"][3],
+                    )
                 else:
                     tag = getattr(node, "color_tag", "NONE")
                     node_color = color_tag_cache.get(tag, colors["node"])
             else:
                 node_color = colors["node"]
-
             if show_type_list:
                 label = node.bl_label or node.type.replace("_", " ").title()
                 if label not in type_counts:
@@ -316,35 +325,35 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
             else:
                 info["fill_color"] = _srgb_to_linear(_alpha_mul(node_color, master_alpha))
 
-            border_col = colors["node_border"]
+            border_color = colors["node_border"]
             if node.select:
-                border_col = colors["node_active"] if node == active_node else colors["node_selected"]
+                border_color = colors["node_active"] if node == active_node else colors["node_selected"]
             border_alpha = master_alpha
             if not node.select:
                 border_alpha *= 0.6
             if node.mute:
                 border_alpha = 0.35 * master_alpha
-            info["border_color"] = _srgb_to_linear(_alpha_mul(border_col, border_alpha))
+            info["border_color"] = _srgb_to_linear(_alpha_mul(border_color, border_alpha))
             info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT * 2
             info["name"] = node.name
 
             if node.type == "GROUP":
-                marker_col = node_color if colored_nodes and not node.select else border_col
-                marker_color = _alpha_mul(marker_col, border_alpha)
-                group_markers.setdefault(marker_color, []).append((loc_x + w / 2, ty, w))
+                marker_base_color = node_color if show_node_colors and not node.select else border_color
+                marker_color = _alpha_mul(marker_base_color, border_alpha)
+                group_markers.setdefault(marker_color, []).append((top_x + node_w / 2, ty, node_w))
                 info["group_marker_col"] = marker_color
 
         # Labels (tree-space positions computed in build)
         text_alpha = 0.35 if node.mute else 1.0
         if is_frame:
             frame_label = node.label
-            if frame_label and show_frame_labels and zoom >= 0.8:
+            if frame_label and show_frame_labels:
                 text_color = _alpha_mul(colors["label"], master_alpha)
-                fc = info["frame_color"]
-                bg_color_lbl = _srgb_to_linear((fc[0], fc[1], fc[2], 0.4 * master_alpha))
-                info["frame_label"] = (frame_label, text_color, bg_color_lbl)
+                frame_rgba = info["frame_color"]
+                bg_label_color = _srgb_to_linear((frame_rgba[0], frame_rgba[1], frame_rgba[2], 0.4 * master_alpha))
+                info["frame_label"] = (frame_label, text_color, bg_label_color)
         else:
-            if show_names:
+            if show_node_labels:
                 label = node.label
                 if not label and getattr(node, "node_tree", None):
                     label = node.node_tree.name
@@ -364,12 +373,11 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
 
         node_infos.append(info)
 
-        # Sockets + wire endpoints for this node (skip frames)
         if is_frame or node.type == "REROUTE":
             continue
 
-        body_top = loc_y_top
-        body_bot = body_top - h
+        body_top = top_y
+        body_bot = body_top - node_h
         body_range = body_top - body_bot
 
         if show_socket_indicators:
@@ -382,63 +390,74 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
                         s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)
                     ]
 
-                x_base = loc_x + (w if is_output else 0)
-                num = len(visible)
-                for idx, socket in enumerate(visible):
-                    if body_range <= 0 or num <= 1:
-                        sy_tree = (body_top + body_bot) * 0.5
+                x_base = top_x + (node_w if is_output else 0)
+                visible_count = len(visible)
+                for socket_index, socket in enumerate(visible):
+                    if body_range <= 0 or visible_count <= 1:
+                        socket_tree_y = (body_top + body_bot) * 0.5
                     else:
-                        sy_tree = body_top - body_range * (idx + 1) / (num + 1)
+                        socket_tree_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
 
-                    sptr = socket.as_pointer()
-                    if sptr not in sock_color_cache:
+                    socket_ptr = socket.as_pointer()
+                    if socket_ptr not in socket_color_cache:
                         if show_wire_color:
                             try:
-                                sc = socket.draw_color(bpy.context, node)
-                                sock_color_cache[sptr] = (float(sc[0]), float(sc[1]), float(sc[2]), master_alpha)
+                                draw_color_rgba = socket.draw_color(bpy.context, node)
+                                socket_color_cache[socket_ptr] = (
+                                    float(draw_color_rgba[0]),
+                                    float(draw_color_rgba[1]),
+                                    float(draw_color_rgba[2]),
+                                    master_alpha,
+                                )
                             except Exception:
-                                sock_color_cache[sptr] = default_socket_color
+                                socket_color_cache[socket_ptr] = default_socket_color
                         else:
-                            sock_color_cache[sptr] = default_socket_color
-                    dots.append((sock_color_cache[sptr], x_base, sy_tree))
-            socket_items_by_node[ptr] = dots
+                            socket_color_cache[socket_ptr] = default_socket_color
+                    dots.append((socket_color_cache[socket_ptr], x_base, socket_tree_y))
+            socket_items_by_node[node_ptr] = dots
 
         if show_wires:
             visible_outs = [s for s in node.outputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
             if visible_outs:
-                x_base = loc_x + w
-                num = len(visible_outs)
+                x_base = top_x + node_w
+                visible_count = len(visible_outs)
                 out_dict = {}
-                for idx, sock in enumerate(visible_outs):
-                    if body_range <= 0 or num <= 1:
-                        sy = (body_top + body_bot) * 0.5
+                for socket_index, socket in enumerate(visible_outs):
+                    if body_range <= 0 or visible_count <= 1:
+                        socket_y = (body_top + body_bot) * 0.5
                     else:
-                        sy = body_top - body_range * (idx + 1) / (num + 1)
-                    sptr = sock.as_pointer()
-                    if sptr in sock_color_cache:
-                        wire_color = sock_color_cache[sptr]
+                        socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                    socket_ptr = socket.as_pointer()
+                    if socket_ptr in socket_color_cache:
+                        socket_color = socket_color_cache[socket_ptr]
+                        wire_color = (socket_color[0], socket_color[1], socket_color[2], wire_alpha)
                     else:
                         wire_color = default_wire_color
                         if show_wire_color:
                             try:
-                                sc = sock.draw_color(bpy.context, node)
-                                wire_color = (float(sc[0]), float(sc[1]), float(sc[2]), master_alpha)
+                                draw_color_rgba = socket.draw_color(bpy.context, node)
+                                wire_color = (
+                                    float(draw_color_rgba[0]),
+                                    float(draw_color_rgba[1]),
+                                    float(draw_color_rgba[2]),
+                                    wire_alpha,
+                                )
                             except Exception:
                                 pass
-                    out_dict[sock.identifier] = (x_base, sy, wire_color)
+                    out_dict[socket.identifier] = (x_base, socket_y, wire_color)
                 out_pos[node.name] = out_dict
 
             visible_ins = [s for s in node.inputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
             if visible_ins:
-                x_base = loc_x
-                num = len(visible_ins)
+                x_base = top_x
+                visible_count = len(visible_ins)
                 in_dict = {}
-                for idx, sock in enumerate(visible_ins):
-                    if body_range <= 0 or num <= 1:
-                        sy = (body_top + body_bot) * 0.5
+                for socket_index, socket in enumerate(visible_ins):
+                    if body_range <= 0 or visible_count <= 1:
+                        socket_y = (body_top + body_bot) * 0.5
                     else:
-                        sy = body_top - body_range * (idx + 1) / (num + 1)
-                    in_dict[sock.identifier] = (x_base, sy, default_wire_color)
+                        socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                    in_dict[socket.identifier] = (x_base, socket_y, default_wire_color)
                 in_pos[node.name] = in_dict
 
     tree_data["node_infos"] = node_infos
@@ -458,7 +477,7 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     # Position-refresh support (see _apply_move_updates)
     tree_data["out_pos"] = out_pos
     tree_data["in_pos"] = in_pos
-    tree_data["socket_draw_colors"] = sock_color_cache
+    tree_data["socket_draw_colors"] = socket_color_cache
     tree_data["default_socket_color"] = default_socket_color
     tree_data["default_wire_color"] = default_wire_color
     tree_data["socket_indicators_on"] = show_socket_indicators
@@ -472,24 +491,29 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
         for node in nodes:
             if node.type != "REROUTE":
                 continue
-            ptr = node.as_pointer()
-            w, h = node_data[ptr]["dims"]
-            loc_x, loc_y_top = node_data[ptr]["loc"]
-            cx_n = loc_x + w / 2
-            cy_n = loc_y_top - h / 2
+            node_ptr = node.as_pointer()
+            node_w, node_h = node_data[node_ptr]["dims"]
+            top_x, top_y = node_data[node_ptr]["loc"]
+            node_center_x = top_x + node_w / 2
+            node_center_y = top_y - node_h / 2
 
             wire_color = default_wire_color
             if show_wire_color:
                 try:
-                    sock = node.outputs[0] if node.outputs else node.inputs[0]
-                    sc = sock.draw_color(bpy.context, node)
-                    wire_color = (float(sc[0]), float(sc[1]), float(sc[2]), master_alpha)
+                    socket = node.outputs[0] if node.outputs else node.inputs[0]
+                    draw_color_rgba = socket.draw_color(bpy.context, node)
+                    wire_color = (
+                        float(draw_color_rgba[0]),
+                        float(draw_color_rgba[1]),
+                        float(draw_color_rgba[2]),
+                        wire_alpha,
+                    )
                 except Exception:
                     pass
 
-            reroute_meta[node.name] = (w / 2, h / 2, wire_color)
-            out_pos[node.name] = {s.identifier: (cx_n, cy_n, wire_color) for s in node.outputs}
-            in_pos[node.name] = {s.identifier: (cx_n, cy_n, wire_color) for s in node.inputs}
+            reroute_meta[node.name] = (node_w / 2, node_h / 2, wire_color)
+            out_pos[node.name] = {s.identifier: (node_center_x, node_center_y, wire_color) for s in node.outputs}
+            in_pos[node.name] = {s.identifier: (node_center_x, node_center_y, wire_color) for s in node.inputs}
 
     tree_data["reroute_meta"] = reroute_meta
 
@@ -502,9 +526,9 @@ def _compile_tree_data(st: MinimapState, node_tree, colors, settings, master_alp
     # Persisted so position-only refreshes skip the links RNA pass entirely
     tree_data["raw_links"] = raw_links
     tree_data["wire_items"] = wire_items
-    st.cache.tree_data = tree_data
-    st.cache.tree_version += 1
-    st.cache.position_version += 1
+    minimap_state.cache.tree_data = tree_data
+    minimap_state.cache.tree_version += 1
+    minimap_state.cache.position_version += 1
 
 
 def _extract_raw_links(node_tree) -> list[tuple[str, str, str, str]]:
@@ -563,7 +587,7 @@ def _group_socket_dots(by_node: dict[int, list[tuple[tuple, float, float]]]) -> 
     return grouped
 
 
-def _apply_move_updates(st: MinimapState, node_tree) -> bool:
+def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
     """Patch cached tree data in place after pure position changes (drag).
 
     Refreshes node positions, socket/wire endpoints, and group markers
@@ -572,25 +596,25 @@ def _apply_move_updates(st: MinimapState, node_tree) -> bool:
     Returns True when applied; False when cached tables are missing and a
     full recompile is required.
     """
-    tree_data = st.cache.tree_data
+    tree_data = minimap_state.cache.tree_data
     if not tree_data:
         return False
-    infos = tree_data.get("node_infos")
+    node_infos = tree_data.get("node_infos")
     out_pos = tree_data.get("out_pos")
     in_pos = tree_data.get("in_pos")
     reroute_meta = tree_data.get("reroute_meta")
     default_socket_color = tree_data.get("default_socket_color")
     default_wire_color = tree_data.get("default_wire_color")
-    if infos is None or out_pos is None or in_pos is None:
+    if node_infos is None or out_pos is None or in_pos is None:
         return False
     if reroute_meta is None or default_socket_color is None or default_wire_color is None:
         return False
 
-    info_by_ptr: dict[int, dict] = {}
-    for info in infos:
+    node_info_by_ptr: dict[int, dict] = {}
+    for info in node_infos:
         ptr = info.get("ptr")
         if ptr:
-            info_by_ptr[ptr] = info
+            node_info_by_ptr[ptr] = info
 
     show_indicators = bool(tree_data.get("socket_indicators_on"))
     by_node = tree_data.get("socket_items_by_node")
@@ -601,88 +625,87 @@ def _apply_move_updates(st: MinimapState, node_tree) -> bool:
     moved_any = False
 
     for node in node_tree.nodes:
-        ptr = node.as_pointer()
-        loc = node.location_absolute
-        lx = loc.x
-        ly = loc.y
+        node_ptr = node.as_pointer()
+        node_loc_abs = node.location_absolute
+        node_left_x = node_loc_abs.x
+        node_top_y = node_loc_abs.y
 
-        ntype = node.type
-        if ntype == "REROUTE":
-            meta = reroute_meta.get(node.name)
-            if meta:
-                hw_off, hh_off, wire_color = meta
-                cx_n = lx + hw_off
-                cy_n = ly - hh_off
-                o_entry = out_pos.get(node.name)
-                i_entry = in_pos.get(node.name)
+        node_type = node.type
+        if node_type == "REROUTE":
+            reroute_entry = reroute_meta.get(node.name)
+            if reroute_entry:
+                hw_off, hh_off, wire_color = reroute_entry
+                node_center_x = node_left_x + hw_off
+                node_center_y = node_top_y - hh_off
+                out_entry = out_pos.get(node.name)
+                in_entry = in_pos.get(node.name)
                 # Flag movement so the tail re-resolves wire_items and
                 # bumps the position generation; reroutes have no info
                 # entry, so nothing else would mark them as moved.
-                entry = o_entry or i_entry
+                entry = out_entry or in_entry
                 if entry:
                     old_x, old_y, _old_col = next(iter(entry.values()))
-                    if old_x != cx_n or old_y != cy_n:
+                    if old_x != node_center_x or old_y != node_center_y:
                         moved_any = True
-                if o_entry is not None:
-                    for sid in o_entry:
-                        o_entry[sid] = (cx_n, cy_n, wire_color)
-                if i_entry is not None:
-                    for sid in i_entry:
-                        i_entry[sid] = (cx_n, cy_n, wire_color)
+                if out_entry is not None:
+                    for socket_identifier in out_entry:
+                        out_entry[socket_identifier] = (node_center_x, node_center_y, wire_color)
+                if in_entry is not None:
+                    for socket_identifier in in_entry:
+                        in_entry[socket_identifier] = (node_center_x, node_center_y, wire_color)
             continue
 
-        info = info_by_ptr.get(ptr)
+        info = node_info_by_ptr.get(node_ptr)
         if info is None:
             continue
 
         w = info["tree_w"]
-        body_top = ly
+        body_top = node_top_y
         body_range = info["tree_h"]
         new_y = body_top - body_range
         # Endpoint and dot geometry only depends on position (dims are
         # unchanged on move-only diffs), so untouched nodes skip all
         # socket RNA; only the moved nodes' dots get rebuilt per node.
-        moved = lx != info["tree_x"] or new_y != info["tree_y"]
-        info["tree_x"] = lx
+        moved = node_left_x != info["tree_x"] or new_y != info["tree_y"]
+        info["tree_x"] = node_left_x
         info["tree_y"] = new_y
 
         if not moved:
             continue
         moved_any = True
 
-        if ntype == "FRAME":
+        if node_type == "FRAME":
             continue
 
         name = node.name
-        o_entry = out_pos.get(name)
-        if o_entry:
+        out_entry = out_pos.get(name)
+        if out_entry:
             visible_outs = [s for s in node.outputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
-            x_base = lx + w
-            num = len(visible_outs)
-            for idx, sock in enumerate(visible_outs):
-                if body_range <= 0 or num <= 1:
-                    sy = body_top - body_range * 0.5
+            x_base = node_left_x + w
+            visible_count = len(visible_outs)
+            for socket_index, socket in enumerate(visible_outs):
+                if body_range <= 0 or visible_count <= 1:
+                    socket_y = body_top - body_range * 0.5
                 else:
-                    sy = body_top - body_range * (idx + 1) / (num + 1)
-                sid = sock.identifier
-                old = o_entry.get(sid)
-                color = old[2] if old else default_wire_color
-                o_entry[sid] = (x_base, sy, color)
+                    socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                socket_identifier = socket.identifier
+                existing = out_entry.get(socket_identifier)
+                color = existing[2] if existing else default_wire_color
+                out_entry[socket_identifier] = (x_base, socket_y, color)
 
-        i_entry = in_pos.get(name)
-        if i_entry:
+        in_entry = in_pos.get(name)
+        if in_entry:
             visible_ins = [s for s in node.inputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
-            num = len(visible_ins)
-            for idx, sock in enumerate(visible_ins):
-                if body_range <= 0 or num <= 1:
-                    sy = body_top - body_range * 0.5
+            visible_count = len(visible_ins)
+            for socket_index, socket in enumerate(visible_ins):
+                if body_range <= 0 or visible_count <= 1:
+                    socket_y = body_top - body_range * 0.5
                 else:
-                    sy = body_top - body_range * (idx + 1) / (num + 1)
-                sid = sock.identifier
-                old = i_entry.get(sid)
-                color = old[2] if old else default_wire_color
-                i_entry[sid] = (lx, sy, color)
-
+                    socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                socket_identifier = socket.identifier
+                existing = in_entry.get(socket_identifier)
+                color = existing[2] if existing else default_wire_color
+                in_entry[socket_identifier] = (node_left_x, socket_y, color)
         if show_indicators:
             dots: list[tuple[tuple, float, float]] = []
             for is_output, sock_list in ((False, node.inputs), (True, node.outputs)):
@@ -692,20 +715,19 @@ def _apply_move_updates(st: MinimapState, node_tree) -> bool:
                     visible = [
                         s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)
                     ]
-                x_base = lx + (w if is_output else 0.0)
-                num = len(visible)
-                for idx, socket in enumerate(visible):
-                    if body_range <= 0 or num <= 1:
-                        sy_tree = (body_top + new_y) * 0.5
+                x_base = node_left_x + (w if is_output else 0.0)
+                visible_count = len(visible)
+                for socket_index, socket in enumerate(visible):
+                    if body_range <= 0 or visible_count <= 1:
+                        socket_tree_y = (body_top + new_y) * 0.5
                     else:
-                        sy_tree = body_top - body_range * (idx + 1) / (num + 1)
+                        socket_tree_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
                     color = sock_colors.get(socket.as_pointer(), default_socket_color)
-                    dots.append((color, x_base, sy_tree))
-                by_node[ptr] = dots
+                    dots.append((color, x_base, socket_tree_y))
+                by_node[node_ptr] = dots
 
-    # Group underline markers follow their nodes
     markers: dict[tuple, list[tuple[float, float, float]]] = {}
-    for info in infos:
+    for info in node_infos:
         marker_col = info.get("group_marker_col")
         if marker_col:
             markers.setdefault(marker_col, []).append(
@@ -719,5 +741,5 @@ def _apply_move_updates(st: MinimapState, node_tree) -> bool:
         if raw_links is None:
             raw_links = _extract_raw_links(node_tree)
         tree_data["wire_items"] = _resolve_wire_items(raw_links, out_pos, in_pos)
-        st.cache.position_version += 1
+        minimap_state.cache.position_version += 1
     return True

@@ -28,11 +28,11 @@ class ResizeHandle(StrEnum):
 class ViewState:
     rect: Rect = (0.0, 0.0, 0.0, 0.0)
     tree_bounds: Rect = (0.0, 0.0, 0.0, 0.0)
-    margin: float = 10.0
-    padding: float = 6.0
-    scale: float = 1.0
-    zoom: float = 1.0
-    base_zoom: float = 1.0
+    outer_margin: float = 10.0
+    inner_padding: float = 6.0
+    map_scale: float = 1.0
+    user_zoom: float = 1.0
+    anchor_zoom: float = 1.0
     pan: Vec2 = (0.0, 0.0)
     width_clamped: bool = False
     height_clamped: bool = False
@@ -41,12 +41,12 @@ class ViewState:
 @dataclass
 class ButtonState:
     rects: dict[str, Rect] = field(default_factory=dict)
-    hovered: str | None = None
+    hovered_button_id: str | None = None
 
 
 @dataclass
 class InteractionState:
-    hovered_node: str | None = None
+    hovered_node_id: str | None = None
     hovered_handle: ResizeHandle | None = None
     resize_active: ResizeHandle | None = None
     pressed: bool = False
@@ -54,24 +54,24 @@ class InteractionState:
 
 @dataclass
 class ListState:
-    width: float = 0.0
-    drag_width: float | None = None
+    list_width: float = 0.0
+    dragging_width: float | None = None
     width_clamped: bool = False
     scroll: float = 0.0
     scroll_max: float = 0.0
     row_height: float = 16.0
     hovered_type_label: str | None = None
-    hovered_node: tuple | None = None
+    hovered_list_row: tuple | None = None
     hovered_scrollbar: bool = False
     scrollbar_dragging: bool = False
-    expanded: set = field(default_factory=set)
-    row_rects: list = field(default_factory=list)
-    node_rects: list = field(default_factory=list)
-    toggle_rects: dict = field(default_factory=dict)
+    expanded: set[str] = field(default_factory=set)
+    row_rects: list[Rect] = field(default_factory=list)
+    node_rects: list[Rect] = field(default_factory=list)
+    toggle_rects: dict[str, Rect] = field(default_factory=dict)
     scrollbar_thumb: Rect | None = None
     scrollbar_track: Rect | None = None
-    zone_rect: Rect | None = None
-    visible_row_keys: list = field(default_factory=list)
+    list_zone_rect: Rect | None = None
+    visible_row_keys: list[str] = field(default_factory=list)
     anim_active: bool = False
     anim_from: float = 0.0
     anim_target: float = -1.0
@@ -93,7 +93,7 @@ class RenderCache:
     highlight_borders_batch: Any = None
     frames_fill_batch: Any = None
     frames_border_batch: Any = None
-    text: list | None = None
+    node_labels: list[tuple[int, str, float, float, tuple[float, ...], float]] | None = None
     wire_batches: list | None = None
     wire_shadow_batch: Any = None
     marker_batches: list | None = None
@@ -125,7 +125,7 @@ class RenderCache:
         self.highlight_borders_batch = None
         self.frames_fill_batch = None
         self.frames_border_batch = None
-        self.text = None
+        self.node_labels = None
         self.wire_batches = None
         self.wire_shadow_batch = None
         self.marker_batches = None
@@ -151,7 +151,7 @@ class RenderCache:
         self.highlight_borders_batch = None
         self.frames_fill_batch = None
         self.frames_border_batch = None
-        self.text = None
+        self.node_labels = None
         self.wire_batches = None
         self.wire_shadow_batch = None
         self.marker_batches = None
@@ -177,7 +177,7 @@ class MinimapState:
 
 
 # Socket indicator pill size multiplier (in tree units).
-SOCKET_PH = 2.0
+SOCKET_PILL_SIZE_MULTIPLIER = 2.0
 
 _minimap_state: dict[int, MinimapState] = {}
 _minimap_window_operators: dict[int, Any] = {}
@@ -215,39 +215,39 @@ def _state(area_ptr: int | None = None) -> MinimapState:
 
 def _cleanup_area_states() -> None:
     """Remove stale entries from `_minimap_state` for closed NODE_EDITOR areas."""
-    wm = bpy.context.window_manager
-    if not wm:
+    window_manager = bpy.context.window_manager
+    if not window_manager:
         return
-    active_ptrs: set[int] = set()
-    for window in wm.windows:
+    active_area_pointers: set[int] = set()
+    for window in window_manager.windows:
         if not window or not window.screen:
             continue
         for area in window.screen.areas:
             if area.type == "NODE_EDITOR":
-                active_ptrs.add(area.as_pointer())
-    stale = [ptr for ptr in _minimap_state if ptr not in active_ptrs]
-    for ptr in stale:
-        del _minimap_state[ptr]
-    if stale:
-        logger.debug("_cleanup_area_states: removed %d stale entries", len(stale))
+                active_area_pointers.add(area.as_pointer())
+    stale_pointers = [area_ptr for area_ptr in _minimap_state if area_ptr not in active_area_pointers]
+    for area_ptr in stale_pointers:
+        del _minimap_state[area_ptr]
+    if stale_pointers:
+        logger.debug("_cleanup_area_states: removed %d stale entries", len(stale_pointers))
 
 
 def _ensure_area_states() -> None:
     """Pre-populate state for all existing NODE_EDITOR areas (called at registration)."""
     _cleanup_area_states()
-    wm = bpy.context.window_manager
-    if not wm:
+    window_manager = bpy.context.window_manager
+    if not window_manager:
         logger.debug("_ensure_area_states: no window_manager")
         return
     count = 0
-    for window in wm.windows:
+    for window in window_manager.windows:
         if not window or not window.screen:
             continue
         for area in window.screen.areas:
             if area.type == "NODE_EDITOR":
-                ptr = area.as_pointer()
-                _state(ptr)
+                area_ptr = area.as_pointer()
+                _state(area_ptr)
                 count += 1
-                win_name = window.screen.name if window.screen else "?"
-                logger.debug("_ensure_area_states: created state for area %d (window %s)", ptr, win_name)
+                window_name = window.screen.name if window.screen else "?"
+                logger.debug("_ensure_area_states: created state for area %d (window %s)", area_ptr, window_name)
     logger.debug("_ensure_area_states: %d NODE_EDITOR areas processed", count)

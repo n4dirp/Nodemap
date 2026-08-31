@@ -24,13 +24,13 @@ _COLOR_TAG_TO_THEME_ATTR: dict[str, str] = {
 }
 
 
-def _srgb_to_linear(c: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+def _srgb_to_linear(color: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     """Convert an sRGB color tuple to linear color space."""
 
-    def _conv(ch: float) -> float:
-        return ch / 12.92 if ch <= 0.04045 else ((ch + 0.055) / 1.055) ** 2.4
+    def _convert_channel(channel: float) -> float:
+        return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
 
-    return (_conv(c[0]), _conv(c[1]), _conv(c[2]), c[3])
+    return (_convert_channel(color[0]), _convert_channel(color[1]), _convert_channel(color[2]), color[3])
 
 
 def _rgba(value: tuple[float, ...], alpha: float) -> tuple[float, float, float, float]:
@@ -55,8 +55,8 @@ def _theme(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
         return default
     value: Any = prefs.themes[0]
     try:
-        for part in path.split("."):
-            value = getattr(value, part)
+        for path_part in path.split("."):
+            value = getattr(value, path_part)
         if hasattr(value, "copy"):
             return tuple(value)
         try:
@@ -74,8 +74,8 @@ def _theme_float(path: str, default: float) -> float:
         return default
     value = prefs.themes[0]
     try:
-        for part in path.split("."):
-            value = getattr(value, part)
+        for path_part in path.split("."):
+            value = getattr(value, path_part)
         return float(value)
     except (AttributeError, TypeError, ValueError):
         return default
@@ -88,8 +88,8 @@ def _theme_int(path: str, default: int) -> int:
         return default
     value = prefs.themes[0]
     try:
-        for part in path.split("."):
-            value = getattr(value, part)
+        for path_part in path.split("."):
+            value = getattr(value, path_part)
         return int(value)
     except (AttributeError, TypeError, ValueError):
         return default
@@ -120,9 +120,9 @@ def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> 
         return _rgba(node.color, fallback_color[3])
     color_tag = getattr(node, "color_tag", "NONE")
     if color_tag != "NONE":
-        theme_attr = _COLOR_TAG_TO_THEME_ATTR.get(color_tag)
-        if theme_attr:
-            return _theme_rgba(f"node_editor.{theme_attr}", fallback_color)
+        mapped_theme_attr = _COLOR_TAG_TO_THEME_ATTR.get(color_tag)
+        if mapped_theme_attr:
+            return _theme_rgba(f"node_editor.{mapped_theme_attr}", fallback_color)
     return fallback_color
 
 
@@ -135,10 +135,10 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     else:
         bg = theme_bg
 
-    text = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
-    label = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
+    text_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
+    label_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     if addon and addon.preferences.settings.custom_text_color:
-        text = label = tuple(addon.preferences.settings.text_color)
+        text_color = label_color = tuple(addon.preferences.settings.text_color)
 
     return {
         "bg": bg,
@@ -150,8 +150,8 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "wire": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
         "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
-        "text": text,
-        "label": label,
+        "text": text_color,
+        "label": label_color,
         "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,

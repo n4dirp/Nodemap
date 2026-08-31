@@ -21,8 +21,8 @@ class NODEMAP_PT_popup(Panel):
         layout = self.layout
         prefs = context.preferences.addons.get(__package__).preferences
         settings = prefs.settings
-        st = _state()
-        layout.active = st.enabled
+        minimap_state = _state()
+        layout.active = minimap_state.enabled
 
         row = layout.row()
         row.label(text="Nodemap")
@@ -34,11 +34,14 @@ class NODEMAP_PT_popup(Panel):
 
         sub.operator("nodemap.open_pref", text="", icon="PREFERENCES", emboss=False)
 
-        row = layout.column(align=True)
-        row.operator("nodemap.frame_all", text="Frame All")
-        row.operator("nodemap.frame_view", text="Frame View")
-        if not settings.follow_view:
-            row.operator("nodemap.frame_selected", text="Frame Selected")
+        header, body = layout.panel("NODEMAP_PT_frame", default_closed=False)
+        header.label(text="Frame")
+        if body:
+            row = body.row(align=True)
+            row.operator("nodemap.frame_all", text="All")
+            row.operator("nodemap.frame_view", text="View")
+            if not settings.follow_view:
+                row.operator("nodemap.frame_selected", text="Selected")
 
         header, body = layout.panel("NODEMAP_PT_layout", default_closed=False)
         header.label(text="Objects")
@@ -48,28 +51,38 @@ class NODEMAP_PT_popup(Panel):
                 columns=2,
                 even_columns=True,
                 even_rows=True,
-                align=True,
+                align=False,
             )
-            grid.prop(settings, "show_wires", text="Link Wires")
-            grid.prop(settings, "show_node_borders", text="Node Borders")
-            grid.prop(settings, "show_frames", text="Node Frames")
-            grid.prop(settings, "show_names", text="Node Labels")
-            grid.prop(settings, "show_socket_indicators", text="Node Sockets")
-            grid.prop(settings, "show_node_count", text="Total Count")
-            grid.prop(settings, "show_type_list", text="Type List")
 
-            if settings.show_frames:
-                grid.prop(settings, "show_frame_labels", text="Frame Labels")
+            grid.prop(settings, "show_frames", text="Frames")
+            sub = grid.row()
+            sub.active = settings.show_frames
+            sub.prop(settings, "show_frame_labels", text="Frame Labels")
+            grid.prop(settings, "show_node_colors", text="Node Colors")
+            grid.prop(settings, "show_node_labels", text="Node Labels")
+            grid.prop(settings, "show_socket_indicators", text="Node Sockets")
+            grid.prop(settings, "show_node_outline", text="Node Outline")
+            grid.prop(settings, "show_node_count", text="Total Count")
+            sub = grid.row()
+            sub.active = settings.interactive
+            sub.prop(settings, "show_type_list", text="Type List")
+            grid.prop(settings, "show_wires", text="Wires")
+            sub = grid.row()
+            sub.active = settings.show_wires
+            sub.prop(settings, "show_wire_color", text="Wire Colors")
 
             if settings.interactive:
-                col = body.column()
-                col.label(text="Buttons")
-                row = col.row()
-                col = row.column()
-                col.prop(settings, "show_frame_all_btn", text="Frame All")
-                col.prop(settings, "show_frame_view_btn", text="Frame View")
-                col.prop(settings, "show_frame_selected_btn", text="Frame Selected")
-                row.prop(settings, "show_list_toggle_btn", text="List Toggle")
+                header, body = layout.panel("NODEMAP_PT_buttons", default_closed=False)
+                header.label(text="Buttons")
+                if body:
+                    col = body.column()
+                    row = col.row()
+                    col = row.column()
+                    col.prop(settings, "show_frame_all_btn", text="Frame All")
+                    col.prop(settings, "show_frame_view_btn", text="Frame View")
+                    if not settings.follow_view:
+                        col.prop(settings, "show_frame_selected_btn", text="Frame Selected")
+                    row.prop(settings, "show_list_toggle_btn", text="List Toggle")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=False)
         header.label(text="Options")
@@ -83,13 +96,13 @@ def draw_minimap_header_button(self, context):
     if context.area.type != "NODE_EDITOR":
         return
     layout = self.layout
-    snode = context.space_data
+    space_node_editor = context.space_data
     overlay = context.space_data.overlay
-    st = _state()
+    minimap_state = _state()
 
     row = layout.row(align=True)
-    row.active = snode.node_tree is not None and overlay.show_overlays
-    row.operator("nodemap.toggle", text="", depress=st.enabled, icon="META_PLANE")
+    row.active = space_node_editor.node_tree is not None and overlay.show_overlays
+    row.operator("nodemap.toggle", text="", depress=minimap_state.enabled, icon="META_PLANE")
     row.popover(panel="NODEMAP_PT_popup", text="")
 
 

@@ -5,7 +5,8 @@ from bpy.types import Operator
 
 PRESET_SUBDIR = "nodemap"
 
-ADDON_ID_DEFINE = (
+# Captures the add-on id at preset-save time.
+ADDON_ID_DEFINE_SNIPPET = (
     "addon_id = next((ext.module for ext in "
     "bpy.context.preferences.addons "
     "if ext.module.endswith('nodemap')), "
@@ -19,7 +20,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
     bl_description = "Add or remove a preset"
     preset_menu = "NODEMAP_PT_presets"
     preset_defines = [
-        ADDON_ID_DEFINE,
+        ADDON_ID_DEFINE_SNIPPET,
         "settings = bpy.context.preferences.addons[addon_id].preferences.settings",
     ]
     preset_values = [
@@ -27,7 +28,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.position",
         "settings.show_node_count",
         "settings.show_frames",
-        "settings.show_node_borders",
+        "settings.show_node_outline",
         "settings.show_socket_indicators",
         "settings.show_wires",
         "settings.show_type_list",
@@ -39,7 +40,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_frame_view_btn",
         "settings.show_frame_selected_btn",
         "settings.show_list_toggle_btn",
-        "settings.show_names",
+        "settings.show_node_labels",
         "settings.compact_node_labels",
         "settings.show_frame_labels",
         # Theme
@@ -53,10 +54,12 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.custom_text_color",
         "settings.text_color",
         "settings.show_text_shadow",
-        "settings.colored_nodes",
+        "settings.show_node_colors",
         "settings.show_wire_color",
         "settings.use_custom_wire_curvature",
         "settings.wire_curvature",
+        "settings.wire_thickness",
+        "settings.wire_opacity",
         # Options
         "settings.interactive",
         "settings.follow_view",

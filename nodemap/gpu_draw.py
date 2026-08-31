@@ -17,6 +17,7 @@ _FILL_SDF_VARYING_SHADER: gpu.types.GPUShader | None = None
 _FILL_SDF_HOLE_SHADER: gpu.types.GPUShader | None = None
 _FILL_SDF_CLIP_SHADER: gpu.types.GPUShader | None = None
 _BORDER_SDF_SHADER: gpu.types.GPUShader | None = None
+_BORDER_SDF_VARYING_SIDES_SHADER: gpu.types.GPUShader | None = None
 _PILL_SHADER: gpu.types.GPUShader | None = None
 _PILL_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
@@ -98,6 +99,46 @@ void main() {
     float r2 = max(0.0, radius - bw);
     float outer = sdRoundRect(vUv, halfSize, radius);
     float inner = sdRoundRect(vUv, halfSize - bw, r2);
+    float dist = max(outer, -inner);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_BORDER_FRAG_VARYING_SIDES_SRC = """
+float sdRoundRectVarying(vec2 p, vec2 b, vec4 r) {
+    float radius = mix(
+        mix(r.w, r.z, step(0.0, p.x)),
+        mix(r.x, r.y, step(0.0, p.x)),
+        step(0.0, p.y)
+    );
+    vec2 q = abs(p) - b + radius;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
+}
+float sdRoundBoxAniso(vec2 p, vec2 bNeg, vec2 bPos, vec4 radii) {
+    vec2 b = mix(bNeg, bPos, step(0.0, p));
+    float radius = mix(
+        mix(radii.w, radii.z, step(0.0, p.x)),
+        mix(radii.x, radii.y, step(0.0, p.x)),
+        step(0.0, p.y)
+    );
+    vec2 q = abs(p) - b + radius;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
+}
+void main() {
+    float lineWidth = lineData.x;
+    float skipLeft = lineData.y;
+    float skipRight = lineData.z;
+    float bw = min(lineWidth, min(halfSize.x, halfSize.y));
+    vec4 innerRadii = max(vec4(0.0), radii - bw);
+    // Inner extents: shrink by bw on every side except the masked vertical
+    // sides, where the band collapses so no stroke is emitted there. Two
+    // adjacent buttons therefore contribute a single seam line instead of
+    // two coincident strokes doubling its weight.
+    vec2 bNeg = vec2(halfSize.x - bw * (1.0 - skipLeft), halfSize.y - bw);
+    vec2 bPos = vec2(halfSize.x - bw * (1.0 - skipRight), halfSize.y - bw);
+    float outer = sdRoundRectVarying(vUv, halfSize, radii);
+    float inner = sdRoundBoxAniso(vUv, bNeg, bPos, innerRadii);
     float dist = max(outer, -inner);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
@@ -347,6 +388,29 @@ def _get_sdf_border_shader() -> gpu.types.GPUShader:
     return _BORDER_SDF_SHADER
 
 
+def _get_sdf_border_varying_sides_shader() -> gpu.types.GPUShader:
+    """Border SDF shader suppressing the vertical stroke on masked sides."""
+    global _BORDER_SDF_VARYING_SIDES_SHADER
+    if _BORDER_SDF_VARYING_SIDES_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("border_varying_sides_iface")
+        vert_out.smooth("VEC2", "vUv")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.push_constant("VEC2", "halfSize")
+        info.push_constant("VEC4", "radii")
+        info.push_constant("VEC4", "lineData")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_FILL_VERT_SRC)
+        info.fragment_source(_BORDER_FRAG_VARYING_SIDES_SRC)
+        _BORDER_SDF_VARYING_SIDES_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _BORDER_SDF_VARYING_SIDES_SHADER
+
+
 def _get_pill_shader() -> gpu.types.GPUShader:
     global _PILL_SHADER
     if _PILL_SHADER is None:
@@ -502,51 +566,65 @@ def _build_pill_batch(
         return None, None
 
     shader = _get_batch_pill_shader()
-    pad = 2.0
-    hh = thickness / 2
+    aa_pad = 2.0
+    half_thickness = thickness / 2
 
     all_pos: list[tuple[float, float, float]] = []
     all_uv: list[tuple[float, float]] = []
     all_half_size: list[tuple[float, float]] = []
+    indices: list[tuple[int, int, int]] = []
+    base_vert = 0
 
-    for mx, my, length, angle in wires:
-        hw = length / 2
-        cos_a = math.cos(angle)
-        sin_a = math.sin(angle)
+    for seg_x, seg_y, length, angle in wires:
+        half_length = length / 2
+        cos_angle = math.cos(angle)
+        sin_angle = math.sin(angle)
 
-        # Local-space corners with padding for AA margin
-        lx0 = -hw - pad
-        ly0 = -hh - pad
-        lx1 = hw + pad
-        ly1 = hh + pad
+        corner_x0 = -half_length - aa_pad
+        corner_y0 = -half_thickness - aa_pad
+        corner_x1 = half_length + aa_pad
+        corner_y1 = half_thickness + aa_pad
 
-        # Pre-transform corners to world space (rotate + translate)
         all_pos.extend(
             [
-                (mx + lx0 * cos_a - ly0 * sin_a, my + lx0 * sin_a + ly0 * cos_a, 0.0),
-                (mx + lx1 * cos_a - ly0 * sin_a, my + lx1 * sin_a + ly0 * cos_a, 0.0),
-                (mx + lx1 * cos_a - ly1 * sin_a, my + lx1 * sin_a + ly1 * cos_a, 0.0),
-                (mx + lx0 * cos_a - ly1 * sin_a, my + lx0 * sin_a + ly1 * cos_a, 0.0),
+                (
+                    seg_x + corner_x0 * cos_angle - corner_y0 * sin_angle,
+                    seg_y + corner_x0 * sin_angle + corner_y0 * cos_angle,
+                    0.0,
+                ),
+                (
+                    seg_x + corner_x1 * cos_angle - corner_y0 * sin_angle,
+                    seg_y + corner_x1 * sin_angle + corner_y0 * cos_angle,
+                    0.0,
+                ),
+                (
+                    seg_x + corner_x1 * cos_angle - corner_y1 * sin_angle,
+                    seg_y + corner_x1 * sin_angle + corner_y1 * cos_angle,
+                    0.0,
+                ),
+                (
+                    seg_x + corner_x0 * cos_angle - corner_y1 * sin_angle,
+                    seg_y + corner_x0 * sin_angle + corner_y1 * cos_angle,
+                    0.0,
+                ),
             ]
         )
 
         all_uv.extend(
             [
-                (lx0, ly0),
-                (lx1, ly0),
-                (lx1, ly1),
-                (lx0, ly1),
+                (corner_x0, corner_y0),
+                (corner_x1, corner_y0),
+                (corner_x1, corner_y1),
+                (corner_x0, corner_y1),
             ]
         )
 
-        all_half_size.extend([(hw, hh)] * 4)
+        all_half_size.extend([(half_length, half_thickness)] * 4)
 
-    # Build index buffer: 2 triangles per quad, 4 verts per wire
-    indices: list[tuple[int, int, int]] = []
-    for i in range(len(wires)):
-        base = i * 4
+        base = base_vert
         indices.append((base, base + 1, base + 2))
         indices.append((base + 2, base + 3, base))
+        base_vert += 4
 
     batch = batch_for_shader(
         shader,
@@ -590,42 +668,48 @@ def _build_noodle_batch(
 
     for p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y in wires:
         # Estimate length for tessellation density.
-        d01 = math.hypot(p1x - p0x, p1y - p0y)
-        d12 = math.hypot(p2x - p1x, p2y - p1y)
-        d23 = math.hypot(p3x - p2x, p3y - p2y)
-        est = d01 + d12 + d23
+        seg_len_01 = math.hypot(p1x - p0x, p1y - p0y)
+        seg_len_12 = math.hypot(p2x - p1x, p2y - p1y)
+        seg_len_23 = math.hypot(p3x - p2x, p3y - p2y)
+        est_length = seg_len_01 + seg_len_12 + seg_len_23
         # Per-chord capsule SDF is spatially exact, but a curved segment's tube
         # bulges beyond its chord by the sagitta. Subdivide while that sagitta
         # exceeds a tolerance so the tube follows the curve; the coarser 1.5
         # tolerance keeps the chord count low at the cost of a sub-pixel thinning
         # on the inside of only the tightest turns. Caps bound worst-case cost.
-        n = int(est / 10.0) + 2
+        n = int(est_length / 10.0) + 2
         n = max(2, min(n, 16))
 
         def _bezier_at(t):
-            om = 1.0 - t
-            om2 = om * om
-            t2 = t * t
+            one_minus_t = 1.0 - t
+            one_minus_t_sq = one_minus_t * one_minus_t
+            t_sq = t * t
             return (
-                om2 * om * p0x + 3.0 * om2 * t * p1x + 3.0 * om * t2 * p2x + t2 * t * p3x,
-                om2 * om * p0y + 3.0 * om2 * t * p1y + 3.0 * om * t2 * p2y + t2 * t * p3y,
+                one_minus_t_sq * one_minus_t * p0x
+                + 3.0 * one_minus_t_sq * t * p1x
+                + 3.0 * one_minus_t * t_sq * p2x
+                + t_sq * t * p3x,
+                one_minus_t_sq * one_minus_t * p0y
+                + 3.0 * one_minus_t_sq * t * p1y
+                + 3.0 * one_minus_t * t_sq * p2y
+                + t_sq * t * p3y,
             )
 
-        step = 1.0 / n
-        t_list = [i * step for i in range(n + 1)]
+        base_step = 1.0 / n
+        t_list = [i * base_step for i in range(n + 1)]
         i = 0
         while i < len(t_list) - 1 and len(t_list) < 32:
-            t0 = t_list[i]
-            t1 = t_list[i + 1]
-            if t1 - t0 <= 1.0 / 32.0:
+            t_start = t_list[i]
+            t_end = t_list[i + 1]
+            if t_end - t_start <= 1.0 / 32.0:
                 i += 1
                 continue
-            ca = _bezier_at(t0)
-            cb = _bezier_at(t1)
-            cm = _bezier_at((t0 + t1) * 0.5)
-            dev = math.hypot(cm[0] - (ca[0] + cb[0]) * 0.5, cm[1] - (ca[1] + cb[1]) * 0.5)
-            if dev > 1.5:
-                t_list.insert(i + 1, (t0 + t1) * 0.5)
+            pt_a = _bezier_at(t_start)
+            pt_b = _bezier_at(t_end)
+            pt_mid = _bezier_at((t_start + t_end) * 0.5)
+            sagitta = math.hypot(pt_mid[0] - (pt_a[0] + pt_b[0]) * 0.5, pt_mid[1] - (pt_a[1] + pt_b[1]) * 0.5)
+            if sagitta > 1.5:
+                t_list.insert(i + 1, (t_start + t_end) * 0.5)
             else:
                 i += 1
 
@@ -633,32 +717,34 @@ def _build_noodle_batch(
         n = len(t_list) - 1
 
         def _unit(a, b):
-            dx_ = b[0] - a[0]
-            dy_ = b[1] - a[1]
-            dl_ = math.hypot(dx_, dy_)
-            if dl_ > 1e-9:
-                return (dx_ / dl_, dy_ / dl_)
+            delta_x = b[0] - a[0]
+            delta_y = b[1] - a[1]
+            delta_len = math.hypot(delta_x, delta_y)
+            if delta_len > 1e-9:
+                return (delta_x / delta_len, delta_y / delta_len)
             return (1.0, 0.0)
 
-        dchord = _unit(centers[0], centers[1])
-        dchord_n = (-dchord[1], dchord[0])
+        chord_dir = _unit(centers[0], centers[1])
+        chord_dir_normal = (-chord_dir[1], chord_dir[0])
 
         # Emit one rectangle for a chord. All four vertices share the same
         # segA/segB anchors (the chord endpoints) so the fragment measures a
         # true capsule around exactly that chord; uv.x interpolates the
         # along-chord fraction u.
-        def _emit_rect(ax_, ay_, bx_, by_, nx, ny):
+        def _emit_rect(ax_, ay_, bx_, by_, normal_x, normal_y):
             nonlocal base_vert
-            lx0 = ax_ + nx * lateral
-            ly0 = ay_ + ny * lateral
-            rx0 = ax_ - nx * lateral
-            ry0 = ay_ - ny * lateral
-            lx1 = bx_ + nx * lateral
-            ly1 = by_ + ny * lateral
-            rx1 = bx_ - nx * lateral
-            ry1 = by_ - ny * lateral
+            left_x0 = ax_ + normal_x * lateral
+            left_y0 = ay_ + normal_y * lateral
+            right_x0 = ax_ - normal_x * lateral
+            right_y0 = ay_ - normal_y * lateral
+            left_x1 = bx_ + normal_x * lateral
+            left_y1 = by_ + normal_y * lateral
+            right_x1 = bx_ - normal_x * lateral
+            right_y1 = by_ - normal_y * lateral
             base = base_vert
-            all_pos.extend([(lx0, ly0, 0.0), (rx0, ry0, 0.0), (lx1, ly1, 0.0), (rx1, ry1, 0.0)])
+            all_pos.extend(
+                [(left_x0, left_y0, 0.0), (right_x0, right_y0, 0.0), (left_x1, left_y1, 0.0), (right_x1, right_y1, 0.0)]
+            )
             all_uv.extend([(0.0, 0.0), (0.0, 0.0), (1.0, 0.0), (1.0, 0.0)])
             all_segA.extend([(ax_, ay_)] * 4)
             all_segB.extend([(bx_, by_)] * 4)
@@ -670,20 +756,20 @@ def _build_noodle_batch(
         # and segB to the endpoint, so every fragment inside resolves distance to
         # that point (a round cap) regardless of direction. Robust for tiny/steep
         # wires where lateral dwarfs the chord.
-        def _emit_square(cx, cy):
+        def _emit_square(cap_x, cap_y):
             nonlocal base_vert
             base = base_vert
             corners = [
-                (cx + dchord[0] * lateral, cy + dchord[1] * lateral),
-                (cx + dchord_n[0] * lateral, cy + dchord_n[1] * lateral),
-                (cx - dchord[0] * lateral, cy - dchord[1] * lateral),
-                (cx - dchord_n[0] * lateral, cy - dchord_n[1] * lateral),
+                (cap_x + chord_dir[0] * lateral, cap_y + chord_dir[1] * lateral),
+                (cap_x + chord_dir_normal[0] * lateral, cap_y + chord_dir_normal[1] * lateral),
+                (cap_x - chord_dir[0] * lateral, cap_y - chord_dir[1] * lateral),
+                (cap_x - chord_dir_normal[0] * lateral, cap_y - chord_dir_normal[1] * lateral),
             ]
-            for c in corners:
-                all_pos.append((c[0], c[1], 0.0))
+            for corner in corners:
+                all_pos.append((corner[0], corner[1], 0.0))
                 all_uv.append((0.0, 0.0))
-                all_segA.append((cx, cy))
-                all_segB.append((cx, cy))
+                all_segA.append((cap_x, cap_y))
+                all_segB.append((cap_x, cap_y))
             indices.append((base, base + 1, base + 2))
             indices.append((base + 2, base + 3, base))
             base_vert += 4
@@ -693,32 +779,32 @@ def _build_noodle_batch(
         # Interior quads: one rectangle per chord, aligned to that chord's own
         # normal so the capsule follows the curve (the cap squares already cover
         # the first/last endpoint disks). Each chord extends past its shared
-        # joints by `extend` so adjacent capsules overlap their straight sides,
-        # filling the small rounded wedge that shows on the outside of a turn.
-        # The wire's first and last ends stay at the true endpoints.
-        extend = 0.175
-        prev_nx, prev_ny = 0.0, 1.0
-        for qi in range(len(centers) - 1):
-            ax_, ay_ = centers[qi]
-            bx_, by_ = centers[qi + 1]
-            vx = bx_ - ax_
-            vy = by_ - ay_
-            cl = math.hypot(vx, vy)
-            if cl > 1e-9:
-                nx = -vy / cl
-                ny = vx / cl
-                prev_nx, prev_ny = nx, ny
-                ux, uy = vx / cl, vy / cl
+        # joints by `chord_extend` so adjacent capsules overlap their straight
+        # sides, filling the small rounded wedge that shows on the outside of a
+        # turn. The wire's first and last ends stay at the true endpoints.
+        chord_extend = 0.175
+        prev_normal_x, prev_normal_y = 0.0, 1.0
+        for chord_index in range(len(centers) - 1):
+            ax_, ay_ = centers[chord_index]
+            bx_, by_ = centers[chord_index + 1]
+            dir_x = bx_ - ax_
+            dir_y = by_ - ay_
+            dir_len = math.hypot(dir_x, dir_y)
+            if dir_len > 1e-9:
+                normal_x = -dir_y / dir_len
+                normal_y = dir_x / dir_len
+                prev_normal_x, prev_normal_y = normal_x, normal_y
+                chord_unit_x, chord_unit_y = dir_x / dir_len, dir_y / dir_len
             else:
-                nx, ny = prev_nx, prev_ny
-                ux, uy = 0.0, 0.0
-            if qi > 0:
-                ax_ -= ux * extend
-                ay_ -= uy * extend
-            if qi < len(centers) - 2:
-                bx_ += ux * extend
-                by_ += uy * extend
-            _emit_rect(ax_, ay_, bx_, by_, nx, ny)
+                normal_x, normal_y = prev_normal_x, prev_normal_y
+                chord_unit_x, chord_unit_y = 0.0, 0.0
+            if chord_index > 0:
+                ax_ -= chord_unit_x * chord_extend
+                ay_ -= chord_unit_y * chord_extend
+            if chord_index < len(centers) - 2:
+                bx_ += chord_unit_x * chord_extend
+                by_ += chord_unit_y * chord_extend
+            _emit_rect(ax_, ay_, bx_, by_, normal_x, normal_y)
 
         _emit_square(centers[n][0], centers[n][1])
 
@@ -764,25 +850,25 @@ def _draw_text_with_shadow(
         blf.disable(font_id, blf.SHADOW)
 
 
-def _draw_filled_rounded_rect(x, y, w, h, r, color):
-    if w <= 0 or h <= 0:
+def _draw_filled_rounded_rect(x, y, width, height, radius, color):
+    if width <= 0 or height <= 0:
         return
-    r = max(0, min(r, w / 2, h / 2))
+    radius = max(0, min(radius, width / 2, height / 2))
 
     shader = _get_sdf_fill_shader()
-    hw, hh = w / 2, h / 2
+    half_w, half_h = width / 2, height / 2
 
     vertices = (
         (x, y, 0.0),
-        (x + w, y, 0.0),
-        (x + w, y + h, 0.0),
-        (x, y + h, 0.0),
+        (x + width, y, 0.0),
+        (x + width, y + height, 0.0),
+        (x, y + height, 0.0),
     )
     uvs = (
-        (-hw, -hh),
-        (hw, -hh),
-        (hw, hh),
-        (-hw, hh),
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, half_h),
+        (-half_w, half_h),
     )
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
@@ -792,31 +878,31 @@ def _draw_filled_rounded_rect(x, y, w, h, r, color):
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("halfSize", (hw, hh))
-    shader.uniform_float("radius", r)
+    shader.uniform_float("halfSize", (half_w, half_h))
+    shader.uniform_float("radius", radius)
     batch.draw(shader)
 
 
-def _draw_filled_rounded_rect_varying(x, y, w, h, radii, color):
-    if w <= 0 or h <= 0:
+def _draw_filled_rounded_rect_varying(x, y, width, height, radii, color):
+    if width <= 0 or height <= 0:
         return
-    max_r = min(w / 2, h / 2)
+    max_r = min(width / 2, height / 2)
     radii = tuple(max(0, min(r, max_r)) for r in radii)
 
     shader = _get_sdf_fill_varying_shader()
-    hw, hh = w / 2, h / 2
+    half_w, half_h = width / 2, height / 2
 
     vertices = (
         (x, y, 0.0),
-        (x + w, y, 0.0),
-        (x + w, y + h, 0.0),
-        (x, y + h, 0.0),
+        (x + width, y, 0.0),
+        (x + width, y + height, 0.0),
+        (x, y + height, 0.0),
     )
     uvs = (
-        (-hw, -hh),
-        (hw, -hh),
-        (hw, hh),
-        (-hw, hh),
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, half_h),
+        (-half_w, half_h),
     )
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
@@ -826,47 +912,47 @@ def _draw_filled_rounded_rect_varying(x, y, w, h, radii, color):
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("halfSize", (hw, hh))
+    shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radii", radii)
     batch.draw(shader)
 
 
 def _draw_filled_rounded_rect_with_hole(
-    mx,
-    my,
-    mw,
-    mh,
-    outer_r,
-    ix,
-    iy,
-    iw,
-    ih,
-    inner_r,
+    map_x,
+    map_y,
+    map_w,
+    map_h,
+    outer_radius,
+    inner_x,
+    inner_y,
+    inner_w,
+    inner_h,
+    inner_radius,
     color,
 ):
-    if mw <= 0 or mh <= 0 or iw <= 0 or ih <= 0:
+    if map_w <= 0 or map_h <= 0 or inner_w <= 0 or inner_h <= 0:
         return
-    outer_r = max(0, min(outer_r, mw / 2, mh / 2))
+    outer_radius = max(0, min(outer_radius, map_w / 2, map_h / 2))
 
     shader = _get_sdf_fill_hole_shader()
-    hw, hh = mw / 2, mh / 2
+    half_w, half_h = map_w / 2, map_h / 2
 
-    inner_off_x = (ix + iw / 2) - (mx + mw / 2)
-    inner_off_y = (iy + ih / 2) - (my + mh / 2)
-    inner_hw = iw / 2
-    inner_hh = ih / 2
+    inner_off_x = (inner_x + inner_w / 2) - (map_x + map_w / 2)
+    inner_off_y = (inner_y + inner_h / 2) - (map_y + map_h / 2)
+    inner_half_w = inner_w / 2
+    inner_half_h = inner_h / 2
 
     vertices = (
-        (mx, my, 0.0),
-        (mx + mw, my, 0.0),
-        (mx + mw, my + mh, 0.0),
-        (mx, my + mh, 0.0),
+        (map_x, map_y, 0.0),
+        (map_x + map_w, map_y, 0.0),
+        (map_x + map_w, map_y + map_h, 0.0),
+        (map_x, map_y + map_h, 0.0),
     )
     uvs = (
-        (-hw, -hh),
-        (hw, -hh),
-        (hw, hh),
-        (-hw, hh),
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, half_h),
+        (-half_w, half_h),
     )
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
@@ -876,42 +962,42 @@ def _draw_filled_rounded_rect_with_hole(
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("outerData", (hw, hh, outer_r, inner_r))
+    shader.uniform_float("outerData", (half_w, half_h, outer_radius, inner_radius))
     shader.uniform_float("innerOffset", (inner_off_x, inner_off_y))
-    shader.uniform_float("innerHalfSize", (inner_hw, inner_hh))
+    shader.uniform_float("innerHalfSize", (inner_half_w, inner_half_h))
     batch.draw(shader)
 
 
-def _draw_filled_rounded_rect_clipped(x, y, w, h, r, color, clip_x, clip_y, clip_w, clip_h, clip_r):
+def _draw_filled_rounded_rect_clipped(x, y, width, height, radius, color, clip_x, clip_y, clip_w, clip_h, clip_radius):
     """Draw a rounded rect fill intersected with a rounded clip region."""
-    if w <= 0 or h <= 0 or clip_w <= 0 or clip_h <= 0:
+    if width <= 0 or height <= 0 or clip_w <= 0 or clip_h <= 0:
         return
-    r = max(0, min(r, w / 2, h / 2))
-    clip_r = max(0, min(clip_r, clip_w / 2, clip_h / 2))
+    radius = max(0, min(radius, width / 2, height / 2))
+    clip_radius = max(0, min(clip_radius, clip_w / 2, clip_h / 2))
 
     shader = _get_sdf_fill_clip_shader()
-    hw, hh = w / 2, h / 2
-    cx, cy = x + hw, y + hh
-    clip_hw, clip_hh = clip_w / 2, clip_h / 2
-    off_x = (clip_x + clip_hw) - cx
-    off_y = (clip_y + clip_hh) - cy
+    half_w, half_h = width / 2, height / 2
+    center_x, center_y = x + half_w, y + half_h
+    clip_half_w, clip_half_h = clip_w / 2, clip_h / 2
+    off_x = (clip_x + clip_half_w) - center_x
+    off_y = (clip_y + clip_half_h) - center_y
 
     # Pad the quad so the clip arc's AA falloff has room at shared edges
-    pad = 2.0
-    px0, py0 = x - pad, y - pad
-    px1, py1 = x + w + pad, y + h + pad
+    aa_pad = 2.0
+    corner_x0, corner_y0 = x - aa_pad, y - aa_pad
+    corner_x1, corner_y1 = x + width + aa_pad, y + height + aa_pad
 
     vertices = (
-        (px0, py0, 0.0),
-        (px1, py0, 0.0),
-        (px1, py1, 0.0),
-        (px0, py1, 0.0),
+        (corner_x0, corner_y0, 0.0),
+        (corner_x1, corner_y0, 0.0),
+        (corner_x1, corner_y1, 0.0),
+        (corner_x0, corner_y1, 0.0),
     )
     uvs = (
-        (px0 - cx, py0 - cy),
-        (px1 - cx, py0 - cy),
-        (px1 - cx, py1 - cy),
-        (px0 - cx, py1 - cy),
+        (corner_x0 - center_x, corner_y0 - center_y),
+        (corner_x1 - center_x, corner_y0 - center_y),
+        (corner_x1 - center_x, corner_y1 - center_y),
+        (corner_x0 - center_x, corner_y1 - center_y),
     )
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
@@ -921,30 +1007,30 @@ def _draw_filled_rounded_rect_clipped(x, y, w, h, r, color, clip_x, clip_y, clip
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("sizeData", (hw, hh, r, clip_r))
-    shader.uniform_float("clipData", (off_x, off_y, clip_hw, clip_hh))
+    shader.uniform_float("sizeData", (half_w, half_h, radius, clip_radius))
+    shader.uniform_float("clipData", (off_x, off_y, clip_half_w, clip_half_h))
     batch.draw(shader)
 
 
-def _draw_rounded_rect_border(x, y, w, h, r, color, line_width=1.0):
-    if w <= 0 or h <= 0:
+def _draw_rounded_rect_border(x, y, width, height, radius, color, line_width=1.0):
+    if width <= 0 or height <= 0:
         return
-    r = max(0, min(r, w / 2, h / 2))
+    radius = max(0, min(radius, width / 2, height / 2))
 
     shader = _get_sdf_border_shader()
-    hw, hh = w / 2, h / 2
+    half_w, half_h = width / 2, height / 2
 
     vertices = (
         (x, y, 0.0),
-        (x + w, y, 0.0),
-        (x + w, y + h, 0.0),
-        (x, y + h, 0.0),
+        (x + width, y, 0.0),
+        (x + width, y + height, 0.0),
+        (x, y + height, 0.0),
     )
     uvs = (
-        (-hw, -hh),
-        (hw, -hh),
-        (hw, hh),
-        (-hw, hh),
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, half_h),
+        (-half_w, half_h),
     )
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
@@ -954,32 +1040,72 @@ def _draw_rounded_rect_border(x, y, w, h, r, color, line_width=1.0):
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("halfSize", (hw, hh))
-    shader.uniform_float("radius", r)
+    shader.uniform_float("halfSize", (half_w, half_h))
+    shader.uniform_float("radius", radius)
     shader.uniform_float("lineWidth", line_width)
     batch.draw(shader)
 
 
-def _draw_pill(x, y, w, h, color):
-    if w <= 0 or h <= 0:
+def _draw_rounded_rect_border_varying_sides(
+    x, y, width, height, radii, color, line_width=1.0, skip_left=False, skip_right=False
+):
+    if width <= 0 or height <= 0:
+        return
+    max_r = min(width / 2, height / 2)
+    radii = tuple(max(0, min(r, max_r)) for r in radii)
+
+    shader = _get_sdf_border_varying_sides_shader()
+    half_w, half_h = width / 2, height / 2
+
+    vertices = (
+        (x, y, 0.0),
+        (x + width, y, 0.0),
+        (x + width, y + height, 0.0),
+        (x, y + height, 0.0),
+    )
+    uvs = (
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, half_h),
+        (-half_w, half_h),
+    )
+    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+
+    shader.bind()
+    shader.uniform_float(
+        "ModelViewProjectionMatrix",
+        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+    )
+    shader.uniform_float("color", _srgb_to_linear(color))
+    shader.uniform_float("halfSize", (half_w, half_h))
+    shader.uniform_float("radii", radii)
+    shader.uniform_float(
+        "lineData",
+        (line_width, 1.0 if skip_left else 0.0, 1.0 if skip_right else 0.0, 0.0),
+    )
+    batch.draw(shader)
+
+
+def _draw_pill(x, y, width, height, color):
+    if width <= 0 or height <= 0:
         return
 
     shader = _get_pill_shader()
-    hw, hh = w / 2, h / 2
+    half_w, half_h = width / 2, height / 2
 
-    pad = 2.0
+    aa_pad = 2.0
 
     vertices = (
-        (x - pad, y - pad, 0.0),
-        (x + w + pad, y - pad, 0.0),
-        (x + w + pad, y + h + pad, 0.0),
-        (x - pad, y + h + pad, 0.0),
+        (x - aa_pad, y - aa_pad, 0.0),
+        (x + width + aa_pad, y - aa_pad, 0.0),
+        (x + width + aa_pad, y + height + aa_pad, 0.0),
+        (x - aa_pad, y + height + aa_pad, 0.0),
     )
     uvs = (
-        (-hw - pad, -hh - pad),
-        (hw + pad, -hh - pad),
-        (hw + pad, hh + pad),
-        (-hw - pad, hh + pad),
+        (-half_w - aa_pad, -half_h - aa_pad),
+        (half_w + aa_pad, -half_h - aa_pad),
+        (half_w + aa_pad, half_h + aa_pad),
+        (-half_w - aa_pad, half_h + aa_pad),
     )
 
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
@@ -991,31 +1117,31 @@ def _draw_pill(x, y, w, h, color):
     )
 
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("halfSize", (hw, hh))
+    shader.uniform_float("halfSize", (half_w, half_h))
 
     batch.draw(shader)
 
 
-def _draw_pill_border(x, y, w, h, color, line_width=1.0):
-    if w <= 0 or h <= 0:
+def _draw_pill_border(x, y, width, height, color, line_width=1.0):
+    if width <= 0 or height <= 0:
         return
 
     shader = _get_pill_border_shader()
-    hw, hh = w / 2, h / 2
+    half_w, half_h = width / 2, height / 2
 
-    pad = 2.0
+    aa_pad = 2.0
 
     vertices = (
-        (x - pad, y - pad, 0.0),
-        (x + w + pad, y - pad, 0.0),
-        (x + w + pad, y + h + pad, 0.0),
-        (x - pad, y + h + pad, 0.0),
+        (x - aa_pad, y - aa_pad, 0.0),
+        (x + width + aa_pad, y - aa_pad, 0.0),
+        (x + width + aa_pad, y + height + aa_pad, 0.0),
+        (x - aa_pad, y + height + aa_pad, 0.0),
     )
     uvs = (
-        (-hw - pad, -hh - pad),
-        (hw + pad, -hh - pad),
-        (hw + pad, hh + pad),
-        (-hw - pad, hh + pad),
+        (-half_w - aa_pad, -half_h - aa_pad),
+        (half_w + aa_pad, -half_h - aa_pad),
+        (half_w + aa_pad, half_h + aa_pad),
+        (-half_w - aa_pad, half_h + aa_pad),
     )
 
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
@@ -1026,7 +1152,7 @@ def _draw_pill_border(x, y, w, h, color, line_width=1.0):
         gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
     )
     shader.uniform_float("color", _srgb_to_linear(color))
-    shader.uniform_float("halfSize", (hw, hh))
+    shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("lineWidth", line_width)
 
     batch.draw(shader)

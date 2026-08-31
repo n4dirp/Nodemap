@@ -48,29 +48,29 @@ from .transforms import (
 logger = logging.getLogger(__package__)
 
 
-def _is_in_minimap(region_x: int, region_y: int, st: MinimapState | None = None) -> bool:
-    if st is None:
-        st = _state()
-    mx, my, mw, mh = st.view.rect
-    return mx <= region_x <= mx + mw and my <= region_y <= my + mh
+def _is_in_minimap(region_x: int, region_y: int, state: MinimapState | None = None) -> bool:
+    if state is None:
+        state = _state()
+    map_x, map_y, map_w, map_h = state.view.rect
+    return map_x <= region_x <= map_x + map_w and map_y <= region_y <= map_y + map_h
 
 
-def _region_to_tree(region_x: int, region_y: int, st: MinimapState | None = None) -> tuple[float, float] | None:
-    if st is None:
-        st = _state()
-    if not st.view.rect or not st.view.tree_bounds:
+def _region_to_tree(region_x: int, region_y: int, state: MinimapState | None = None) -> tuple[float, float] | None:
+    if state is None:
+        state = _state()
+    if not state.view.rect or not state.view.tree_bounds:
         return None
-    return _tree_from_region(region_x, region_y, _compute_map_transform(st))
+    return _tree_from_region(region_x, region_y, _compute_map_transform(state))
 
 
 def _tree_from_region(
-    region_x: int, region_y: int, t: tuple[float, float, float, float, float]
+    region_x: int, region_y: int, transform: tuple[float, float, float, float, float]
 ) -> tuple[float, float] | None:
     """Inverse-map a minimap pixel coordinate to tree space using a precomputed transform."""
-    cx, cy, scale, tree_cx, tree_cy = t
+    map_anchor_x, map_anchor_y, scale, tree_center_x, tree_center_y = transform
     if scale <= 0:
         return None
-    return tree_cx + (region_x - cx) / scale, tree_cy + (region_y - cy) / scale
+    return tree_center_x + (region_x - map_anchor_x) / scale, tree_center_y + (region_y - map_anchor_y) / scale
 
 
 def _view_zoom_factors(space, region, visible: tuple[float, float, float, float] | None = None) -> tuple[float, float]:
@@ -79,49 +79,49 @@ def _view_zoom_factors(space, region, visible: tuple[float, float, float, float]
         visible = _get_visible_rect(space, region)
     if not visible:
         return 1.0, 1.0
-    vw = max(visible[2] - visible[0], 1e-6)
-    vh = max(visible[3] - visible[1], 1e-6)
-    return region.width / vw, region.height / vh
+    visible_w = max(visible[2] - visible[0], 1e-6)
+    visible_h = max(visible[3] - visible[1], 1e-6)
+    return region.width / visible_w, region.height / visible_h
 
 
-def _frame_btn_at(mx: int, my: int, st: MinimapState) -> str | None:
+def _frame_button_at(mouse_x: int, mouse_y: int, state: MinimapState) -> str | None:
     """Return the id of the frame button under the cursor, if any."""
-    for btn_id, rect in st.buttons.rects.items():
-        if rect:
-            bx, by, bw, bh = rect
-            if bx <= mx <= bx + bw and by <= my <= by + bh:
-                return btn_id
+    for frame_button_id, button_rect in state.buttons.rects.items():
+        if button_rect:
+            button_x, button_y, button_width, button_height = button_rect
+            if button_x <= mouse_x <= button_x + button_width and button_y <= mouse_y <= button_y + button_height:
+                return frame_button_id
     return None
 
 
-def _in_list_zone(region_x: int, region_y: int, st: MinimapState) -> bool:
+def _in_list_zone(region_x: int, region_y: int, state: MinimapState) -> bool:
     """Return True when the cursor is over the type-list zone of the minimap."""
-    if st.list.width <= 0 or not st.view.rect:
+    if state.list.list_width <= 0 or not state.view.rect:
         return False
-    mx, my, _, mh = st.view.rect
-    pad = _HANDLE_THICKNESS * _get_ui_scale()
-    zone_left = mx + pad
-    zone_right = mx + st.view.padding + st.list.width
-    zone_rect = st.list.zone_rect
+    map_x, map_y, _, map_h = state.view.rect
+    hit_pad = _HANDLE_THICKNESS * _get_ui_scale()
+    zone_left = map_x + hit_pad
+    zone_right = map_x + state.view.inner_padding + state.list.list_width
+    zone_rect = state.list.list_zone_rect
     if zone_rect:
         _, zone_y, _, zone_h = zone_rect
     else:
-        zone_y = my + pad
-        zone_h = mh - 2 * pad
+        zone_y = map_y + hit_pad
+        zone_h = map_h - 2 * hit_pad
     return zone_left <= region_x <= zone_right and zone_y <= region_y <= zone_y + zone_h
 
 
-def _list_row_at(region_x: int, region_y: int, st: MinimapState) -> str | None:
+def _list_row_at(region_x: int, region_y: int, state: MinimapState) -> str | None:
     """Return the type label of the type-list row under the cursor, if any."""
-    for x, y, w, h, label in st.list.row_rects:
+    for x, y, w, h, label in state.list.row_rects:
         if x <= region_x <= x + w and y <= region_y <= y + h:
             return label
     return None
 
 
-def _list_child_at(region_x: int, region_y: int, st: MinimapState) -> tuple[str, str] | None:
+def _list_child_at(region_x: int, region_y: int, state: MinimapState) -> tuple[str, str] | None:
     """Return ``(label, node_name)`` of the expanded child row under the cursor."""
-    for x, y, w, h, label, node_name in st.list.node_rects:
+    for x, y, w, h, label, node_name in state.list.node_rects:
         if x <= region_x <= x + w and y <= region_y <= y + h:
             return label, node_name
     return None
@@ -129,35 +129,41 @@ def _list_child_at(region_x: int, region_y: int, st: MinimapState) -> tuple[str,
 
 def _in_rect(region_x: int, region_y: int, rect: tuple[float, float, float, float]) -> bool:
     """Return True when the cursor falls inside the ``(x, y, w, h)`` rect."""
-    x, y, w, h = rect
-    return x <= region_x <= x + w and y <= region_y <= y + h
+    rect_x, rect_y, rect_w, rect_h = rect
+    return rect_x <= region_x <= rect_x + rect_w and rect_y <= region_y <= rect_y + rect_h
 
 
-def _list_scrollbar_hit(region_x: int, region_y: int, st: MinimapState) -> bool:
+def _list_scrollbar_hit(region_x: int, region_y: int, state: MinimapState) -> bool:
     """Return True when the cursor is over the type-list scrollbar gutter."""
-    track = st.list.scrollbar_track
-    if not track or st.list.scroll_max <= 0:
+    scrollbar_track = state.list.scrollbar_track
+    if not scrollbar_track or state.list.scroll_max <= 0:
         return False
-    x, y, w, h = track
-    pad = _SCROLLBAR_HIT_PAD * _get_ui_scale()
-    return x - pad <= region_x <= x + w + pad and y <= region_y <= y + h
+    x, y, w, h = scrollbar_track
+    hit_pad = _SCROLLBAR_HIT_PAD * _get_ui_scale()
+    # The scrollbar sits inside the zone, so the right hit pad must not bleed
+    # into the list/map divider band where the LIST resize handle owns hover.
+    right = x + w + hit_pad
+    zone_rect = state.list.list_zone_rect
+    if zone_rect:
+        right = min(right, zone_rect[0] + zone_rect[2])
+    return x - hit_pad <= region_x <= right and y <= region_y <= y + h
 
 
-def _apply_list_scroll_drag(mx: int, my: int, grab: float, st: MinimapState) -> None:
+def _apply_list_scroll_drag(mouse_x: int, mouse_y: int, grab: float, state: MinimapState) -> None:
     """Scroll the type list so the dragged thumb tracks the cursor.
 
     *grab* is the cursor-to-thumb-top distance captured at press; mapping the
     thumb top back to a track fraction keeps the grab point stable.
     """
-    track = st.list.scrollbar_track
-    thumb = st.list.scrollbar_thumb
-    if not track or not thumb or st.list.scroll_max <= 0:
+    scrollbar_track = state.list.scrollbar_track
+    scrollbar_thumb = state.list.scrollbar_thumb
+    if not scrollbar_track or not scrollbar_thumb or state.list.scroll_max <= 0:
         return
-    _tx, ty, _tw, tl = track
-    thumb_len = thumb[3]
-    span = max(tl - thumb_len, 1.0)
-    offset = min(max(my + grab - thumb_len - ty, 0.0), span)
-    st.list.scroll = (1.0 - offset / span) * st.list.scroll_max
+    track_x, track_y, track_w, track_len = scrollbar_track
+    thumb_length = scrollbar_thumb[3]
+    track_span = max(track_len - thumb_length, 1.0)
+    scroll_offset = min(max(mouse_y + grab - thumb_length - track_y, 0.0), track_span)
+    state.list.scroll = (1.0 - scroll_offset / track_span) * state.list.scroll_max
 
 
 _CURSOR_MAP: dict[ResizeHandle, str] = {
@@ -168,38 +174,40 @@ _CURSOR_MAP: dict[ResizeHandle, str] = {
 }
 
 
-def _get_list_divider_handle(st: MinimapState, rx: int, ry: int, ui_scale: float) -> ResizeHandle | None:
+def _get_list_divider_handle(state: MinimapState, region_x: int, region_y: int, ui_scale: float) -> ResizeHandle | None:
     """Return ``LIST`` when the cursor is over the divider between list and map.
 
     The divider spans the gap (``6*scale``) between the list zone's right edge
     and the map content's left edge and uses the same hit thickness as the
     outer resize borders.
     """
-    if st.list.width <= 0 or not st.list.zone_rect or not st.view.rect:
+    if state.list.list_width <= 0 or not state.list.list_zone_rect or not state.view.rect:
         return None
-    zx, zy, zw, zh = st.list.zone_rect
+    zone_x, zone_y, zone_w, zone_h = state.list.list_zone_rect
     # Hit zone starts at the zone's right edge (never reaching into the
     # scrollbar) and extends right into the map gutter for reachability.
-    z_right = zx + zw
-    hw = (_HANDLE_THICKNESS - 1) * ui_scale
-    if z_right <= rx <= z_right + hw and zy <= ry <= zy + zh:
+    zone_right_edge = zone_x + zone_w
+    hit_half_width = (_HANDLE_THICKNESS - 1) * ui_scale
+    if zone_right_edge <= region_x <= zone_right_edge + hit_half_width and zone_y <= region_y <= zone_y + zone_h:
         return ResizeHandle.LIST
     return None
 
 
-def _get_resize_handle(st: MinimapState, corner: str, rx: int, ry: int, ui_scale: float) -> ResizeHandle | None:
-    mx, my, mw, mh = st.view.rect
-    if mw <= 0 or mh <= 0:
+def _get_resize_handle(
+    state: MinimapState, corner: str, region_x: int, region_y: int, ui_scale: float
+) -> ResizeHandle | None:
+    map_x, map_y, map_w, map_h = state.view.rect
+    if map_w <= 0 or map_h <= 0:
         return None
-    hw = _HANDLE_THICKNESS * ui_scale
+    half_w = _HANDLE_THICKNESS * ui_scale
 
-    def near(v, target):
-        return target - hw <= v <= target + hw
+    def is_near_edge(value, target):
+        return target - half_w <= value <= target + half_w
 
     match corner:
         case "TOP_RIGHT":
-            on_left = mx <= rx <= mx + hw
-            on_bottom = my <= ry <= my + hw
+            on_left = map_x <= region_x <= map_x + half_w
+            on_bottom = map_y <= region_y <= map_y + half_w
             if on_left and on_bottom:
                 return ResizeHandle.C
             if on_left:
@@ -207,8 +215,8 @@ def _get_resize_handle(st: MinimapState, corner: str, rx: int, ry: int, ui_scale
             if on_bottom:
                 return ResizeHandle.H
         case "TOP_LEFT":
-            on_right = mx + mw - hw <= rx <= mx + mw
-            on_bottom = my <= ry <= my + hw
+            on_right = map_x + map_w - half_w <= region_x <= map_x + map_w
+            on_bottom = map_y <= region_y <= map_y + half_w
             if on_right and on_bottom:
                 return ResizeHandle.C
             if on_right:
@@ -216,8 +224,8 @@ def _get_resize_handle(st: MinimapState, corner: str, rx: int, ry: int, ui_scale
             if on_bottom:
                 return ResizeHandle.H
         case "BOTTOM_RIGHT":
-            on_left = mx <= rx <= mx + hw
-            on_top = my + mh - hw <= ry <= my + mh
+            on_left = map_x <= region_x <= map_x + half_w
+            on_top = map_y + map_h - half_w <= region_y <= map_y + map_h
             if on_left and on_top:
                 return ResizeHandle.C
             if on_left:
@@ -225,8 +233,8 @@ def _get_resize_handle(st: MinimapState, corner: str, rx: int, ry: int, ui_scale
             if on_top:
                 return ResizeHandle.H
         case "BOTTOM_LEFT":
-            on_right = mx + mw - hw <= rx <= mx + mw
-            on_top = my + mh - hw <= ry <= my + mh
+            on_right = map_x + map_w - half_w <= region_x <= map_x + map_w
+            on_top = map_y + map_h - half_w <= region_y <= map_y + map_h
             if on_right and on_top:
                 return ResizeHandle.C
             if on_right:
@@ -245,9 +253,9 @@ class NODEMAP_OT_toggle(Operator):
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
-        st = _state()
-        st.enabled = not st.enabled
-        if not st.enabled:
+        state = _state()
+        state.enabled = not state.enabled
+        if not state.enabled:
             win = context.window
             if win:
                 op = _minimap_window_operators.get(win.as_pointer())
@@ -266,22 +274,22 @@ class NODEMAP_OT_restore_keymap(Operator):
 
     @classmethod
     def poll(cls, context: Context) -> bool:
-        wm = context.window_manager
-        kc = wm.keyconfigs.user
-        if not kc:
+        window_manager = context.window_manager
+        user_keyconfig = window_manager.keyconfigs.user
+        if not user_keyconfig:
             return False
-        km = kc.keymaps.get("Node Editor")
-        if km:
-            return km.keymap_items.get("nodemap.toggle") is None
+        node_editor_keymap = user_keyconfig.keymaps.get("Node Editor")
+        if node_editor_keymap:
+            return node_editor_keymap.keymap_items.get("nodemap.toggle") is None
         return True
 
     def execute(self, context: Context) -> set[str]:
-        wm = context.window_manager
-        kc = wm.keyconfigs.user
-        km = kc.keymaps.get("Node Editor")
-        if not km:
-            km = kc.keymaps.new(name="Node Editor", space_type="NODE_EDITOR")
-        km.keymap_items.new("nodemap.toggle", type="M", value="PRESS", ctrl=True)
+        window_manager = context.window_manager
+        user_keyconfig = window_manager.keyconfigs.user
+        node_editor_keymap = user_keyconfig.keymaps.get("Node Editor")
+        if not node_editor_keymap:
+            node_editor_keymap = user_keyconfig.keymaps.new(name="Node Editor", space_type="NODE_EDITOR")
+        node_editor_keymap.keymap_items.new("nodemap.toggle", type="M", value="PRESS", ctrl=True)
         return {"FINISHED"}
 
 
@@ -341,7 +349,7 @@ class NODEMAP_OT_navigate(Operator):
 
     _mx: int = 0
     _my: int = 0
-    _st: MinimapState | None = None
+    _state: MinimapState | None = None
     _area: Area | None = None
     _region: Region | None = None
     _space: SpaceNodeEditor | None = None
@@ -352,11 +360,11 @@ class NODEMAP_OT_navigate(Operator):
     _list_width_dragging: bool = False
     _list_width_start_x: int = 0
     _list_width_start_pct: int = 0
-    _list_width_start_mw: float = 0.0
+    _list_width_start_map_w: float = 0.0
     _last_cursor: str = ""
     _pan_acc: list[float]
     _redirect_acc: list[float]
-    _armed_btn: str | None = None
+    _armed_button: str | None = None
     _list_row_pressed: str | None = None
     _list_child_pressed: tuple[str, str] | None = None
     _list_toggle_pressed: str | None = None
@@ -409,11 +417,11 @@ class NODEMAP_OT_navigate(Operator):
     def modal(self, context: Context, event: Event) -> set[str]:
         if not context.window:
             return {"CANCELLED"}
-        win_ptr = context.window.as_pointer()
-        if _minimap_window_operators.get(win_ptr) is not self:
+        window_ptr = context.window.as_pointer()
+        if _minimap_window_operators.get(window_ptr) is not self:
             return {"CANCELLED"}
 
-        _is_interacting = (
+        is_interactive = (
             self._dragging
             or self._mmb_dragging
             or self._list_mmb_dragging
@@ -428,42 +436,42 @@ class NODEMAP_OT_navigate(Operator):
             or self._editor_anim_active
         )
 
-        if not _is_interacting:
-            area, region = _get_area_and_region_under_mouse(context, event)
-            if not area or area.type != "NODE_EDITOR" or not region:
-                self._st = None
+        if not is_interactive:
+            under_mouse_area, under_mouse_region = _get_area_and_region_under_mouse(context, event)
+            if not under_mouse_area or under_mouse_area.type != "NODE_EDITOR" or not under_mouse_region:
+                self._state = None
                 self._area = None
                 self._region = None
                 self._space = None
                 return {"PASS_THROUGH"}
-            self._st = _state(area.as_pointer())
-            self._area = area
-            self._region = region
-            self._space = area.spaces.active
-            _clamp_pan_to_viewport(self._space, self._region, self._st)
+            self._state = _state(under_mouse_area.as_pointer())
+            self._area = under_mouse_area
+            self._region = under_mouse_region
+            self._space = under_mouse_area.spaces.active
+            _clamp_pan_to_viewport(self._space, self._region, self._state)
 
-        if not self._st or not self._st.enabled:
+        if not self._state or not self._state.enabled:
             return {"PASS_THROUGH"}
 
         if self._space and not self._space.overlay.show_overlays:
-            if _is_interacting:
+            if is_interactive:
                 self._cancel_interaction(context)
             return {"PASS_THROUGH"}
 
         if self._region is not None:
-            self._mx = event.mouse_x - self._region.x
-            self._my = event.mouse_y - self._region.y
+            self._mouse_x = event.mouse_x - self._region.x
+            self._mouse_y = event.mouse_y - self._region.y
         else:
-            self._mx = event.mouse_x
-            self._my = event.mouse_y
+            self._mouse_x = event.mouse_x
+            self._mouse_y = event.mouse_y
 
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         if addon and not settings.interactive:
             return {"PASS_THROUGH"}
 
-        st = self._st
-        in_minimap = _is_in_minimap(self._mx, self._my, st)
+        state = self._state
+        in_minimap = _is_in_minimap(self._mouse_x, self._mouse_y, state)
 
         match event.type:
             case "LEFTMOUSE":
@@ -474,27 +482,27 @@ class NODEMAP_OT_navigate(Operator):
 
             case "MIDDLEMOUSE":
                 if event.value == "PRESS" and in_minimap:
-                    st.interaction.pressed = True
+                    state.interaction.pressed = True
                     self._cancel_smooth(context)
-                    if _in_list_zone(self._mx, self._my, st):
+                    if _in_list_zone(self._mouse_x, self._mouse_y, state):
                         self._list_mmb_dragging = True
-                        self._list_mmb_drag_start = (self._mx, self._my)
+                        self._list_mmb_drag_start = (self._mouse_x, self._mouse_y)
                     else:
                         self._mmb_dragging = True
-                        self._mmb_drag_start = (self._mx, self._my)
+                        self._mmb_drag_start = (self._mouse_x, self._mouse_y)
                     return {"RUNNING_MODAL"}
                 if event.value == "RELEASE" and self._list_mmb_dragging:
-                    st.interaction.pressed = False
+                    state.interaction.pressed = False
                     self._redraw_ui()
                     self._list_mmb_dragging = False
                     self._list_mmb_drag_start = None
                     return {"RUNNING_MODAL"}
                 if event.value == "RELEASE" and self._mmb_dragging:
-                    st.interaction.pressed = False
+                    state.interaction.pressed = False
                     self._redraw_ui()
                     self._mmb_dragging = False
                     self._mmb_drag_start = None
-                    _clamp_pan_to_viewport(self._space, self._region, st)
+                    _clamp_pan_to_viewport(self._space, self._region, state)
                     if settings and self._animations_enabled(settings, context):
                         speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
                         if speed > 2.0:
@@ -552,47 +560,47 @@ class NODEMAP_OT_navigate(Operator):
         Returns the minimap state, the add-on (if registered), its settings, and
         whether the cursor is currently over the minimap.
         """
-        st = self._st
+        state = self._state
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
-        in_minimap = _is_in_minimap(self._mx, self._my, st) if st else False
-        return st, addon, settings, in_minimap
+        in_minimap = _is_in_minimap(self._mouse_x, self._mouse_y, state) if state else False
+        return state, addon, settings, in_minimap
 
     def _handle_left_mouse(self, context: Context, event: Event) -> set[str]:
-        st, addon, settings, in_minimap = self._minimap_event_context(context)
+        state, addon, settings, in_minimap = self._minimap_event_context(context)
         # --- Release ---
         if event.value == "RELEASE":
             if self._list_width_dragging:
                 self._list_width_dragging = False
-                st.list.drag_width = None
-                st.list.width_clamped = False
-                st.interaction.resize_active = None
-                st.interaction.hovered_handle = None
+                state.list.dragging_width = None
+                state.list.width_clamped = False
+                state.interaction.resize_active = None
+                state.interaction.hovered_handle = None
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
-                st.cache.invalidate_batches_only()
+                state.cache.invalidate_batches_only()
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
-            if st.interaction.pressed:
-                st.interaction.pressed = False
+            if state.interaction.pressed:
+                state.interaction.pressed = False
                 self._redraw_ui()
             if self._list_scroll_pressed:
                 self._list_scroll_pressed = False
-                st.list.scrollbar_dragging = False
+                state.list.scrollbar_dragging = False
                 self._list_scroll_grab = 0.0
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
-            if self._armed_btn:
+            if self._armed_button:
                 self._activate_armed_button(context, settings)
                 return {"RUNNING_MODAL"}
             if self._list_child_pressed:
                 label, node_name = self._list_child_pressed
                 self._list_child_pressed = None
-                still_over = _list_child_at(self._mx, self._my, st) == (label, node_name)
-                if _in_list_zone(self._mx, self._my, st) and still_over:
-                    st.cache.force_immediate = True
+                still_over = _list_child_at(self._mouse_x, self._mouse_y, state) == (label, node_name)
+                if _in_list_zone(self._mouse_x, self._mouse_y, state) and still_over:
+                    state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, st, ("child", label, node_name))
+                        self._apply_list_range(context, state, ("child", label, node_name))
                     elif event.ctrl:
                         self._select_single_node(context, node_name, toggle=True)
                     else:
@@ -601,23 +609,30 @@ class NODEMAP_OT_navigate(Operator):
             if self._list_toggle_pressed:
                 label = self._list_toggle_pressed
                 self._list_toggle_pressed = None
-                toggle = st.list.toggle_rects.get(label)
-                if toggle and _in_list_zone(self._mx, self._my, st) and _in_rect(self._mx, self._my, toggle):
-                    if label in st.list.expanded:
-                        st.list.expanded.discard(label)
+                toggle = state.list.toggle_rects.get(label)
+                if (
+                    toggle
+                    and _in_list_zone(self._mouse_x, self._mouse_y, state)
+                    and _in_rect(self._mouse_x, self._mouse_y, toggle)
+                ):
+                    if label in state.list.expanded:
+                        state.list.expanded.discard(label)
                     else:
-                        st.list.expanded.add(label)
-                    st.cache.list_key = None
-                    st.cache.force_immediate = True
+                        state.list.expanded.add(label)
+                    state.cache.list_key = None
+                    state.cache.force_immediate = True
                     self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._list_row_pressed:
                 label = self._list_row_pressed
                 self._list_row_pressed = None
-                if _in_list_zone(self._mx, self._my, st) and _list_row_at(self._mx, self._my, st) == label:
-                    st.cache.force_immediate = True
+                if (
+                    _in_list_zone(self._mouse_x, self._mouse_y, state)
+                    and _list_row_at(self._mouse_x, self._mouse_y, state) == label
+                ):
+                    state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, st, ("header", label))
+                        self._apply_list_range(context, state, ("header", label))
                     elif event.ctrl:
                         self._select_type_nodes(context, label, toggle=True)
                     else:
@@ -629,11 +644,11 @@ class NODEMAP_OT_navigate(Operator):
                 self._resize_start_values = None
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
-                st.view.width_clamped = False
-                st.view.height_clamped = False
-                st.interaction.hovered_handle = None
-                st.interaction.resize_active = None
-                st.cache.invalidate_batches_only()
+                state.view.width_clamped = False
+                state.view.height_clamped = False
+                state.interaction.hovered_handle = None
+                state.interaction.resize_active = None
+                state.cache.invalidate_batches_only()
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._dragging:
@@ -666,8 +681,10 @@ class NODEMAP_OT_navigate(Operator):
                 return {"RUNNING_MODAL"}
             if not self._dragging and self._was_in_minimap:
                 if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                    st.cache.force_immediate = True
-                    self._handle_click_selection(context, event, st, frame=settings.left_click_action == "SELECT_FRAME")
+                    state.cache.force_immediate = True
+                    self._handle_click_selection(
+                        context, event, state, frame=settings.left_click_action == "SELECT_FRAME"
+                    )
                 self._was_in_minimap = False
                 self._drag_start = None
                 return {"RUNNING_MODAL"}
@@ -678,117 +695,117 @@ class NODEMAP_OT_navigate(Operator):
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
             self._cancel_smooth(context)
-            armed = _frame_btn_at(self._mx, self._my, st)
-            if armed:
-                self._armed_btn = armed
+            armed_button_id = _frame_button_at(self._mouse_x, self._mouse_y, state)
+            if armed_button_id:
+                self._armed_button = armed_button_id
                 return {"RUNNING_MODAL"}
             # List/map divider — same style as outer resize borders, percent width.
             ui_scale = _get_ui_scale()
-            divider_handle = _get_list_divider_handle(st, self._mx, self._my, ui_scale)
-            if divider_handle:
+            divider_resize_handle = _get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
+            if divider_resize_handle:
                 self._list_width_dragging = True
-                st.interaction.resize_active = divider_handle
+                state.interaction.resize_active = divider_resize_handle
                 self._redraw_ui()
-                self._list_width_start_x = self._mx
+                self._list_width_start_x = self._mouse_x
                 self._list_width_start_pct = settings.type_list_width_pct if settings else 35
-                _mx, _my, _mw, _mh = st.view.rect
-                self._list_width_start_mw = _mw
-                cursor = _CURSOR_MAP[divider_handle]
+                map_x, map_y, map_w, map_h = state.view.rect
+                self._list_width_start_map_w = map_w
+                cursor = _CURSOR_MAP[divider_resize_handle]
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
                 return {"RUNNING_MODAL"}
-            if _in_list_zone(self._mx, self._my, st):
-                track = st.list.scrollbar_track
-                thumb = st.list.scrollbar_thumb
-                if _list_scrollbar_hit(self._mx, self._my, st) and track and thumb:
-                    thumb_top = thumb[1] + thumb[3]
-                    if thumb[1] <= self._my <= thumb_top:
+            if _in_list_zone(self._mouse_x, self._mouse_y, state):
+                scrollbar_track = state.list.scrollbar_track
+                scrollbar_thumb = state.list.scrollbar_thumb
+                if _list_scrollbar_hit(self._mouse_x, self._mouse_y, state) and scrollbar_track and scrollbar_thumb:
+                    thumb_bottom_y = scrollbar_thumb[1] + scrollbar_thumb[3]
+                    if scrollbar_thumb[1] <= self._mouse_y <= thumb_bottom_y:
                         # Direct grab: keep the pressed point pinned to the cursor.
-                        self._list_scroll_grab = thumb_top - self._my
+                        self._list_scroll_grab = thumb_bottom_y - self._mouse_y
                     else:
                         # Trough click pages one track-length toward the
                         # click, then continues as a drag from there.
                         # Note: y grows upward but larger list_scroll
                         # shifts content down, so a click above the
                         # thumb decreases the scroll.
-                        if self._my > thumb_top:
-                            st.list.scroll = max(st.list.scroll - track[3], 0.0)
+                        if self._mouse_y > thumb_bottom_y:
+                            state.list.scroll = max(state.list.scroll - scrollbar_track[3], 0.0)
                         else:
-                            st.list.scroll = min(st.list.scroll + track[3], st.list.scroll_max)
-                        span = max(track[3] - thumb[3], 1.0)
-                        offset = min(span * (1.0 - st.list.scroll / st.list.scroll_max), span)
-                        self._list_scroll_grab = track[1] + offset + thumb[3] - self._my
+                            state.list.scroll = min(state.list.scroll + scrollbar_track[3], state.list.scroll_max)
+                        track_span = max(scrollbar_track[3] - scrollbar_thumb[3], 1.0)
+                        scroll_offset = min(track_span * (1.0 - state.list.scroll / state.list.scroll_max), track_span)
+                        self._list_scroll_grab = scrollbar_track[1] + scroll_offset + scrollbar_thumb[3] - self._mouse_y
                     self._list_scroll_pressed = True
-                    st.list.scrollbar_dragging = True
+                    state.list.scrollbar_dragging = True
                     self._redraw_ui()
                     return {"RUNNING_MODAL"}
-                child = _list_child_at(self._mx, self._my, st)
-                if child:
-                    self._list_child_pressed = child
+                child_row = _list_child_at(self._mouse_x, self._mouse_y, state)
+                if child_row:
+                    self._list_child_pressed = child_row
                     if not event.shift and not event.ctrl:
-                        _label, _node_name = child
-                        key = ("child", _label, _node_name)
+                        child_label, child_node_name = child_row
+                        key = ("child", child_label, child_node_name)
                         try:
-                            self._list_last_row_index = st.list.visible_row_keys.index(key)
+                            self._list_last_row_index = state.list.visible_row_keys.index(key)
                         except ValueError:
                             self._list_last_row_index = -1
                 else:
-                    label = _list_row_at(self._mx, self._my, st)
-                    if label:
-                        toggle = st.list.toggle_rects.get(label)
-                        if toggle and _in_rect(self._mx, self._my, toggle):
-                            self._list_toggle_pressed = label
+                    row_label = _list_row_at(self._mouse_x, self._mouse_y, state)
+                    if row_label:
+                        toggle_rect = state.list.toggle_rects.get(row_label)
+                        if toggle_rect and _in_rect(self._mouse_x, self._mouse_y, toggle_rect):
+                            self._list_toggle_pressed = row_label
                         else:
-                            self._list_row_pressed = label
+                            self._list_row_pressed = row_label
                             if not event.shift and not event.ctrl:
-                                key = ("header", label)
+                                key = ("header", row_label)
                                 try:
-                                    self._list_last_row_index = st.list.visible_row_keys.index(key)
+                                    self._list_last_row_index = state.list.visible_row_keys.index(key)
                                 except ValueError:
                                     self._list_last_row_index = -1
                 return {"RUNNING_MODAL"}
             if addon:
-                handle = self._get_handle_at(context, event)
-                if handle:
-                    self._resize_handle = handle
-                    st.interaction.resize_active = handle
+                resize_handle = self._get_handle_at(context, event)
+                if resize_handle:
+                    self._resize_handle = resize_handle
+                    state.interaction.resize_active = resize_handle
                     self._redraw_ui()
-                    self._resize_start_mouse = (self._mx, self._my)
-                    _ui_scale = _get_ui_scale()
-                    rmx, rmy, rmw, rmh = st.view.rect
+                    self._resize_start_mouse = (self._mouse_x, self._mouse_y)
+                    ui_scale = _get_ui_scale()
+                    map_x, map_y, map_w, map_h = state.view.rect
                     self._resize_start_values = (
-                        int(rmw / _ui_scale),
-                        int(rmh / _ui_scale),
+                        int(map_w / ui_scale),
+                        int(map_h / ui_scale),
                     )
-                    cursor = _CURSOR_MAP[handle]
+                    cursor = _CURSOR_MAP[resize_handle]
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
             if settings and settings.left_click_action in ("PAN", "SELECT_PAN"):
-                self._drag_start = (self._mx, self._my)
-                self._center_view_on_mouse(context, self._mx, self._my)
+                self._drag_start = (self._mouse_x, self._mouse_y)
+                self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
             return {"RUNNING_MODAL"}
         else:
             self._drag_start = None
             return {"PASS_THROUGH"}
 
     def _handle_right_mouse(self, context: Context, event: Event) -> set[str]:
-        st, addon, settings, in_minimap = self._minimap_event_context(context)
+        state, addon, settings, in_minimap = self._minimap_event_context(context)
         # --- Release ---
         if event.value == "RELEASE":
             if self._list_width_dragging:
                 self._list_width_dragging = False
-                st.list.drag_width = None
-                st.list.width_clamped = False
-                st.interaction.resize_active = None
-                st.interaction.hovered_handle = None
+                state.list.dragging_width = None
+                state.list.width_clamped = False
+                state.interaction.resize_active = None
+                state.interaction.hovered_handle = None
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
-                st.cache.invalidate_batches_only()
+                state.cache.invalidate_batches_only()
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
-            if st.interaction.pressed:
-                st.interaction.pressed = False
+            if state.interaction.pressed:
+                state.interaction.pressed = False
                 self._redraw_ui()
             if self._resize_handle:
                 self._resize_handle = None
@@ -796,11 +813,11 @@ class NODEMAP_OT_navigate(Operator):
                 self._resize_start_values = None
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
-                st.view.width_clamped = False
-                st.view.height_clamped = False
-                st.interaction.hovered_handle = None
-                st.interaction.resize_active = None
-                st.cache.invalidate_batches_only()
+                state.view.width_clamped = False
+                state.view.height_clamped = False
+                state.interaction.hovered_handle = None
+                state.interaction.resize_active = None
+                state.cache.invalidate_batches_only()
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._dragging:
@@ -838,37 +855,37 @@ class NODEMAP_OT_navigate(Operator):
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
             self._cancel_smooth(context)
-            ui_scale_div = _get_ui_scale()
-            divider_handle_r = _get_list_divider_handle(st, self._mx, self._my, ui_scale_div)
+            ui_scale = _get_ui_scale()
+            divider_handle_r = _get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
             if divider_handle_r:
                 self._list_width_dragging = True
-                st.interaction.resize_active = divider_handle_r
+                state.interaction.resize_active = divider_handle_r
                 self._redraw_ui()
-                self._list_width_start_x = self._mx
+                self._list_width_start_x = self._mouse_x
                 self._list_width_start_pct = settings.type_list_width_pct if settings else 35
-                _mx, _my, _mw, _mh = st.view.rect
-                self._list_width_start_mw = _mw
+                map_x, map_y, map_w, map_h = state.view.rect
+                self._list_width_start_map_w = map_w
                 cursor = _CURSOR_MAP[divider_handle_r]
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
                 return {"RUNNING_MODAL"}
-            if _in_list_zone(self._mx, self._my, st):
-                if _list_scrollbar_hit(self._mx, self._my, st):
+            if _in_list_zone(self._mouse_x, self._mouse_y, state):
+                if _list_scrollbar_hit(self._mouse_x, self._mouse_y, state):
                     # Scrollbar owns the press; no row selection or pan.
                     return {"RUNNING_MODAL"}
-                child = _list_child_at(self._mx, self._my, st)
-                if child:
-                    _label, node_name = child
-                    st.cache.force_immediate = True
+                child_row = _list_child_at(self._mouse_x, self._mouse_y, state)
+                if child_row:
+                    child_label, node_name = child_row
+                    state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, st, ("child", _label, node_name))
+                        self._apply_list_range(context, state, ("child", child_label, node_name))
                     elif event.ctrl:
                         self._select_single_node(context, node_name, toggle=True)
                     else:
                         self._select_single_node(context, node_name)
-                        key = ("child", _label, node_name)
+                        key = ("child", child_label, node_name)
                         try:
-                            self._list_last_row_index = st.list.visible_row_keys.index(key)
+                            self._list_last_row_index = state.list.visible_row_keys.index(key)
                         except ValueError:
                             self._list_last_row_index = -1
                     if not (event.shift or event.ctrl):
@@ -880,29 +897,29 @@ class NODEMAP_OT_navigate(Operator):
                                 pass
                     self._was_in_minimap = False
                     return {"RUNNING_MODAL"}
-                label = _list_row_at(self._mx, self._my, st)
-                if label:
-                    toggle = st.list.toggle_rects.get(label)
-                    if toggle and _in_rect(self._mx, self._my, toggle):
-                        if label in st.list.expanded:
-                            st.list.expanded.discard(label)
+                row_label = _list_row_at(self._mouse_x, self._mouse_y, state)
+                if row_label:
+                    toggle_rect = state.list.toggle_rects.get(row_label)
+                    if toggle_rect and _in_rect(self._mouse_x, self._mouse_y, toggle_rect):
+                        if row_label in state.list.expanded:
+                            state.list.expanded.discard(row_label)
                         else:
-                            st.list.expanded.add(label)
-                        st.cache.list_key = None
-                        st.cache.force_immediate = True
+                            state.list.expanded.add(row_label)
+                        state.cache.list_key = None
+                        state.cache.force_immediate = True
                         self._redraw_ui()
                         self._was_in_minimap = False
                         return {"RUNNING_MODAL"}
-                    st.cache.force_immediate = True
+                    state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, st, ("header", label))
+                        self._apply_list_range(context, state, ("header", row_label))
                     elif event.ctrl:
-                        self._select_type_nodes(context, label, toggle=True)
+                        self._select_type_nodes(context, row_label, toggle=True)
                     else:
-                        self._select_type_nodes(context, label)
-                        key = ("header", label)
+                        self._select_type_nodes(context, row_label)
+                        key = ("header", row_label)
                         try:
-                            self._list_last_row_index = st.list.visible_row_keys.index(key)
+                            self._list_last_row_index = state.list.visible_row_keys.index(key)
                         except ValueError:
                             self._list_last_row_index = -1
                     if not (event.shift or event.ctrl):
@@ -915,28 +932,28 @@ class NODEMAP_OT_navigate(Operator):
                 self._was_in_minimap = False
                 return {"RUNNING_MODAL"}
             if addon:
-                handle = self._get_handle_at(context, event)
-                if handle:
-                    self._resize_handle = handle
-                    st.interaction.resize_active = handle
+                resize_handle = self._get_handle_at(context, event)
+                if resize_handle:
+                    self._resize_handle = resize_handle
+                    state.interaction.resize_active = resize_handle
                     self._redraw_ui()
-                    self._resize_start_mouse = (self._mx, self._my)
-                    _ui_scale = _get_ui_scale()
-                    rmx, rmy, rmw, rmh = st.view.rect
+                    self._resize_start_mouse = (self._mouse_x, self._mouse_y)
+                    ui_scale = _get_ui_scale()
+                    map_x, map_y, map_w, map_h = state.view.rect
                     self._resize_start_values = (
-                        int(rmw / _ui_scale),
-                        int(rmh / _ui_scale),
+                        int(map_w / ui_scale),
+                        int(map_h / ui_scale),
                     )
-                    cursor = _CURSOR_MAP[handle]
+                    cursor = _CURSOR_MAP[resize_handle]
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
             if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                st.cache.force_immediate = True
-                self._handle_click_selection(context, event, st, frame=settings.right_click_action == "SELECT_FRAME")
+                state.cache.force_immediate = True
+                self._handle_click_selection(context, event, state, frame=settings.right_click_action == "SELECT_FRAME")
             if settings and settings.right_click_action in ("PAN", "SELECT_PAN"):
-                self._drag_start = (self._mx, self._my)
-                self._center_view_on_mouse(context, self._mx, self._my)
+                self._drag_start = (self._mouse_x, self._mouse_y)
+                self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
             self._was_in_minimap = False
             return {"RUNNING_MODAL"}
         else:
@@ -944,7 +961,7 @@ class NODEMAP_OT_navigate(Operator):
             return {"PASS_THROUGH"}
 
     def _handle_mouse_move(self, context: Context, event: Event) -> set[str]:
-        st, addon, settings, in_minimap = self._minimap_event_context(context)
+        state, addon, settings, in_minimap = self._minimap_event_context(context)
         if self._list_width_dragging:
             self._apply_list_width_drag(context)
             self._redraw_ui()
@@ -953,97 +970,105 @@ class NODEMAP_OT_navigate(Operator):
             self._resize_apply_delta(context, event)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
-        if self._list_scroll_pressed and st.list.scrollbar_dragging:
-            _apply_list_scroll_drag(self._mx, self._my, self._list_scroll_grab, st)
+        if self._list_scroll_pressed and state.list.scrollbar_dragging:
+            _apply_list_scroll_drag(self._mouse_x, self._mouse_y, self._list_scroll_grab, state)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         if not self._dragging and not self._mmb_dragging and not self._drag_start:
             self._update_cursor(context, event)
         if not self._dragging and not self._mmb_dragging and not self._resize_handle and not self._list_width_dragging:
-            in_list = _in_list_zone(self._mx, self._my, st)
+            in_list = _in_list_zone(self._mouse_x, self._mouse_y, state)
             # The scrollbar gutter suppresses row hovers so the bar can
             # be approached without flashing the rows underneath.
-            over_bar = in_list and _list_scrollbar_hit(self._mx, self._my, st)
-            if st.list.hovered_scrollbar != over_bar:
-                st.list.hovered_scrollbar = over_bar
+            over_bar = (
+                in_list
+                and _list_scrollbar_hit(self._mouse_x, self._mouse_y, state)
+                and state.interaction.hovered_handle != ResizeHandle.LIST
+            )
+            if state.list.hovered_scrollbar != over_bar:
+                state.list.hovered_scrollbar = over_bar
                 self._redraw_ui()
-            row_label = None if over_bar else (_list_row_at(self._mx, self._my, st) if in_list else None)
-            child_hover = None if over_bar else (_list_child_at(self._mx, self._my, st) if in_list else None)
-            if st.list.hovered_type_label != row_label:
-                st.list.hovered_type_label = row_label
+            row_label = None if over_bar else (_list_row_at(self._mouse_x, self._mouse_y, state) if in_list else None)
+            child_hover = None
+            if not over_bar and in_list:
+                child_hover = _list_child_at(self._mouse_x, self._mouse_y, state)
+            if state.list.hovered_type_label != row_label:
+                state.list.hovered_type_label = row_label
                 self._redraw_ui()
-            if st.list.hovered_node != child_hover:
-                st.list.hovered_node = child_hover
+            if state.list.hovered_list_row != child_hover:
+                state.list.hovered_list_row = child_hover
                 self._redraw_ui()
             new_hovered = None
             if in_list and child_hover is not None:
                 # Hovering a single child row highlights only that node's
                 # border on the minimap (not the whole type group).
                 new_hovered = child_hover[1]
-            if st.interaction.hovered_node != new_hovered:
-                st.interaction.hovered_node = new_hovered
+            if state.interaction.hovered_node_id != new_hovered:
+                state.interaction.hovered_node_id = new_hovered
                 self._redraw_ui()
-            old_btn = st.buttons.hovered
-            new_btn = _frame_btn_at(self._mx, self._my, st) if in_minimap and not in_list else None
+            old_btn = state.buttons.hovered_button_id
+            new_btn = _frame_button_at(self._mouse_x, self._mouse_y, state) if in_minimap and not in_list else None
             if old_btn != new_btn:
-                st.buttons.hovered = new_btn
+                state.buttons.hovered_button_id = new_btn
                 self._redraw_ui()
         if self._list_mmb_dragging and self._list_mmb_drag_start:
-            dy = self._my - self._list_mmb_drag_start[1]
+            dy = self._mouse_y - self._list_mmb_drag_start[1]
             if abs(dy) > 0:
-                st.list.scroll = min(
-                    max(st.list.scroll - dy, 0.0),
-                    st.list.scroll_max,
+                state.list.scroll = min(
+                    max(state.list.scroll - dy, 0.0),
+                    state.list.scroll_max,
                 )
-                self._list_mmb_drag_start = (self._mx, self._my)
+                self._list_mmb_drag_start = (self._mouse_x, self._mouse_y)
                 self._redraw_ui()
             return {"RUNNING_MODAL"}
         if self._mmb_dragging and self._mmb_drag_start:
-            dx = self._mx - self._mmb_drag_start[0]
-            dy = self._my - self._mmb_drag_start[1]
+            dx = self._mouse_x - self._mmb_drag_start[0]
+            dy = self._mouse_y - self._mmb_drag_start[1]
             if abs(dx) <= 1 and abs(dy) <= 1:
                 self._smooth_velocity[0] *= 0.15
                 self._smooth_velocity[1] *= 0.15
             else:
                 self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + dx * 0.4
                 self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + dy * 0.4
-            pan_before = st.view.pan
-            st.view.pan = (st.view.pan[0] + dx, st.view.pan[1] + dy)
-            _clamp_pan_to_viewport(self._space, self._region, st)
-            rejected_x = dx - (st.view.pan[0] - pan_before[0])
-            rejected_y = dy - (st.view.pan[1] - pan_before[1])
+            pan_before = state.view.pan
+            state.view.pan = (state.view.pan[0] + dx, state.view.pan[1] + dy)
+            _clamp_pan_to_viewport(self._space, self._region, state)
+            rejected_x = dx - (state.view.pan[0] - pan_before[0])
+            rejected_y = dy - (state.view.pan[1] - pan_before[1])
             if (rejected_x != 0 or rejected_y != 0) and settings and settings.follow_view:
-                st.view.pan = (pan_before[0] + dx, pan_before[1] + dy)
+                state.view.pan = (pan_before[0] + dx, pan_before[1] + dy)
                 self._redirect_to_view2d(context, -dx, -dy)
             elif rejected_x != 0 or rejected_y != 0:
                 self._redirect_to_view2d(context, -int(rejected_x), -int(rejected_y))
-            self._mmb_drag_start = (self._mx, self._my)
+            self._mmb_drag_start = (self._mouse_x, self._mouse_y)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         if self._drag_start is not None:
-            dx = self._mx - self._drag_start[0]
-            dy = self._my - self._drag_start[1]
+            dx = self._mouse_x - self._drag_start[0]
+            dy = self._mouse_y - self._drag_start[1]
             if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
                 if not self._dragging and (self._anim_active or self._frame_anim_active or self._editor_anim_active):
                     self._cancel_smooth(context)
                 self._dragging = True
                 if self._was_in_minimap:
-                    st.interaction.pressed = True
+                    state.interaction.pressed = True
                     smooth = settings and self._animations_enabled(settings, context, default=False)
                     self._pan_view(context, dx, dy, smooth)
-                    self._drag_start = (self._mx, self._my)
+                    self._drag_start = (self._mouse_x, self._mouse_y)
             return {"RUNNING_MODAL"}
         if in_minimap:
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
 
     def _handle_wheel(self, context: Context, event: Event) -> set[str]:
-        st, addon, settings, in_minimap = self._minimap_event_context(context)
-        if in_minimap and _in_list_zone(self._mx, self._my, st):
+        state, addon, settings, in_minimap = self._minimap_event_context(context)
+        if in_minimap and _in_list_zone(self._mouse_x, self._mouse_y, state):
             direction = -1 if event.type == "WHEELUPMOUSE" else 1
-            st.list.scroll = min(max(st.list.scroll + direction * st.list.row_height * 3, 0.0), st.list.scroll_max)
-            over_bar = _list_scrollbar_hit(self._mx, self._my, st)
-            st.list.hovered_type_label = None if over_bar else _list_row_at(self._mx, self._my, st)
+            state.list.scroll = min(
+                max(state.list.scroll + direction * state.list.row_height * 3, 0.0), state.list.scroll_max
+            )
+            over_bar = _list_scrollbar_hit(self._mouse_x, self._mouse_y, state)
+            state.list.hovered_type_label = None if over_bar else _list_row_at(self._mouse_x, self._mouse_y, state)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         if in_minimap:
@@ -1082,11 +1107,11 @@ class NODEMAP_OT_navigate(Operator):
                     pass
             else:
                 zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
-                effective_zoom = st.view.zoom
+                effective_zoom = state.view.user_zoom
 
                 is_constrained = False
                 if addon and addon.preferences.settings.follow_view:
-                    if effective_zoom < st.view.base_zoom - 0.001:
+                    if effective_zoom < state.view.anchor_zoom - 0.001:
                         is_constrained = True
 
                 if is_constrained and event.type == "WHEELUPMOUSE":
@@ -1099,22 +1124,22 @@ class NODEMAP_OT_navigate(Operator):
                 else:
                     new_zoom = max(0.1, min(effective_zoom * zoom_delta, 20.0))
 
-                    transform = _get_minimap_transform(st)
-                    tree_coord = _tree_from_region(self._mx, self._my, transform)
+                    transform = _get_minimap_transform(state)
+                    tree_coord = _tree_from_region(self._mouse_x, self._mouse_y, transform)
 
                     if transform[2] > 0 and tree_coord is not None:
-                        _, _, scale, tree_cx, tree_cy = transform
-                        base_scale = scale / st.view.zoom
-                        tx, ty = tree_coord
-                        pan_x, pan_y = st.view.pan
+                        _, _, scale, tree_center_x, tree_center_y = transform
+                        base_scale = scale / state.view.user_zoom
+                        hit_tx, hit_ty = tree_coord
+                        pan_x, pan_y = state.view.pan
 
-                        pan_x_new = pan_x - (tx - tree_cx) * base_scale * (new_zoom - st.view.zoom)
-                        pan_y_new = pan_y - (ty - tree_cy) * base_scale * (new_zoom - st.view.zoom)
+                        pan_x_new = pan_x - (hit_tx - tree_center_x) * base_scale * (new_zoom - state.view.user_zoom)
+                        pan_y_new = pan_y - (hit_ty - tree_center_y) * base_scale * (new_zoom - state.view.user_zoom)
 
-                        st.view.base_zoom = new_zoom
-                        st.view.zoom = new_zoom
-                        st.view.pan = (pan_x_new, pan_y_new)
-                        _clamp_pan_to_viewport(self._space, self._region, st)
+                        state.view.anchor_zoom = new_zoom
+                        state.view.user_zoom = new_zoom
+                        state.view.pan = (pan_x_new, pan_y_new)
+                        _clamp_pan_to_viewport(self._space, self._region, state)
 
             self._redraw_ui()
             return {"RUNNING_MODAL"}
@@ -1150,11 +1175,11 @@ class NODEMAP_OT_navigate(Operator):
         View2d coordinates are tree coordinates scaled by the UI scale factor
         (mirroring ``_get_visible_rect``), so the point is scaled here first.
         """
-        vr = self._region.view2d if self._region else None
-        if not vr:
+        view2d = self._region.view2d if self._region else None
+        if not view2d:
             return None
         ui = _get_ui_scale()
-        pt = vr.view_to_region(tree_x * ui, tree_y * ui, clip=False)
+        pt = view2d.view_to_region(tree_x * ui, tree_y * ui, clip=False)
         if not pt:
             return None
         return int(pt[0]), int(pt[1])
@@ -1179,21 +1204,21 @@ class NODEMAP_OT_navigate(Operator):
             probes.append(fallback)
 
         tree_nodes = getattr(getattr(node, "id_data", None), "nodes", None)
-        for probe_index, (tx, ty) in enumerate(probes):
-            projected = self._project_tree_to_region(tx, ty)
+        for probe_index, (probe_tx, probe_ty) in enumerate(probes):
+            projected = self._project_tree_to_region(probe_tx, probe_ty)
             if projected is None:
                 continue
-            rx, ry = projected
+            proj_x, proj_y = projected
             keep = None
             if probe_index and extend and tree_nodes:
                 keep = {n.name for n in tree_nodes if n.select}
             kwargs: dict = {"extend": extend}
             if bpy.app.version >= (3, 0, 0):
-                kwargs["location"] = (rx, ry)
+                kwargs["location"] = (proj_x, proj_y)
                 kwargs["deselect_all"] = deselect_all
             else:
-                kwargs["mouse_x"] = rx
-                kwargs["mouse_y"] = ry
+                kwargs["mouse_x"] = proj_x
+                kwargs["mouse_y"] = proj_y
             try:
                 with self._override_ctx(context):
                     bpy.ops.node.select(**kwargs)
@@ -1213,7 +1238,7 @@ class NODEMAP_OT_navigate(Operator):
             return True
         return False
 
-    def _handle_click_selection(self, context: Context, event: Event, st: dict, frame: bool = False) -> None:
+    def _handle_click_selection(self, context: Context, event: Event, state: dict, frame: bool = False) -> None:
         space = self._space
         if not space or space.type != "NODE_EDITOR":
             return
@@ -1221,7 +1246,7 @@ class NODEMAP_OT_navigate(Operator):
         if not node_tree or not node_tree.nodes:
             return
 
-        tree_coord = _region_to_tree(self._mx, self._my, st)
+        tree_coord = _region_to_tree(self._mouse_x, self._mouse_y, state)
         if tree_coord is None:
             return
 
@@ -1249,11 +1274,11 @@ class NODEMAP_OT_navigate(Operator):
                     except RuntimeError:
                         pass
 
-        st.list.hovered_node = None
-        st.interaction.hovered_node = None
+        state.list.hovered_list_row = None
+        state.interaction.hovered_node_id = None
         self._redraw_ui()
 
-    def _apply_list_range(self, context: Context, st: MinimapState, target_key: tuple) -> None:
+    def _apply_list_range(self, context: Context, state: MinimapState, target_key: tuple) -> None:
         """Select all visible rows between the last-clicked and *target_key*.
 
         Replaces the current selection with the contiguous range, matching
@@ -1261,7 +1286,7 @@ class NODEMAP_OT_navigate(Operator):
         (``_list_last_row_index``) is **not** moved — it stays at the last
         plain-clicked row so repeated Shift-clicks expand from the same origin.
         """
-        keys = st.list.visible_row_keys
+        keys = state.list.visible_row_keys
         try:
             target_idx = keys.index(target_key)
         except ValueError:
@@ -1283,9 +1308,8 @@ class NODEMAP_OT_navigate(Operator):
         except RuntimeError:
             pass
 
-        # Select every row in the range.
-        for idx in range(lo, hi + 1):
-            key = keys[idx]
+        for key_idx in range(lo, hi + 1):
+            key = keys[key_idx]
             if key[0] == "header":
                 self._select_type_nodes(context, key[1], extend=True)
             elif key[0] == "child":
@@ -1304,13 +1328,13 @@ class NODEMAP_OT_navigate(Operator):
         selected they are all deselected, otherwise they are all selected.
         """
         space = self._space
-        st = self._st
-        if not space or space.type != "NODE_EDITOR" or not st:
+        state = self._state
+        if not space or space.type != "NODE_EDITOR" or not state:
             return
         node_tree = space.edit_tree
         if not node_tree:
             return
-        type_nodes = (st.cache.tree_data or {}).get("type_nodes") or {}
+        type_nodes = (state.cache.tree_data or {}).get("type_nodes") or {}
         names = type_nodes.get(label)
         if not names:
             return
@@ -1359,8 +1383,8 @@ class NODEMAP_OT_navigate(Operator):
         is flipped instead of replaced.
         """
         space = self._space
-        st = self._st
-        if not space or space.type != "NODE_EDITOR" or not st:
+        state = self._state
+        if not space or space.type != "NODE_EDITOR" or not state:
             return
         node_tree = space.edit_tree
         if not node_tree:
@@ -1386,36 +1410,39 @@ class NODEMAP_OT_navigate(Operator):
 
     def _activate_armed_button(self, context: Context, settings) -> None:
         """Release the armed minimap button; run its action when still under the cursor."""
-        btn_id = self._armed_btn
-        self._armed_btn = None
-        st = self._st
-        if not btn_id or st is None:
+        button_id = self._armed_button
+        self._armed_button = None
+        state = self._state
+        if not button_id or state is None:
             return
-        rect = st.buttons.rects.get(btn_id)
+        rect = state.buttons.rects.get(button_id)
         if not rect:
             return
-        bx, by, bw, bh = rect
-        if not (bx <= self._mx <= bx + bw and by <= self._my <= by + bh):
+        button_x, button_y, button_width, button_height = rect
+        if not (
+            button_x <= self._mouse_x <= button_x + button_width
+            and button_y <= self._mouse_y <= button_y + button_height
+        ):
             return
-        if btn_id == "LIST":
+        if button_id == "LIST":
             if settings:
                 settings.show_type_list = not settings.show_type_list
-                start_list_width_animation(st, settings)
+                start_list_width_animation(state, settings)
                 self._redraw_ui()
             return
-        self._dispatch_frame_action(context, settings, btn_id)
+        self._dispatch_frame_action(context, settings, button_id)
 
-    def _dispatch_frame_action(self, context: Context, settings, btn_id: str) -> None:
+    def _dispatch_frame_action(self, context: Context, settings, button_id: str) -> None:
         """Run a frame action directly, or eased via animation when smooth pan applies.
 
         Shared by the minimap button release and the Home / Numpad shortcuts.
         """
-        st = self._st
-        if not st:
+        state = self._state
+        if not state:
             return
         smooth = bool(settings) and self._animations_enabled(settings, context)
         area_ptr = self._area.as_pointer() if self._area else 0
-        match btn_id:
+        match button_id:
             case "ALL":
                 if smooth:
                     targets = _compute_frame_all_targets(self._space, self._region, area_ptr)
@@ -1429,12 +1456,12 @@ class NODEMAP_OT_navigate(Operator):
                     if visible:
                         node_tree = self._space.edit_tree
                         if node_tree:
-                            _, _, mw, mh = st.view.rect
-                            st.view.tree_bounds = _expand_bounds_margin(
+                            _, _, map_w, map_h = state.view.rect
+                            state.view.tree_bounds = _expand_bounds_margin(
                                 _get_node_tree_bounds(node_tree.nodes),
                                 _get_ui_scale(),
-                                mh,
-                                st.view.padding,
+                                map_h,
+                                state.view.inner_padding,
                             )
                         fill = settings.frame_view_fill
                         targets = _compute_frame_to_bounds_targets(visible, fill, area_ptr)
@@ -1445,42 +1472,42 @@ class NODEMAP_OT_navigate(Operator):
                 if smooth:
                     targets = _compute_frame_selected_targets(self._space, self._region, area_ptr)
                     if targets:
-                        target_zoom = targets[0] if targets[0] is not None else st.view.zoom
+                        target_zoom = targets[0] if targets[0] is not None else state.view.user_zoom
                         self._start_frame_animation(context, target_zoom, [targets[1], targets[2]])
                 else:
                     frame_selected(self._space, self._region, area_ptr)
 
     def _pan_view(self, context: Context, dx: int, dy: int, smooth: bool = False) -> None:
-        st = self._st
-        if not st:
+        state = self._state
+        if not state:
             return
         visible = _get_visible_rect(self._space, self._region)
         if not visible:
             return
-        _, _, scale, _, _ = _compute_map_transform(st)
+        _, _, scale, _, _ = _compute_map_transform(state)
         if scale <= 0:
             return
         view_zoom_x, view_zoom_y = _view_zoom_factors(self._space, self._region, visible)
 
-        vx = (dx / scale) * view_zoom_x
-        vy = (dy / scale) * view_zoom_y
+        view_delta_x = (dx / scale) * view_zoom_x
+        view_delta_y = (dy / scale) * view_zoom_y
         if abs(dx) <= 1 and abs(dy) <= 1:
             self._smooth_velocity[0] *= 0.15
             self._smooth_velocity[1] *= 0.15
         else:
-            self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + vx * 0.4
-            self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + vy * 0.4
+            self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + view_delta_x * 0.4
+            self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + view_delta_y * 0.4
 
         if smooth:
-            self._drag_target[0] += vx
-            self._drag_target[1] += vy
+            self._drag_target[0] += view_delta_x
+            self._drag_target[1] += view_delta_y
             if not self._drag_active:
                 self._drag_active = True
                 self._create_timer(context)
             return
 
-        self._pan_acc[0] += vx
-        self._pan_acc[1] += vy
+        self._pan_acc[0] += view_delta_x
+        self._pan_acc[1] += view_delta_y
         pan_x = int(self._pan_acc[0])
         pan_y = int(self._pan_acc[1])
         self._pan_acc[0] -= pan_x
@@ -1488,14 +1515,14 @@ class NODEMAP_OT_navigate(Operator):
 
         if pan_x != 0 or pan_y != 0:
             try:
-                pan_before = st.view.pan
+                pan_before = state.view.pan
 
                 with self._override_ctx(context):
                     bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                _clamp_pan_to_viewport(self._space, self._region, st)
+                _clamp_pan_to_viewport(self._space, self._region, state)
 
-                clamp_dx = st.view.pan[0] - pan_before[0]
-                clamp_dy = st.view.pan[1] - pan_before[1]
+                clamp_dx = state.view.pan[0] - pan_before[0]
+                clamp_dy = state.view.pan[1] - pan_before[1]
 
                 if clamp_dx != 0 or clamp_dy != 0:
                     self._pan_acc[0] += (-clamp_dx / scale) * view_zoom_x
@@ -1509,15 +1536,15 @@ class NODEMAP_OT_navigate(Operator):
                     if extra_pan_x != 0 or extra_pan_y != 0:
                         with self._override_ctx(context):
                             bpy.ops.view2d.pan(deltax=extra_pan_x, deltay=extra_pan_y)
-                        _clamp_pan_to_viewport(self._space, self._region, st)
+                        _clamp_pan_to_viewport(self._space, self._region, state)
             except RuntimeError:
                 pass
 
     def _redirect_to_view2d(self, context: Context, dx: float, dy: float) -> None:
-        st = self._st
-        if not st:
+        state = self._state
+        if not state:
             return
-        _, _, scale, _, _ = _compute_map_transform(st)
+        _, _, scale, _, _ = _compute_map_transform(state)
         if scale <= 0:
             return
         visible = _get_visible_rect(self._space, self._region)
@@ -1537,11 +1564,11 @@ class NODEMAP_OT_navigate(Operator):
             except RuntimeError:
                 pass
 
-    def _center_view_on_mouse(self, context: Context, mx: int, my: int) -> None:
-        st = self._st
-        if not st:
+    def _center_view_on_mouse(self, context: Context, mouse_x: int, mouse_y: int) -> None:
+        state = self._state
+        if not state:
             return
-        tree_coord = _region_to_tree(mx, my, st)
+        tree_coord = _region_to_tree(mouse_x, mouse_y, state)
         if not tree_coord:
             return
 
@@ -1561,7 +1588,7 @@ class NODEMAP_OT_navigate(Operator):
         if pan_x == 0 and pan_y == 0:
             return
 
-        st.interaction.pressed = True
+        state.interaction.pressed = True
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
         if settings and self._animations_enabled(settings, context):
@@ -1575,7 +1602,7 @@ class NODEMAP_OT_navigate(Operator):
             try:
                 with self._override_ctx(context):
                     bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                _clamp_pan_to_viewport(self._space, self._region, st)
+                _clamp_pan_to_viewport(self._space, self._region, state)
             except RuntimeError:
                 pass
 
@@ -1609,38 +1636,38 @@ class NODEMAP_OT_navigate(Operator):
             self._resize_handle = None
             self._resize_start_mouse = None
             self._resize_start_values = None
-            st = self._st
-            if st:
-                st.view.width_clamped = False
-                st.view.height_clamped = False
-                st.interaction.hovered_handle = None
-                st.interaction.resize_active = None
+            state = self._state
+            if state:
+                state.view.width_clamped = False
+                state.view.height_clamped = False
+                state.interaction.hovered_handle = None
+                state.interaction.resize_active = None
         if self._list_width_dragging:
             self._list_width_dragging = False
-            st = self._st
-            if st:
-                st.list.drag_width = None
-                st.list.width_clamped = False
-                st.interaction.hovered_handle = None
-                st.interaction.resize_active = None
-                st.cache.invalidate_batches_only()
+            state = self._state
+            if state:
+                state.list.dragging_width = None
+                state.list.width_clamped = False
+                state.interaction.hovered_handle = None
+                state.interaction.resize_active = None
+                state.cache.invalidate_batches_only()
         context.window.cursor_modal_set("DEFAULT")
         self._last_cursor = ""
-        self._armed_btn = None
+        self._armed_button = None
         self._list_row_pressed = None
         self._list_child_pressed = None
         self._list_toggle_pressed = None
         self._list_scroll_pressed = False
         self._list_scroll_grab = 0.0
-        st = self._st
-        if st:
-            st.buttons.hovered = None
-            st.list.hovered_type_label = None
-            st.interaction.hovered_node = None
-            st.list.hovered_scrollbar = False
-            st.list.scrollbar_dragging = False
-            if st.interaction.pressed:
-                st.interaction.pressed = False
+        state = self._state
+        if state:
+            state.buttons.hovered_button_id = None
+            state.list.hovered_type_label = None
+            state.interaction.hovered_node_id = None
+            state.list.hovered_scrollbar = False
+            state.list.scrollbar_dragging = False
+            if state.interaction.pressed:
+                state.interaction.pressed = False
         self._redraw_ui()
 
     def _cancel_smooth(self, context: Context) -> None:
@@ -1662,12 +1689,12 @@ class NODEMAP_OT_navigate(Operator):
             self._anim_active = False
             self._destroy_timer(context)
         if self._frame_anim_active:
-            st = self._st
-            if st:
-                st.view.base_zoom = self._frame_anim_target_zoom
-                st.view.zoom = self._frame_anim_target_zoom
-                st.view.pan = (self._frame_anim_target_pan[0], self._frame_anim_target_pan[1])
-                _clamp_pan_to_viewport(self._space, self._region, st)
+            state = self._state
+            if state:
+                state.view.anchor_zoom = self._frame_anim_target_zoom
+                state.view.user_zoom = self._frame_anim_target_zoom
+                state.view.pan = (self._frame_anim_target_pan[0], self._frame_anim_target_pan[1])
+                _clamp_pan_to_viewport(self._space, self._region, state)
             self._frame_anim_active = False
             self._frame_anim_progress = 0.0
             self._destroy_timer(context)
@@ -1685,8 +1712,8 @@ class NODEMAP_OT_navigate(Operator):
             self._destroy_timer(context)
             return
         if self._inertia_mode == "PAN":
-            st = self._st
-            if st:
+            state = self._state
+            if state:
                 self._pan_acc[0] += self._smooth_velocity[0]
                 self._pan_acc[1] += self._smooth_velocity[1]
                 dx = int(self._pan_acc[0])
@@ -1694,8 +1721,8 @@ class NODEMAP_OT_navigate(Operator):
                 self._pan_acc[0] -= dx
                 self._pan_acc[1] -= dy
                 if dx != 0 or dy != 0:
-                    st.view.pan = (st.view.pan[0] + dx, st.view.pan[1] + dy)
-                    _clamp_pan_to_viewport(self._space, self._region, st)
+                    state.view.pan = (state.view.pan[0] + dx, state.view.pan[1] + dy)
+                    _clamp_pan_to_viewport(self._space, self._region, state)
         elif self._inertia_mode == "VIEW":
             self._pan_acc[0] += self._smooth_velocity[0]
             self._pan_acc[1] += self._smooth_velocity[1]
@@ -1709,7 +1736,7 @@ class NODEMAP_OT_navigate(Operator):
                         bpy.ops.view2d.pan(deltax=dx, deltay=dy)
                 except RuntimeError:
                     pass
-                _clamp_pan_to_viewport(self._space, self._region, self._st)
+                _clamp_pan_to_viewport(self._space, self._region, self._state)
         self._redraw_ui()
 
     def _apply_smooth_drag(self, context: Context) -> None:
@@ -1719,12 +1746,12 @@ class NODEMAP_OT_navigate(Operator):
         raw = magnitude / 200.0
         follow = 0.25 + raw * 0.55
         follow = min(follow, 0.8)
-        _MAX_MOVE = 120.0 + magnitude * 0.15
-        _MAX_MOVE = min(_MAX_MOVE, 800.0)
+        max_move = 120.0 + magnitude * 0.15
+        max_move = min(max_move, 800.0)
         dx = self._drag_target[0] * follow
         dy = self._drag_target[1] * follow
-        dx = max(min(dx, _MAX_MOVE), -_MAX_MOVE)
-        dy = max(min(dy, _MAX_MOVE), -_MAX_MOVE)
+        dx = max(min(dx, max_move), -max_move)
+        dy = max(min(dy, max_move), -max_move)
         self._pan_acc[0] += dx
         self._pan_acc[1] += dy
         self._drag_target[0] -= dx
@@ -1739,7 +1766,7 @@ class NODEMAP_OT_navigate(Operator):
                     bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
             except RuntimeError:
                 pass
-            _clamp_pan_to_viewport(self._space, self._region, self._st)
+            _clamp_pan_to_viewport(self._space, self._region, self._state)
         if not self._dragging:
             self._drag_active = False
         self._redraw_ui()
@@ -1786,14 +1813,14 @@ class NODEMAP_OT_navigate(Operator):
         self._redraw_ui()
 
     def _start_frame_animation(self, context: Context, target_zoom: float, target_pan: list[float]) -> None:
-        st = self._st
-        if not st:
+        state = self._state
+        if not state:
             return
         if self._frame_anim_active:
             self._frame_anim_active = False
         self._frame_anim_progress = 0.0
-        self._frame_anim_start_zoom = st.view.zoom
-        self._frame_anim_start_pan = [st.view.pan[0], st.view.pan[1]]
+        self._frame_anim_start_zoom = state.view.user_zoom
+        self._frame_anim_start_pan = [state.view.pan[0], state.view.pan[1]]
         self._frame_anim_target_zoom = target_zoom
         self._frame_anim_target_pan = [target_pan[0], target_pan[1]]
         self._frame_anim_active = True
@@ -1802,8 +1829,8 @@ class NODEMAP_OT_navigate(Operator):
     def _apply_frame_animation(self, context: Context) -> None:
         if not self._frame_anim_active:
             return
-        st = self._st
-        if not st:
+        state = self._state
+        if not state:
             self._frame_anim_active = False
             self._destroy_timer(context)
             return
@@ -1814,25 +1841,25 @@ class NODEMAP_OT_navigate(Operator):
         progress = self._frame_anim_progress + 1 / frames
         self._frame_anim_progress = progress
         if progress >= 1.0:
-            st.view.base_zoom = self._frame_anim_target_zoom
-            st.view.zoom = self._frame_anim_target_zoom
-            st.view.pan = (self._frame_anim_target_pan[0], self._frame_anim_target_pan[1])
-            _clamp_pan_to_viewport(self._space, self._region, st)
+            state.view.anchor_zoom = self._frame_anim_target_zoom
+            state.view.user_zoom = self._frame_anim_target_zoom
+            state.view.pan = (self._frame_anim_target_pan[0], self._frame_anim_target_pan[1])
+            _clamp_pan_to_viewport(self._space, self._region, state)
             self._frame_anim_active = False
             self._frame_anim_progress = 0.0
             self._destroy_timer(context)
             self._redraw_ui()
             return
         eased = 1.0 - (1.0 - progress) ** 3
-        st.view.zoom = (
+        state.view.user_zoom = (
             self._frame_anim_start_zoom + (self._frame_anim_target_zoom - self._frame_anim_start_zoom) * eased
         )
-        st.view.base_zoom = st.view.zoom
-        st.view.pan = (
+        state.view.anchor_zoom = state.view.user_zoom
+        state.view.pan = (
             self._frame_anim_start_pan[0] + (self._frame_anim_target_pan[0] - self._frame_anim_start_pan[0]) * eased,
             self._frame_anim_start_pan[1] + (self._frame_anim_target_pan[1] - self._frame_anim_start_pan[1]) * eased,
         )
-        _clamp_pan_to_viewport(self._space, self._region, st)
+        _clamp_pan_to_viewport(self._space, self._region, state)
         self._redraw_ui()
 
     def _view_selected_animated(self, context: Context, settings) -> bool:
@@ -1867,7 +1894,7 @@ class NODEMAP_OT_navigate(Operator):
     def _apply_editor_animation(self, context: Context) -> None:
         if not self._editor_anim_active:
             return
-        if not self._space or not self._region or not self._st:
+        if not self._space or not self._region or not self._state:
             self._editor_anim_active = False
             self._destroy_timer(context)
             return
@@ -1978,58 +2005,58 @@ class NODEMAP_OT_navigate(Operator):
         self._destroy_timer(context)
 
     def _update_cursor(self, context: Context, event: Event) -> None:
-        st = self._st
-        if not st or not st.view.rect:
+        state = self._state
+        if not state or not state.view.rect:
             return
-        in_minimap = _is_in_minimap(self._mx, self._my, st)
+        in_minimap = _is_in_minimap(self._mouse_x, self._mouse_y, state)
         if not in_minimap:
             if self._last_cursor:
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
-            old_handle = st.interaction.hovered_handle
-            st.interaction.hovered_handle = None
+            old_handle = state.interaction.hovered_handle
+            state.interaction.hovered_handle = None
             if old_handle:
                 self._redraw_ui()
             return
         # Divider takes precedence over outer borders and list hover.
         ui_scale = _get_ui_scale()
-        divider = _get_list_divider_handle(st, self._mx, self._my, ui_scale)
+        divider = _get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
         if divider:
-            old_handle = st.interaction.hovered_handle
-            st.interaction.hovered_handle = divider
+            old_handle = state.interaction.hovered_handle
+            state.interaction.hovered_handle = divider
             if divider != old_handle:
                 self._redraw_ui()
-            cursor = "HAND" if st.list.width_clamped else _CURSOR_MAP.get(divider, "MOVE_X")
+            cursor = "HAND" if state.list.width_clamped else _CURSOR_MAP.get(divider, "MOVE_X")
             if cursor != self._last_cursor:
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
             return
         handle = self._get_handle_at(context, event)
-        old_handle = st.interaction.hovered_handle
-        st.interaction.hovered_handle = handle
+        old_handle = state.interaction.hovered_handle
+        state.interaction.hovered_handle = handle
         if handle != old_handle:
             self._redraw_ui()
-        if _in_list_zone(self._mx, self._my, st):
+        if _in_list_zone(self._mouse_x, self._mouse_y, state):
             if self._last_cursor:
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
             return
-        is_clamped = handle and (st.view.width_clamped or st.view.height_clamped)
+        is_clamped = handle and (state.view.width_clamped or state.view.height_clamped)
         cursor = "HAND" if is_clamped else _CURSOR_MAP.get(handle, "DEFAULT")
         if cursor != self._last_cursor:
             context.window.cursor_modal_set(cursor)
             self._last_cursor = cursor
 
     def _get_handle_at(self, context: Context, event: Event) -> str | None:
-        st = self._st
-        if not st:
+        state = self._state
+        if not state:
             return None
         addon = context.preferences.addons.get(__package__)
         if not addon:
             return None
         corner = addon.preferences.settings.position
         ui_scale = _get_ui_scale()
-        return _get_resize_handle(st, corner, self._mx, self._my, ui_scale)
+        return _get_resize_handle(state, corner, self._mouse_x, self._mouse_y, ui_scale)
 
     def _resize_apply_delta(self, context: Context, event: Event) -> None:
         addon = context.preferences.addons.get(__package__)
@@ -2039,8 +2066,8 @@ class NODEMAP_OT_navigate(Operator):
         if not self._resize_start_values:
             return
         w0, h0 = self._resize_start_values
-        dx = self._mx - self._resize_start_mouse[0]
-        dy = self._my - self._resize_start_mouse[1]
+        dx = self._mouse_x - self._resize_start_mouse[0]
+        dy = self._mouse_y - self._resize_start_mouse[1]
         corner = settings.position
 
         ui_scale = _get_ui_scale()
@@ -2049,10 +2076,10 @@ class NODEMAP_OT_navigate(Operator):
 
         safe_w = ex - sx
         safe_h = ey - sy
-        max_mw_pct = settings.max_width_pct / 100.0
-        max_mh_pct = settings.max_height_pct / 100.0
-        max_w = max(MIN_MAP_WIDTH, int((safe_w - 2 * x_margin) * max_mw_pct))
-        max_h = max(MIN_MAP_HEIGHT, int((safe_h - y_margin - margin) * max_mh_pct))
+        max_width_pct = settings.max_width_pct / 100.0
+        max_height_pct = settings.max_height_pct / 100.0
+        max_w = max(MIN_MAP_WIDTH, int((safe_w - 2 * x_margin) * max_width_pct))
+        max_h = max(MIN_MAP_HEIGHT, int((safe_h - y_margin - margin) * max_height_pct))
 
         # Suppress property update callbacks during drag to avoid clearing
         # tree_data, which causes a one-frame flash while recompiling.
@@ -2076,31 +2103,31 @@ class NODEMAP_OT_navigate(Operator):
         finally:
             _pref_mod._suppress_update = False
 
-        st = self._st
-        if not st:
+        state = self._state
+        if not state:
             return
-        st.interaction.hovered_handle = self._resize_handle
-        st.view.width_clamped = settings.minimap_width >= max_w or settings.minimap_width <= MIN_MAP_WIDTH
-        st.view.height_clamped = settings.minimap_height >= max_h or settings.minimap_height <= MIN_MAP_HEIGHT
+        state.interaction.hovered_handle = self._resize_handle
+        state.view.width_clamped = settings.minimap_width >= max_w or settings.minimap_width <= MIN_MAP_WIDTH
+        state.view.height_clamped = settings.minimap_height >= max_h or settings.minimap_height <= MIN_MAP_HEIGHT
 
     def _apply_list_width_drag(self, context: Context) -> None:
         """Update the type-list percent width from the current mouse delta."""
-        st = self._st
+        state = self._state
         addon = context.preferences.addons.get(__package__)
-        if not st or not addon:
+        if not state or not addon:
             return
         settings = addon.preferences.settings
-        if self._list_width_start_mw <= 0:
+        if self._list_width_start_map_w <= 0:
             return
-        dx = self._mx - self._list_width_start_x
-        mw = self._list_width_start_mw
+        dx = self._mouse_x - self._list_width_start_x
+        map_w = self._list_width_start_map_w
         ui_scale = _get_ui_scale()
         min_w = _TYPE_LIST_MIN_WIDTH * ui_scale
-        max_w = mw * _TYPE_LIST_MAX_WIDTH_PCT
-        start_w = mw * (self._list_width_start_pct / 100.0)
+        max_w = map_w * _TYPE_LIST_MAX_WIDTH_PCT
+        start_w = map_w * (self._list_width_start_pct / 100.0)
         start_w = min(max(start_w, min_w), max_w)
         new_w = min(max(start_w + dx, min_w), max_w)
-        new_pct = int(round(new_w / max(mw, 1.0) * 100.0))
+        new_pct = int(round(new_w / max(map_w, 1.0) * 100.0))
         new_pct = min(max(new_pct, 15), 50)
         from . import preferences as _pref_mod
 
@@ -2111,19 +2138,19 @@ class NODEMAP_OT_navigate(Operator):
             _pref_mod._suppress_update = False
         # Preserve framing so the same world rect stays centered in the
         # reduced/expanded available width (100→75 keeps same relative pos).
-        old_w = st.list.width
+        old_w = state.list.list_width
         if abs(new_w - old_w) >= 0.5:
             from .transforms import _preserve_view_for_list_width
 
-            _preserve_view_for_list_width(st, old_w, new_w, ui_scale)
+            _preserve_view_for_list_width(state, old_w, new_w, ui_scale)
         # Drive the zone width live (per-pixel) so the pill tracks the cursor
         # without the integer-percent quantization or a one-frame zone lag.
-        st.list.drag_width = new_w
-        st.list.width = new_w
-        st.list.width_clamped = new_w <= min_w + 0.5 or new_w >= max_w - 0.5
+        state.list.dragging_width = new_w
+        state.list.list_width = new_w
+        state.list.width_clamped = new_w <= min_w + 0.5 or new_w >= max_w - 0.5
         # Keep state hover in sync so the pill draws during drag.
-        st.interaction.hovered_handle = ResizeHandle.LIST
-        st.interaction.resize_active = ResizeHandle.LIST
+        state.interaction.hovered_handle = ResizeHandle.LIST
+        state.interaction.resize_active = ResizeHandle.LIST
 
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":
@@ -2132,7 +2159,7 @@ class NODEMAP_OT_navigate(Operator):
         self._window_ptr = context.window.as_pointer()
         self._pan_acc = [0.0, 0.0]
         self._redirect_acc = [0.0, 0.0]
-        self._armed_btn = None
+        self._armed_button = None
         self._list_row_pressed = None
         self._list_scroll_pressed = False
         self._list_scroll_grab = 0.0
@@ -2140,7 +2167,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_width_dragging = False
         self._list_width_start_x = 0
         self._list_width_start_pct = 35
-        self._list_width_start_mw = 0.0
+        self._list_width_start_map_w = 0.0
         self._smooth_timer = None
         self._inertia_active = False
         self._inertia_mode = None
@@ -2174,17 +2201,17 @@ class NODEMAP_OT_navigate(Operator):
             del _minimap_window_operators[self._window_ptr]
         logger.debug("cancel: ops_after=%s", list(_minimap_window_operators.keys()))
         self._destroy_timer(context)
-        if self._st is not None:
-            self._st.view.width_clamped = False
-            self._st.view.height_clamped = False
-            self._st.interaction.hovered_handle = None
-            self._st.interaction.resize_active = None
-            self._st.buttons.hovered = None
-            self._st.list.hovered_type_label = None
-            self._st.list.hovered_node = None
-            self._st.interaction.hovered_node = None
-            self._st.list.hovered_scrollbar = False
-            self._st.list.scrollbar_dragging = False
+        if self._state is not None:
+            self._state.view.width_clamped = False
+            self._state.view.height_clamped = False
+            self._state.interaction.hovered_handle = None
+            self._state.interaction.resize_active = None
+            self._state.buttons.hovered_button_id = None
+            self._state.list.hovered_type_label = None
+            self._state.list.hovered_list_row = None
+            self._state.interaction.hovered_node_id = None
+            self._state.list.hovered_scrollbar = False
+            self._state.list.scrollbar_dragging = False
         self._list_row_pressed = None
         self._list_child_pressed = None
         self._list_toggle_pressed = None
@@ -2194,7 +2221,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_width_dragging = False
 
 
-class NODEMAP_OT_OpenPreferences(Operator):
+class NODEMAP_OT_open_preferences(Operator):
     bl_idname = "nodemap.open_pref"
     bl_label = "Open Preferences"
     bl_description = "Open the add-on preferences panel"
@@ -2203,8 +2230,8 @@ class NODEMAP_OT_OpenPreferences(Operator):
         bpy.ops.screen.userpref_show()
         bpy.context.preferences.active_section = "ADDONS"
 
-        wm = context.window_manager
-        wm.addon_search = "Nodemap"
+        window_manager = context.window_manager
+        window_manager.addon_search = "Nodemap"
 
         try:
             bpy.ops.preferences.addon_expand(module="render_commander")
@@ -2221,5 +2248,5 @@ classes = (
     NODEMAP_OT_frame_selected,
     NODEMAP_OT_frame_view,
     NODEMAP_OT_navigate,
-    NODEMAP_OT_OpenPreferences,
+    NODEMAP_OT_open_preferences,
 )

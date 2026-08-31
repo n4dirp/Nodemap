@@ -17,8 +17,8 @@ _EDITOR_FIT_MARGIN: float = 0.15
 MIN_MAP_WIDTH: int = 120
 MIN_MAP_HEIGHT: int = 80
 
-STATS_FONT_ID = 0
-STATS_FONT_SIZE = 10
+TYPE_LIST_FONT_ID = 0
+TYPE_LIST_FONT_SIZE = 10
 _TYPE_LIST_MIN_WIDTH = 70.0
 _TYPE_LIST_MAX_WIDTH_PCT = 0.5
 _LIST_PAD_X = 6.0
@@ -28,6 +28,7 @@ _LIST_COUNT_GAP = 8.0
 _SCROLLBAR_HIT_PAD = 6.0
 _EMPTY_FINGERPRINT = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
 _LIST_ANIM_FRAMES: dict[str, int] = {"FAST": 10, "MEDIUM": 20}
+_LABEL_MARGIN_PX = 12.0
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
@@ -61,35 +62,35 @@ def _get_node_dims(node: bpy.types.Node, ui_scale: float | None = None) -> tuple
         return 100.0, 30.0
     try:
         dims = node.dimensions
-        w = abs(dims[0])
-        if w == 0:
-            w = abs(node.width)
+        node_w = abs(dims[0])
+        if node_w == 0:
+            node_w = abs(node.width)
     except (AttributeError, TypeError, IndexError):
-        w = abs(node.width)
+        node_w = abs(node.width)
 
     try:
         dims = node.dimensions
-        h = abs(dims[1])
-        if h == 0:
-            h = abs(getattr(node, "height", 30.0))
+        node_h = abs(dims[1])
+        if node_h == 0:
+            node_h = abs(getattr(node, "height", 30.0))
     except (AttributeError, TypeError, IndexError):
-        h = abs(getattr(node, "height", 30.0))
+        node_h = abs(getattr(node, "height", 30.0))
 
-    return max(w / ui_scale, 5.0), max(h / ui_scale, 5.0)
+    return max(node_w / ui_scale, 5.0), max(node_h / ui_scale, 5.0)
 
 
 def _get_node_tree_bounds(nodes: bpy.types.Nodes) -> tuple[float, float, float, float]:
     """Compute the bounding box of all nodes in a node tree as (min_x, min_y, max_x, max_y)."""
     min_x = min_y = float("inf")
     max_x = max_y = float("-inf")
-    ui = _get_ui_scale()
+    ui_scale = _get_ui_scale()
     for node in nodes:
-        w, h = _get_node_dims(node, ui)
-        x, y = node.location_absolute.x, node.location_absolute.y
-        min_x = min(min_x, x)
-        max_x = max(max_x, x + w)
-        min_y = min(min_y, y - h)
-        max_y = max(max_y, y)
+        node_w, node_h = _get_node_dims(node, ui_scale)
+        node_x, node_y = node.location_absolute.x, node.location_absolute.y
+        min_x = min(min_x, node_x)
+        max_x = max(max_x, node_x + node_w)
+        min_y = min(min_y, node_y - node_h)
+        max_y = max(max_y, node_y)
 
     if min_x == float("inf"):
         return 0.0, 0.0, 200.0, 200.0
@@ -97,13 +98,12 @@ def _get_node_tree_bounds(nodes: bpy.types.Nodes) -> tuple[float, float, float, 
 
 
 def _expand_bounds_margin(
-    bounds: tuple[float, float, float, float], ui_scale: float, mh: float, padding: float
+    bounds: tuple[float, float, float, float], ui_scale: float, map_h: float, padding: float
 ) -> tuple[float, float, float, float]:
     """Expand tree bounds by a small margin so frame labels stay inside the minimap."""
-    LABEL_MARGIN_PX = 12 * ui_scale
     bbox_h = max(bounds[3] - bounds[1], 1.0)
-    inner_h = max(mh - 2 * padding, 1.0)
-    margin = LABEL_MARGIN_PX * bbox_h / inner_h
+    inner_h = max(map_h - 2 * padding, 1.0)
+    margin = _LABEL_MARGIN_PX * ui_scale * bbox_h / inner_h
     return (bounds[0] - margin - 50, bounds[1] - margin, bounds[2] + margin + 100, bounds[3] + margin)
 
 
@@ -111,11 +111,11 @@ def _find_node_at(nodes: bpy.types.Nodes, tree_x: float, tree_y: float) -> bpy.t
     """Accurately finds hovered node via true box intersection, favoring top-level over frames."""
     best_node = None
     for node in nodes:
-        w, h = _get_node_dims(node)
-        x, y = node.location_absolute.x, node.location_absolute.y
+        node_w, node_h = _get_node_dims(node)
+        node_x, node_y = node.location_absolute.x, node.location_absolute.y
 
         # Checking exact bounds since layout is strictly Y-down
-        if x <= tree_x <= x + w and (y - h) <= tree_y <= y:
+        if node_x <= tree_x <= node_x + node_w and (node_y - node_h) <= tree_y <= node_y:
             if node.type != "FRAME":
                 return node
             else:
@@ -128,14 +128,14 @@ def _get_area_and_region_under_mouse(context, event) -> tuple:
     window = getattr(context, "window", None)
     if not window:
         return None, None
-    mx, my = event.mouse_x, event.mouse_y
+    mouse_x, mouse_y = event.mouse_x, event.mouse_y
     for area in window.screen.areas:
-        if area.x <= mx <= area.x + area.width and area.y <= my <= area.y + area.height:
+        if area.x <= mouse_x <= area.x + area.width and area.y <= mouse_y <= area.y + area.height:
             for region in area.regions:
                 if (
                     region.type == "WINDOW"
-                    and region.x <= mx <= region.x + region.width
-                    and region.y <= my <= region.y + region.height
+                    and region.x <= mouse_x <= region.x + region.width
+                    and region.y <= mouse_y <= region.y + region.height
                 ):
                     return area, region
     return None, None
@@ -151,13 +151,13 @@ def _get_safe_bounds(
     right = region.width
     top = region.height
 
-    for r in area.regions:
-        if r.type == "TOOLS":
-            left = max(left, r.width)
-        elif "ASSET_SHELF" in r.type:
-            bottom = max(bottom, r.height)
-        elif r.type == "UI":
-            right = min(right, region.width - r.width)
+    for sub_region in area.regions:
+        if sub_region.type == "TOOLS":
+            left = max(left, sub_region.width)
+        elif "ASSET_SHELF" in sub_region.type:
+            bottom = max(bottom, sub_region.height)
+        elif sub_region.type == "UI":
+            right = min(right, region.width - sub_region.width)
 
     return int(left), int(bottom), int(right), int(top)
 
@@ -173,25 +173,25 @@ def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, fl
     show_asset_shelf = getattr(space, "show_region_asset_shelf", False)
     show_context_path = getattr(space.overlay, "show_context_path", False)
 
-    MAP_PADDING = 12.0
-    x_margin = MAP_PADDING * ui_scale
+    map_padding = 12.0
+    x_margin = map_padding * ui_scale
     y_margin = x_margin
     margin_bottom = x_margin
 
-    adjusted = (MAP_PADDING + 25) * ui_scale
+    adjusted_margin = (map_padding + 25) * ui_scale
 
     match corner:
         case "TOP_RIGHT" | "TOP_LEFT":
             if show_context_path:
-                y_margin = adjusted
+                y_margin = adjusted_margin
             if is_compositor and show_asset_shelf:
-                margin_bottom = adjusted
+                margin_bottom = adjusted_margin
 
         case "BOTTOM_RIGHT" | "BOTTOM_LEFT":
             if is_compositor and show_asset_shelf:
-                y_margin = adjusted
+                y_margin = adjusted_margin
             if show_context_path:
-                margin_bottom = adjusted
+                margin_bottom = adjusted_margin
 
     return x_margin, y_margin, margin_bottom
 
@@ -203,12 +203,12 @@ def _get_node_initials(name: str) -> str:
         return "?"
     words = name.split()
     if len(words) >= 2:
-        initials = "".join(w[0] for w in words if w[0].isalnum()).upper()
+        initials = "".join(word[0] for word in words if word[0].isalnum()).upper()
         if initials:
             return initials
-    for ch in name:
-        if ch.isalnum():
-            return ch.upper()
+    for character in name:
+        if character.isalnum():
+            return character.upper()
     return name[0].upper()
 
 
@@ -221,42 +221,44 @@ def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: f
     if blf.dimensions(font_id, label)[0] <= max_width:
         return [label]
     lines = []
-    i = 0
-    while i < len(words) and len(lines) < max_lines:
-        line_words = [words[i]]
-        i += 1
-        while i < len(words):
-            candidate = " ".join(line_words + [words[i]])
-            w, _ = blf.dimensions(font_id, candidate)
-            if w > max_width:
+    word_index = 0
+    while word_index < len(words) and len(lines) < max_lines:
+        line_words = [words[word_index]]
+        word_index += 1
+        while word_index < len(words):
+            candidate = " ".join(line_words + [words[word_index]])
+            candidate_width, _ = blf.dimensions(font_id, candidate)
+            if candidate_width > max_width:
                 break
-            line_words.append(words[i])
-            i += 1
+            line_words.append(words[word_index])
+            word_index += 1
         lines.append(" ".join(line_words))
     return lines
 
 
-def _get_type_list_width(settings, st, mw: float, ui_scale: float, font_size: int = STATS_FONT_SIZE) -> float:
-    """Return the type-list zone width as a percentage of *mw* (0 when disabled).
+def _get_type_list_width(
+    settings, minimap_state, map_w: float, ui_scale: float, font_size: int = TYPE_LIST_FONT_SIZE
+) -> float:
+    """Return the type-list zone width as a percentage of *map_w* (0 when disabled).
 
     Width is driven by ``type_list_width_pct`` (``_TYPE_LIST_MIN_WIDTH`` to
     ``_TYPE_LIST_MAX_WIDTH_PCT`` clamp) and does not depend on content
     measurement; content clips or shows extra padding instead.
     Called before the map transform so node framing can reserve the zone.
     """
-    if not settings or not settings.show_type_list:
+    if not settings or not settings.show_type_list or not settings.interactive:
         return 0.0
-    tree_data = st.cache.tree_data
+    tree_data = minimap_state.cache.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
         return 0.0
 
-    pct = settings.type_list_width_pct / 100.0
-    raw = mw * pct
-    return min(max(raw, _TYPE_LIST_MIN_WIDTH * ui_scale), mw * _TYPE_LIST_MAX_WIDTH_PCT)
+    percent = settings.type_list_width_pct / 100.0
+    raw_width = map_w * percent
+    return min(max(raw_width, _TYPE_LIST_MIN_WIDTH * ui_scale), map_w * _TYPE_LIST_MAX_WIDTH_PCT)
 
 
-def start_list_width_animation(st, settings) -> None:
+def start_list_width_animation(minimap_state, settings) -> None:
     """Begin animating the type-list zone width after a toggle-button click.
 
     An expansion defers the target measurement to the draw step because
@@ -270,27 +272,27 @@ def start_list_width_animation(st, settings) -> None:
         pass
     if not settings or not settings.animations:
         return
-    st.list.anim_active = True
-    st.list.anim_from = st.list.width
-    st.list.anim_target = 0.0 if not settings.show_type_list else -1.0
+    minimap_state.list.anim_active = True
+    minimap_state.list.anim_from = minimap_state.list.list_width
+    minimap_state.list.anim_target = 0.0 if not settings.show_type_list else -1.0
     frames = _LIST_ANIM_FRAMES.get(settings.pan_speed, 24)
-    st.list.anim_duration = frames / 60.0
-    st.list.anim_start = time.perf_counter()
+    minimap_state.list.anim_duration = frames / 60.0
+    minimap_state.list.anim_start = time.perf_counter()
 
 
-def _list_anim_tick(st) -> None:
-    st.list.anim_timer = None
-    if st.list.anim_active:
+def _list_anim_tick(minimap_state) -> None:
+    minimap_state.list.anim_timer = None
+    if minimap_state.list.anim_active:
         redraw_ui("NODE_EDITOR")
 
 
-def _schedule_list_anim_redraw(st) -> None:
+def _schedule_list_anim_redraw(minimap_state) -> None:
     """Schedule a one-shot timer tick that forces a redraw while the list animates."""
-    if st.list.anim_timer is not None:
+    if minimap_state.list.anim_timer is not None:
         return
     try:
-        bpy.app.timers.register(lambda: _list_anim_tick(st), first_interval=1 / 60)
-        st.list.anim_timer = True
+        bpy.app.timers.register(lambda: _list_anim_tick(minimap_state), first_interval=1 / 60)
+        minimap_state.list.anim_timer = True
     except (RuntimeError, ValueError):
         pass
 
@@ -307,7 +309,7 @@ def _get_tree_snapshot(
     if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
         return _EMPTY_FINGERPRINT, (0.0, 0.0, 200.0, 200.0), 0
     nodes = node_tree.nodes
-    ui = _get_ui_scale()
+    ui_scale = _get_ui_scale()
 
     loc_sum = 0.0
     width_sum = 0.0
@@ -321,61 +323,61 @@ def _get_tree_snapshot(
     max_x = max_y = float("-inf")
 
     for node in nodes:
-        loc = node.location_absolute
-        x = loc.x
-        y = loc.y
-        loc_sum += x + y
+        node_loc_abs = node.location_absolute
+        node_x = node_loc_abs.x
+        node_y = node_loc_abs.y
+        loc_sum += node_x + node_y
 
-        w_rna = abs(node.width)
+        width_rna = abs(node.width)
         width_sum += node.width
 
         try:
             dims = node.dimensions
-            h_abs = abs(dims[1])
-            w_dim = abs(dims[0])
+            height_raw = abs(dims[1])
+            dimensions_width = abs(dims[0])
         except (AttributeError, TypeError, IndexError):
-            h_abs = abs(getattr(node, "height", 30.0))
-            w_dim = w_rna
-        height_sum += h_abs
+            height_raw = abs(getattr(node, "height", 30.0))
+            dimensions_width = width_rna
+        height_sum += height_raw
 
         if node.mute:
             mute_sum += 1
         if node.hide:
             hide_sum += 1
-            bw, bh = 100.0, 30.0
+            bounds_w, bounds_h = 100.0, 30.0
         else:
-            bw = w_dim if w_dim > 0 else w_rna
-            bh = h_abs if h_abs > 0 else abs(getattr(node, "height", 30.0))
-            bw = max(bw / ui, 5.0)
-            bh = max(bh / ui, 5.0)
+            bounds_w = dimensions_width if dimensions_width > 0 else width_rna
+            bounds_h = height_raw if height_raw > 0 else abs(getattr(node, "height", 30.0))
+            bounds_w = max(bounds_w / ui_scale, 5.0)
+            bounds_h = max(bounds_h / ui_scale, 5.0)
 
         if include_selection and node.select:
             select_sum += 1
         if node.type not in ("FRAME", "REROUTE"):
             content_count += 1
 
-        rx = x + bw
-        by = y - bh
-        if x < min_x:
-            min_x = x
-        if rx > max_x:
-            max_x = rx
-        if by < min_y:
-            min_y = by
-        if y > max_y:
-            max_y = y
+        right_x = node_x + bounds_w
+        bottom_y = node_y - bounds_h
+        if node_x < min_x:
+            min_x = node_x
+        if right_x > max_x:
+            max_x = right_x
+        if bottom_y < min_y:
+            min_y = bottom_y
+        if node_y > max_y:
+            max_y = node_y
 
     links_count = len(node_tree.links) if hasattr(node_tree, "links") else 0
-    active_name = ""
+    active_node_name = ""
     if include_selection:
-        active = nodes.active
-        if active:
-            active_name = active.name
+        active_node = nodes.active
+        if active_node:
+            active_node_name = active_node.name
 
     fingerprint = (
         len(nodes),
         loc_sum,
-        active_name,
+        active_node_name,
         select_sum,
         mute_sum,
         hide_sum,

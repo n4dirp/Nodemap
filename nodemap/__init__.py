@@ -31,24 +31,23 @@ classes = (
 )
 
 _draw_handler = None
-_modal_operator = None
-addon_keymaps: list[tuple[bpy.types.KeyMap, bpy.types.KeyMapItem]] = []
+addon_keymap_bindings: list[tuple[bpy.types.KeyMap, bpy.types.KeyMapItem]] = []
 
 
 def _register_keymaps():
-    wm = bpy.context.window_manager
-    kc = wm.keyconfigs.addon
-    if not kc:
+    window_manager = bpy.context.window_manager
+    addon_keyconfig = window_manager.keyconfigs.addon
+    if not addon_keyconfig:
         return
-    km = kc.keymaps.new(name="Node Editor", space_type="NODE_EDITOR")
-    kmi = km.keymap_items.new("nodemap.toggle", type="M", value="PRESS", ctrl=True)
-    addon_keymaps.append((km, kmi))
+    node_editor_keymap = addon_keyconfig.keymaps.new(name="Node Editor", space_type="NODE_EDITOR")
+    toggle_keymap_item = node_editor_keymap.keymap_items.new("nodemap.toggle", type="M", value="PRESS", ctrl=True)
+    addon_keymap_bindings.append((node_editor_keymap, toggle_keymap_item))
 
 
 def _unregister_keymaps():
-    for km, kmi in addon_keymaps:
-        km.keymap_items.remove(kmi)
-    addon_keymaps.clear()
+    for node_editor_keymap, toggle_keymap_item in addon_keymap_bindings:
+        node_editor_keymap.keymap_items.remove(toggle_keymap_item)
+    addon_keymap_bindings.clear()
 
 
 def register():
@@ -57,7 +56,7 @@ def register():
 
     _update_logger_from_prefs()
 
-    global _draw_handler, _modal_operator
+    global _draw_handler
     _draw_handler = SpaceNodeEditor.draw_handler_add(
         draw_minimap,
         (),
@@ -84,7 +83,7 @@ def unregister():
 
     _unregister_keymaps()
 
-    global _draw_handler, _modal_operator
+    global _draw_handler
     if _draw_handler is not None:
         try:
             SpaceNodeEditor.draw_handler_remove(_draw_handler, "WINDOW")

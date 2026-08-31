@@ -25,11 +25,11 @@ def _compute_frame_all_targets(
 ) -> tuple[float, float, float] | None:
     """Compute target zoom and pan to frame the entire node tree.
 
-    Updates ``st.view.tree_bounds`` immediately (required for correct targets and
-    drawing during animation). Returns ``(zoom, pan_x, pan_y)`` or ``None``
-    when data is unavailable.
+    Updates ``minimap_state.view.tree_bounds`` immediately (required for correct
+    targets and drawing during animation). Returns ``(zoom, pan_x, pan_y)`` or
+    ``None`` when data is unavailable.
     """
-    st = _state(area_ptr)
+    minimap_state = _state(area_ptr)
     if space is None:
         space = bpy.context.space_data
     if region is None:
@@ -42,36 +42,36 @@ def _compute_frame_all_targets(
 
     bounds = _get_node_tree_bounds(node_tree.nodes)
 
-    _, _, _, mh = st.view.rect
-    bounds = _expand_bounds_margin(bounds, _get_ui_scale(), mh, st.view.padding)
-    st.view.tree_bounds = bounds
+    _, _, _, map_h = minimap_state.view.rect
+    bounds = _expand_bounds_margin(bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding)
+    minimap_state.view.tree_bounds = bounds
 
-    addon = bpy.context.preferences.addons.get(__package__)
-    follow = addon and addon.preferences.settings.follow_view
+    addon_prefs_block = bpy.context.preferences.addons.get(__package__)
+    follow = addon_prefs_block and addon_prefs_block.preferences.settings.follow_view
 
     if not follow:
         return 1.0, 0.0, 0.0
 
     visible = _get_visible_rect(space, region)
     if visible:
-        c_min_x = min(bounds[0], visible[0])
-        c_min_y = min(bounds[1], visible[1])
-        c_max_x = max(bounds[2], visible[2])
-        c_max_y = max(bounds[3], visible[3])
+        combined_min_x = min(bounds[0], visible[0])
+        combined_min_y = min(bounds[1], visible[1])
+        combined_max_x = max(bounds[2], visible[2])
+        combined_max_y = max(bounds[3], visible[3])
     else:
-        c_min_x, c_min_y, c_max_x, c_max_y = bounds
+        combined_min_x, combined_min_y, combined_max_x, combined_max_y = bounds
 
-    _, _, inner_w, inner_h, _, _, base_scale, tree_cx, tree_cy = _compute_base_map_geom(st)
+    _, _, inner_w, inner_h, _, _, base_scale, tree_center_x, tree_center_y = _compute_base_map_geom(minimap_state)
 
-    combined_w = max(c_max_x - c_min_x, 1.0)
-    combined_h = max(c_max_y - c_min_y, 1.0)
+    combined_w = max(combined_max_x - combined_min_x, 1.0)
+    combined_h = max(combined_max_y - combined_min_y, 1.0)
     zoom = min(inner_w / (base_scale * combined_w), inner_h / (base_scale * combined_h), 1.0)
 
-    combined_cx = (c_min_x + c_max_x) / 2
-    combined_cy = (c_min_y + c_max_y) / 2
+    combined_cx = (combined_min_x + combined_max_x) / 2
+    combined_cy = (combined_min_y + combined_max_y) / 2
 
-    pan_x = -(combined_cx - tree_cx) * base_scale * zoom
-    pan_y = -(combined_cy - tree_cy) * base_scale * zoom
+    pan_x = -(combined_cx - tree_center_x) * base_scale * zoom
+    pan_y = -(combined_cy - tree_center_y) * base_scale * zoom
     return zoom, pan_x, pan_y
 
 
@@ -88,11 +88,11 @@ def frame_all(
     targets = _compute_frame_all_targets(space, region, area_ptr)
     if targets is None:
         return
-    st = _state(area_ptr)
+    minimap_state = _state(area_ptr)
     zoom, pan_x, pan_y = targets
-    st.view.base_zoom = zoom
-    st.view.zoom = zoom
-    st.view.pan = (pan_x, pan_y)
+    minimap_state.view.anchor_zoom = zoom
+    minimap_state.view.user_zoom = zoom
+    minimap_state.view.pan = (pan_x, pan_y)
     _redraw()
 
 
@@ -105,22 +105,22 @@ def _compute_frame_to_bounds_targets(
 
     Returns ``(zoom, pan_x, pan_y)``.
     """
-    st = _state(area_ptr)
+    minimap_state = _state(area_ptr)
 
-    _, _, inner_w, inner_h, _, _, base_scale, tree_cx, tree_cy = _compute_base_map_geom(st)
+    _, _, inner_w, inner_h, _, _, base_scale, tree_center_x, tree_center_y = _compute_base_map_geom(minimap_state)
 
-    tw = max(target_bounds[2] - target_bounds[0], 1.0)
-    th = max(target_bounds[3] - target_bounds[1], 1.0)
+    target_w = max(target_bounds[2] - target_bounds[0], 1.0)
+    target_h = max(target_bounds[3] - target_bounds[1], 1.0)
     if fill:
-        zoom = min(inner_w / (base_scale * tw), inner_h / (base_scale * th))
+        zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h))
     else:
-        zoom = min(inner_w / (base_scale * tw), inner_h / (base_scale * th), 1.0)
+        zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h), 1.0)
 
     target_cx = (target_bounds[0] + target_bounds[2]) / 2
     target_cy = (target_bounds[1] + target_bounds[3]) / 2
 
-    pan_x = -(target_cx - tree_cx) * base_scale * zoom
-    pan_y = -(target_cy - tree_cy) * base_scale * zoom
+    pan_x = -(target_cx - tree_center_x) * base_scale * zoom
+    pan_y = -(target_cy - tree_center_y) * base_scale * zoom
     return zoom, pan_x, pan_y
 
 
@@ -135,19 +135,19 @@ def _frame_to_bounds(
     (one axis may clip); when False the bounds frame within the minimap
     (empty space may remain).
     """
-    st = _state(area_ptr)
+    minimap_state = _state(area_ptr)
     zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(target_bounds, fill, area_ptr)
-    st.view.base_zoom = zoom
-    st.view.zoom = zoom
-    st.view.pan = (pan_x, pan_y)
+    minimap_state.view.anchor_zoom = zoom
+    minimap_state.view.user_zoom = zoom
+    minimap_state.view.pan = (pan_x, pan_y)
     _redraw()
 
 
 def _compute_center_pan(tree_x: float, tree_y: float, area_ptr: int | None = None) -> tuple[float, float]:
     """Compute minimap pan values that center the given tree point, keeping zoom."""
-    st = _state(area_ptr)
-    _, _, scale, tree_cx, tree_cy = _compute_map_transform(st)
-    return -(tree_x - tree_cx) * scale, -(tree_y - tree_cy) * scale
+    minimap_state = _state(area_ptr)
+    _, _, scale, tree_center_x, tree_center_y = _compute_map_transform(minimap_state)
+    return -(tree_x - tree_center_x) * scale, -(tree_y - tree_center_y) * scale
 
 
 def _get_selected_bounds(nodes) -> tuple[float, float, float, float] | None:
@@ -157,12 +157,12 @@ def _get_selected_bounds(nodes) -> tuple[float, float, float, float] | None:
     for node in nodes:
         if not node.select:
             continue
-        w, h = _get_node_dims(node)
-        x, y = node.location_absolute.x, node.location_absolute.y
-        min_x = min(min_x, x)
-        max_x = max(max_x, x + w)
-        min_y = min(min_y, y - h)
-        max_y = max(max_y, y)
+        node_w, node_h = _get_node_dims(node)
+        node_x, node_y = node.location_absolute.x, node.location_absolute.y
+        min_x = min(min_x, node_x)
+        max_x = max(max_x, node_x + node_w)
+        min_y = min(min_y, node_y - node_h)
+        max_y = max(max_y, node_y)
     if min_x == float("inf"):
         return None
     return min_x, min_y, max_x, max_y
@@ -179,7 +179,7 @@ def _compute_frame_selected_targets(
     zoom should be kept (single regular node selected). Returns ``None`` when
     nothing is selected or data is unavailable.
     """
-    st = _state(area_ptr)
+    minimap_state = _state(area_ptr)
     if space is None:
         space = bpy.context.space_data
     if not space or space.type != "NODE_EDITOR":
@@ -197,10 +197,10 @@ def _compute_frame_selected_targets(
         return None
     min_x, min_y, max_x, max_y = bounds
 
-    rect = st.view.rect
-    _, _, mw, mh = rect
-    st.view.tree_bounds = _expand_bounds_margin(
-        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.view.padding
+    rect = minimap_state.view.rect
+    _, _, map_w, map_h = rect
+    minimap_state.view.tree_bounds = _expand_bounds_margin(
+        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), map_h, minimap_state.view.inner_padding
     )
 
     if len(selected) > 1 or selected[0].type == "FRAME":
@@ -246,24 +246,24 @@ def _compute_editor_frame_selected_targets(
     min_x, min_y, max_x, max_y = bounds
     sel_cx = (min_x + max_x) / 2
     sel_cy = (min_y + max_y) / 2
-    vw = visible[2] - visible[0]
-    vh = visible[3] - visible[1]
+    viewport_w = visible[2] - visible[0]
+    viewport_h = visible[3] - visible[1]
 
     if len(selected) > 1 or selected[0].type == "FRAME":
-        bw = max(max_x - min_x, 1.0)
-        bh = max(max_y - min_y, 1.0)
-        mx = bw * _EDITOR_FIT_MARGIN
-        my = bh * _EDITOR_FIT_MARGIN
-        left, bottom, right, top = min_x - mx, min_y - my, max_x + mx, max_y + my
+        bounds_w = max(max_x - min_x, 1.0)
+        bounds_h = max(max_y - min_y, 1.0)
+        margin_x = bounds_w * _EDITOR_FIT_MARGIN
+        margin_y = bounds_h * _EDITOR_FIT_MARGIN
+        left, bottom, right, top = min_x - margin_x, min_y - margin_y, max_x + margin_x, max_y + margin_y
 
         # Limit zoom-in so tiny selections do not magnify excessively.
-        hw = max((right - left) / 2, vw / MAX_FRAME_ZOOM / 2)
-        hh = max((top - bottom) / 2, vh / MAX_FRAME_ZOOM / 2)
+        half_w = max((right - left) / 2, viewport_w / MAX_FRAME_ZOOM / 2)
+        half_h = max((top - bottom) / 2, viewport_h / MAX_FRAME_ZOOM / 2)
         cx = (left + right) / 2
         cy = (bottom + top) / 2
-        return cx - hw, cy - hh, cx + hw, cy + hh
+        return cx - half_w, cy - half_h, cx + half_w, cy + half_h
 
-    return sel_cx - vw / 2, sel_cy - vh / 2, sel_cx + vw / 2, sel_cy + vh / 2
+    return sel_cx - viewport_w / 2, sel_cy - viewport_h / 2, sel_cx + viewport_w / 2, sel_cy + viewport_h / 2
 
 
 def frame_selected(
@@ -280,11 +280,11 @@ def frame_selected(
     if targets is None:
         return
     zoom, pan_x, pan_y = targets
-    st = _state(area_ptr)
+    minimap_state = _state(area_ptr)
     if zoom is not None:
-        st.view.base_zoom = zoom
-        st.view.zoom = zoom
-    st.view.pan = (pan_x, pan_y)
+        minimap_state.view.anchor_zoom = zoom
+        minimap_state.view.user_zoom = zoom
+    minimap_state.view.pan = (pan_x, pan_y)
     _redraw()
 
 
@@ -294,7 +294,7 @@ def frame_view(
     area_ptr: int | None = None,
 ) -> None:
     """Adjust minimap zoom/pan to frame the current editor viewport."""
-    st = _state(area_ptr)
+    minimap_state = _state(area_ptr)
     if space is None:
         space = bpy.context.space_data
     if region is None:
@@ -309,13 +309,13 @@ def frame_view(
     if not visible:
         return
 
-    addon = bpy.context.preferences.addons.get(__package__)
-    fill = addon and addon.preferences.settings.frame_view_fill
+    addon_prefs_block = bpy.context.preferences.addons.get(__package__)
+    fill = addon_prefs_block and addon_prefs_block.preferences.settings.frame_view_fill
 
-    rect = st.view.rect
-    _, _, mw, mh = rect
-    st.view.tree_bounds = _expand_bounds_margin(
-        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), mh, st.view.padding
+    rect = minimap_state.view.rect
+    _, _, map_w, map_h = rect
+    minimap_state.view.tree_bounds = _expand_bounds_margin(
+        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), map_h, minimap_state.view.inner_padding
     )
     _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
 
