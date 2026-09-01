@@ -1,3 +1,5 @@
+"""Provide the default preset for the minimap."""
+
 import bpy
 
 addon_id = next((ext.module for ext in bpy.context.preferences.addons if ext.module.endswith("nodemap")), "nodemap")
