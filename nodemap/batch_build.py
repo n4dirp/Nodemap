@@ -605,6 +605,37 @@ def _ensure_minimap_batches(
     pill_h = max(1, tree_data["socket_ph_base"] * bake_scale * ui_scale)
     pill_w = pill_h
     minimap_state.cache.socket_ph = pill_h
+    # Extend node labels with reroute labels before socket batch cull check,
+    # keeping a single BLF measurement pass for all text.
+    reroute_labels_raw = tree_data.get("reroute_labels_raw") if tree_data.get("reroute_on") else None
+    if reroute_labels_raw and scale >= _MIN_SOCKET_SCALE:
+        # Quick visibility cull for labels: skip far off-screen reroutes
+        # to avoid BLF measurement overhead.
+        for entry in reroute_labels_raw:
+            tree_x = entry.get("tree_x")
+            tree_y = entry.get("tree_y")
+            if tree_x is None or tree_y is None:
+                continue
+            baked_x = (tree_x - origin_x) * bake_scale
+            baked_y = (tree_y - origin_y) * bake_scale
+            if (
+                baked_x < cull_left - 60
+                or baked_x > cull_right + 60
+                or baked_y < cull_bottom - 20
+                or baked_y > cull_top + 40
+            ):
+                continue
+            text = entry.get("text", "")
+            if not text:
+                continue
+            text_color = entry.get("color") or _alpha_mul((1.0, 1.0, 1.0, 1.0), 1.0)
+            font_size = max(6, min(11, int(10 * ui_scale)))
+            blf.size(font_id, font_size)
+            text_w, text_h = blf.dimensions(font_id, text)
+            label_x = baked_x - text_w * 0.5
+            label_y = baked_y + pill_h * 0.5 + 3.0 * ui_scale
+            minimap_state.cache.node_labels.append((font_id, text, label_x, label_y, text_color, font_size))
+
     if tree_data["socket_items"] and scale >= _MIN_SOCKET_SCALE:
         half_w = pill_w / 2
         half_h = pill_h / 2
@@ -658,6 +689,70 @@ def _ensure_minimap_batches(
             minimap_state.cache.socket_batch = None
     else:
         minimap_state.cache.socket_batch = None
+
+    # Reroutes — pills like sockets, auto-hidden below the minimum scale
+    reroute_items = tree_data.get("reroute_items") if tree_data.get("reroute_on") else None
+    if reroute_items and scale >= _MIN_SOCKET_SCALE:
+        half_w = pill_w / 2
+        half_h = pill_h / 2
+        pill_radius = pill_h / 2
+        reroute_pos: list[tuple[float, float, float]] = []
+        reroute_uv: list[tuple[float, float]] = []
+        reroute_half_size: list[tuple[float, float]] = []
+        reroute_radius: list[float] = []
+        reroute_color_list: list[tuple[float, float, float, float]] = []
+        for color, positions in reroute_items.items():
+            linear_color = _srgb_to_linear(color)
+            for rx_tree, ry_tree in positions:
+                baked_x = (rx_tree - origin_x) * bake_scale
+                baked_y = (ry_tree - origin_y) * bake_scale
+                # Cull far off-screen reroutes before emitting vertices.
+                if (
+                    baked_x < cull_left - half_w - 2
+                    or baked_x > cull_right + half_w + 2
+                    or baked_y < cull_bottom - half_h - 2
+                    or baked_y > cull_top + half_h + 2
+                ):
+                    continue
+                pad = 1.5
+                reroute_pos.extend(
+                    [
+                        (baked_x - half_w - pad, baked_y - half_h - pad, 0.0),
+                        (baked_x + half_w + pad, baked_y - half_h - pad, 0.0),
+                        (baked_x + half_w + pad, baked_y + half_h + pad, 0.0),
+                        (baked_x - half_w - pad, baked_y + half_h + pad, 0.0),
+                    ]
+                )
+                reroute_uv.extend(
+                    [
+                        (-half_w - pad, -half_h - pad),
+                        (half_w + pad, -half_h - pad),
+                        (half_w + pad, half_h + pad),
+                        (-half_w - pad, half_h + pad),
+                    ]
+                )
+                reroute_half_size.extend([(half_w, half_h)] * 4)
+                reroute_radius.extend([pill_radius] * 4)
+                reroute_color_list.extend([linear_color] * 4)
+        num_reroutes = len(reroute_pos) // 4
+        if num_reroutes > 0:
+            shader = _get_batch_rect_shader()
+            minimap_state.cache.reroute_batch = batch_for_shader(
+                shader,
+                "TRIS",
+                {
+                    "pos": reroute_pos,
+                    "uv": reroute_uv,
+                    "halfSize": reroute_half_size,
+                    "radius": reroute_radius,
+                    "color": reroute_color_list,
+                },
+                indices=_create_quad_indices(num_reroutes),
+            )
+        else:
+            minimap_state.cache.reroute_batch = None
+    else:
+        minimap_state.cache.reroute_batch = None
 
     # Wires and markers get their own cache generation so position-only
     # refreshes (drags) skip the O(links) pill rebake entirely. Wires share

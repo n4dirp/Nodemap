@@ -399,6 +399,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
+    show_reroutes: BoolProperty(
+        name="Reroute Nodes",
+        description="Display reroute nodes as colored pills",
+        default=True,
+        update=_update_invalidate_all,
+    )
+
     show_node_outline: BoolProperty(
         name="Node Outline",
         description="Display borders around nodes, highlighting selection and active state",
@@ -632,6 +639,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "show_node_colors", text="Node Colors")
         col.prop(settings, "show_node_outline", text="Node Outline")
         col.prop(settings, "show_socket_indicators", text="Node Sockets")
+        col.prop(settings, "show_reroutes", text="Reroute Nodes")
         col.prop(settings, "show_node_count", text="Total Count")
         col.prop(settings, "show_type_list", text="Type List")
         col.prop(settings, "show_wires", text="Wires")

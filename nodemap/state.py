@@ -110,6 +110,7 @@ class RenderCache:
     marker_batches: list | None = None
     socket_batch: Any = None
     socket_shadow: list | None = None
+    reroute_batch: Any = None
     list_key: Any = None
     list_entries: list | None = None
     list_layout: dict | None = None
@@ -142,6 +143,7 @@ class RenderCache:
         self.marker_batches = None
         self.socket_batch = None
         self.socket_shadow = None
+        self.reroute_batch = None
         self.batch_key = None
         self.wire_key = None
         self.list_key = None
@@ -168,6 +170,7 @@ class RenderCache:
         self.marker_batches = None
         self.socket_batch = None
         self.socket_shadow = None
+        self.reroute_batch = None
         self.batch_key = None
         self.wire_key = None
         self.list_key = None

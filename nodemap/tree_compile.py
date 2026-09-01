@@ -118,6 +118,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     show_frames = settings.show_frames
     show_node_labels = settings.show_node_labels
     show_socket_indicators = settings.show_socket_indicators
+    show_reroutes = getattr(settings, "show_reroutes", True)
     show_wires = settings.show_wires
     show_wire_color = settings.show_wire_color
     wire_opacity_mult = settings.wire_opacity
@@ -131,6 +132,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     unselected_nodes = []
     selected_nodes = []
     active_node_item = None
+    reroute_nodes: list = []
     node_data: dict[int, dict] = {}
     group_markers: dict[tuple, list[tuple[float, float, float]]] = {}
     type_counts: dict[str, int] = {}
@@ -168,7 +170,8 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
             if show_frames:
                 frames.append(node)
         elif node.type == "REROUTE":
-            pass
+            if show_reroutes:
+                reroute_nodes.append(node)
         else:
             if node.select:
                 if node == active_node:
@@ -469,38 +472,82 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     tree_data["socket_items_by_node"] = socket_items_by_node
 
     # ------------------------------------------------------------------
-    # REROUTE wire endpoints (not in sorted_items, handled separately)
+    # REROUTE pills and wire endpoints (shared draw-color pass)
     # ------------------------------------------------------------------
     reroute_meta: dict[str, tuple[float, float, tuple[float, float, float, float]]] = {}
-    if show_wires:
+    reroute_items: dict[tuple, list[tuple[float, float]]] = {}
+    reroute_by_name: dict[str, tuple[tuple[float, float, float, float], float, float]] = {}
+    reroute_half: dict[str, tuple[float, float]] = {}
+    reroute_labels_raw: list[dict] = []
+
+    # Single iteration over REROUTE nodes to share the draw_color() call for
+    # both pill color (master_alpha) and wire color (wire_alpha). When both
+    # toggles are off the loop is skipped entirely.
+    if show_reroutes or show_wires:
         for node in nodes:
             if node.type != "REROUTE":
                 continue
             node_ptr = node.as_pointer()
-            node_w, node_h = node_data[node_ptr]["dims"]
-            top_x, top_y = node_data[node_ptr]["loc"]
-            node_center_x = top_x + node_w / 2
-            node_center_y = top_y - node_h / 2
+            dims = node_data.get(node_ptr)
+            if dims is None:
+                continue
+            node_w, node_h = dims["dims"]
+            top_x, top_y = dims["loc"]
+            center_x = top_x + node_w / 2
+            center_y = top_y - node_h / 2
 
-            wire_color = default_wire_color
+            # Resolve color rgb once; derive pill vs wire alpha variants.
             if show_wire_color:
                 try:
-                    socket = node.outputs[0] if node.outputs else node.inputs[0]
-                    draw_color_rgba = socket.draw_color(bpy.context, node)
-                    wire_color = (
-                        float(draw_color_rgba[0]),
-                        float(draw_color_rgba[1]),
-                        float(draw_color_rgba[2]),
-                        wire_alpha,
-                    )
+                    sock = node.outputs[0] if node.outputs else (node.inputs[0] if node.inputs else None)
+                    if sock is not None:
+                        draw_color_rgba = sock.draw_color(bpy.context, node)
+                        rgb = (float(draw_color_rgba[0]), float(draw_color_rgba[1]), float(draw_color_rgba[2]))
+                    else:
+                        rgb = default_socket_color[:3]
                 except Exception:
-                    pass
+                    rgb = default_socket_color[:3]
+            else:
+                rgb = default_socket_color[:3]
+            pill_color = (rgb[0], rgb[1], rgb[2], master_alpha)
+            wire_color = (rgb[0], rgb[1], rgb[2], wire_alpha)
 
-            reroute_meta[node.name] = (node_w / 2, node_h / 2, wire_color)
-            out_pos[node.name] = {s.identifier: (node_center_x, node_center_y, wire_color) for s in node.outputs}
-            in_pos[node.name] = {s.identifier: (node_center_x, node_center_y, wire_color) for s in node.inputs}
+            if show_wires:
+                reroute_meta[node.name] = (node_w / 2, node_h / 2, wire_color)
+                out_pos[node.name] = {s.identifier: (center_x, center_y, wire_color) for s in node.outputs}
+                in_pos[node.name] = {s.identifier: (center_x, center_y, wire_color) for s in node.inputs}
+
+            if show_reroutes:
+                reroute_by_name[node.name] = (pill_color, center_x, center_y)
+                reroute_half[node.name] = (node_w / 2, node_h / 2)
+                reroute_items.setdefault(pill_color, []).append((center_x, center_y))
+                if show_node_labels:
+                    label = getattr(node, "label", "") or ""
+                    if label:
+                        if not compact_labels:
+                            label_text = label
+                        else:
+                            initials = _get_node_initials(label)
+                            label_text = initials if initials else label
+                        if label_text:
+                            mute_alpha = 0.35 if getattr(node, "mute", False) else 1.0
+                            text_color = _alpha_mul(colors["label"], mute_alpha * master_alpha)
+                            reroute_labels_raw.append(
+                                {
+                                    "text": label_text,
+                                    "tree_x": center_x,
+                                    "tree_y": center_y,
+                                    "color": text_color,
+                                    "node_name": node.name,
+                                }
+                            )
 
     tree_data["reroute_meta"] = reroute_meta
+    tree_data["reroute_items"] = reroute_items
+    tree_data["reroute_by_name"] = reroute_by_name
+    tree_data["reroute_half"] = reroute_half
+    tree_data["reroute_labels_raw"] = reroute_labels_raw
+    tree_data["reroute_on"] = show_reroutes
 
     # ------------------------------------------------------------------
     # Wire connections (using wire endpoints)
@@ -607,6 +654,18 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
     if show_indicators and by_node is None:
         return False
 
+    show_reroutes_flag = bool(tree_data.get("reroute_on"))
+    reroute_by_name: dict[str, tuple] = tree_data.get("reroute_by_name", {})  # type: ignore[assignment]
+    reroute_half: dict[str, tuple[float, float]] = tree_data.get("reroute_half", {})  # type: ignore[assignment]
+    reroute_labels_raw: list[dict] = tree_data.get("reroute_labels_raw", [])  # type: ignore[assignment]
+    reroute_label_by_name: dict[str, dict] = {}
+    if show_reroutes_flag:
+        for entry in reroute_labels_raw:
+            rname = entry.get("node_name")
+            if rname:
+                reroute_label_by_name[rname] = entry
+    reroute_moved = False
+
     moved_any = False
 
     for node in node_tree.nodes:
@@ -618,26 +677,51 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
         node_type = node.type
         if node_type == "REROUTE":
             reroute_entry = reroute_meta.get(node.name)
-            if reroute_entry:
-                hw_off, hh_off, wire_color = reroute_entry
+            pill_entry = reroute_by_name.get(node.name) if show_reroutes_flag else None
+            if reroute_entry or pill_entry:
+                if reroute_entry is not None:
+                    hw_off, hh_off = reroute_entry[0], reroute_entry[1]
+                else:
+                    half = reroute_half.get(node.name)
+                    if half is None:
+                        continue
+                    hw_off, hh_off = half
                 node_center_x = node_left_x + hw_off
                 node_center_y = node_top_y - hh_off
-                out_entry = out_pos.get(node.name)
-                in_entry = in_pos.get(node.name)
-                # Flag movement so the tail re-resolves wire_items and
-                # bumps the position generation; reroutes have no info
-                # entry, so nothing else would mark them as moved.
-                entry = out_entry or in_entry
-                if entry:
-                    old_x, old_y, _old_col = next(iter(entry.values()))
-                    if old_x != node_center_x or old_y != node_center_y:
-                        moved_any = True
-                if out_entry is not None:
-                    for socket_identifier in out_entry:
-                        out_entry[socket_identifier] = (node_center_x, node_center_y, wire_color)
-                if in_entry is not None:
-                    for socket_identifier in in_entry:
-                        in_entry[socket_identifier] = (node_center_x, node_center_y, wire_color)
+                # Check movement against either wire or pill position.
+                moved_reroute = False
+                if pill_entry is not None:
+                    _, old_cx, old_cy = pill_entry
+                    if old_cx != node_center_x or old_cy != node_center_y:
+                        moved_reroute = True
+                elif reroute_entry is not None:
+                    out_entry_tmp = out_pos.get(node.name)
+                    in_entry_tmp = in_pos.get(node.name)
+                    entry = out_entry_tmp or in_entry_tmp
+                    if entry:
+                        old_x, old_y, _old_col = next(iter(entry.values()))
+                        if old_x != node_center_x or old_y != node_center_y:
+                            moved_reroute = True
+                if moved_reroute:
+                    moved_any = True
+                    reroute_moved = True
+                if reroute_entry:
+                    _, _, wire_color = reroute_entry
+                    out_entry = out_pos.get(node.name)
+                    in_entry = in_pos.get(node.name)
+                    if out_entry is not None:
+                        for socket_identifier in out_entry:
+                            out_entry[socket_identifier] = (node_center_x, node_center_y, wire_color)
+                    if in_entry is not None:
+                        for socket_identifier in in_entry:
+                            in_entry[socket_identifier] = (node_center_x, node_center_y, wire_color)
+                if pill_entry is not None:
+                    pill_color, _, _ = pill_entry
+                    reroute_by_name[node.name] = (pill_color, node_center_x, node_center_y)
+                    label_entry = reroute_label_by_name.get(node.name)
+                    if label_entry is not None:
+                        label_entry["tree_x"] = node_center_x
+                        label_entry["tree_y"] = node_center_y
             continue
 
         info = node_info_by_ptr.get(node_ptr)
@@ -717,6 +801,12 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
     if moved_any:
         if show_indicators:
             tree_data["socket_items"] = _group_socket_dots(by_node)
+        if reroute_moved and show_reroutes_flag:
+            # Regroup pills by color from updated by_name (single O(R) pass).
+            grouped: dict[tuple, list[tuple[float, float]]] = {}
+            for pill_color, cx, cy in reroute_by_name.values():
+                grouped.setdefault(pill_color, []).append((cx, cy))
+            tree_data["reroute_items"] = grouped
         raw_links = tree_data.get("raw_links")
         if raw_links is None:
             raw_links = _extract_raw_links(node_tree)

@@ -879,7 +879,8 @@ def draw_minimap() -> None:
 
     logger.trace(
         "SETTINGS %d nodes | show_wires=%d show_node_labels=%d compact_labels=%d"
-        " show_node_colors=%d socket_indicators=%d wire_color=%d frame_labels=%d",
+        " show_node_colors=%d socket_indicators=%d wire_color=%d frame_labels=%d"
+        " show_reroutes=%d",
         current_fingerprint[0],
         settings.show_wires,
         settings.show_node_labels,
@@ -888,6 +889,7 @@ def draw_minimap() -> None:
         settings.show_socket_indicators,
         settings.show_wire_color,
         settings.show_frame_labels,
+        getattr(settings, "show_reroutes", True),
     )
 
     ui_scale = _get_ui_scale()
@@ -1214,6 +1216,17 @@ def draw_minimap() -> None:
                     gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
                 )
                 socket_batch.draw(shader)
+
+            # Reroute pills — same SDF as sockets, per-vertex color, batched by color
+            reroute_batch = state.cache.reroute_batch
+            if getattr(settings, "show_reroutes", True) and reroute_batch:
+                shader = _get_batch_rect_shader()
+                shader.bind()
+                shader.uniform_float(
+                    "ModelViewProjectionMatrix",
+                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+                )
+                reroute_batch.draw(shader)
         finally:
             gpu.matrix.pop()
 

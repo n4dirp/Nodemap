@@ -70,6 +70,7 @@ class NODEMAP_PT_popup(Panel):
             grid.prop(settings, "show_node_labels", text="Node Labels")
             grid.prop(settings, "show_node_outline", text="Node Outline")
             grid.prop(settings, "show_socket_indicators", text="Node Sockets")
+            grid.prop(settings, "show_reroutes", text="Reroute Nodes")
             grid.prop(settings, "show_node_count", text="Total Count")
             sub = grid.row()
             sub.active = settings.interactive
