@@ -1,4 +1,8 @@
-"""Nodemap popover in the topbar."""
+"""Provide a Nodemap popover in the top bar.
+
+Provide the Node Editor header button and the ``NODEMAP_PT_popup`` popover
+that exposes minimap settings, frame actions, and preset switching.
+"""
 
 from bl_ui.utils import PresetPanel
 from bpy.types import Panel
@@ -8,6 +12,8 @@ from .state import _state
 
 
 class NODEMAP_PT_popup(Panel):
+    """Expose minimap display and interaction settings."""
+
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
@@ -15,9 +21,11 @@ class NODEMAP_PT_popup(Panel):
 
     @classmethod
     def poll(cls, context):
+        """Return True only inside the Node Editor."""
         return context.space_data.type == "NODE_EDITOR"
 
     def draw(self, context):
+        """Draw popover sections for framing, object visibility, and options."""
         layout = self.layout
         prefs = context.preferences.addons.get(__package__).preferences
         settings = prefs.settings
@@ -93,6 +101,7 @@ class NODEMAP_PT_popup(Panel):
 
 
 def draw_minimap_header_button(self, context):
+    """Append the minimap toggle and popover button to the Node Editor header."""
     if context.area.type != "NODE_EDITOR":
         return
     layout = self.layout
@@ -107,6 +116,8 @@ def draw_minimap_header_button(self, context):
 
 
 class NODEMAP_PT_presets(PresetPanel, Panel):
+    """Manage presets for saving and applying minimap configurations."""
+
     bl_label = "Nodemap Presets"
     preset_subdir = PRESET_SUBDIR
     preset_operator = "script.execute_preset"

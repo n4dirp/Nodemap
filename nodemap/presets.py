@@ -1,4 +1,4 @@
-"""Global presets for the nodemap popup settings."""
+"""Provide global presets for the minimap popup settings."""
 
 from bl_operators.presets import AddPresetBase
 from bpy.types import Operator
@@ -15,6 +15,8 @@ ADDON_ID_DEFINE_SNIPPET = (
 
 
 class NODEMAP_OT_preset(AddPresetBase, Operator):
+    """Save or remove a minimap preset for the current settings."""
+
     bl_idname = "nodemap.preset_add"
     bl_label = "Add Nodemap Preset"
     bl_description = "Add or remove a preset"
@@ -24,7 +26,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings = bpy.context.preferences.addons[addon_id].preferences.settings",
     ]
     preset_values = [
-        # Layout
+        # Layout.
         "settings.position",
         "settings.show_node_count",
         "settings.show_frames",
@@ -43,7 +45,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_node_labels",
         "settings.compact_node_labels",
         "settings.show_frame_labels",
-        # Theme
+        # Theme.
         "settings.opacity",
         "settings.viewport_fill_rect",
         "settings.viewport_fill_color",
@@ -60,7 +62,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.wire_curvature",
         "settings.wire_thickness",
         "settings.wire_opacity",
-        # Options
+        # Options.
         "settings.interactive",
         "settings.follow_view",
     ]

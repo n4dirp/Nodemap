@@ -1,4 +1,4 @@
-"""GPU drawing helpers for nodes minimap overlay."""
+"""Provide GPU drawing helpers for the minimap overlay."""
 
 import math
 from typing import Any
@@ -389,7 +389,7 @@ def _get_sdf_border_shader() -> gpu.types.GPUShader:
 
 
 def _get_sdf_border_varying_sides_shader() -> gpu.types.GPUShader:
-    """Border SDF shader suppressing the vertical stroke on masked sides."""
+    """Return a border SDF shader that suppresses the vertical stroke on masked sides."""
     global _BORDER_SDF_VARYING_SIDES_SHADER
     if _BORDER_SDF_VARYING_SIDES_SHADER is None:
         vert_out = GPUStageInterfaceInfo("border_varying_sides_iface")
@@ -453,7 +453,7 @@ def _get_pill_border_shader() -> gpu.types.GPUShader:
 
 
 def _get_batch_pill_shader() -> gpu.types.GPUShader:
-    """Pill SDF shader taking *halfSize* as a per-vertex attribute (for batching)."""
+    """Return a pill SDF shader that takes *halfSize* as a per-vertex attribute."""
     global _BATCH_PILL_SHADER
     if _BATCH_PILL_SHADER is None:
         vert_out = GPUStageInterfaceInfo("batch_pill_iface")
@@ -475,7 +475,7 @@ def _get_batch_pill_shader() -> gpu.types.GPUShader:
 
 
 def _get_batch_rect_shader() -> gpu.types.GPUShader:
-    """Custom batched rounded rectangle background fill shader."""
+    """Return a batched rounded-rectangle background fill shader."""
     global _BATCH_RECT_SHADER
     if _BATCH_RECT_SHADER is None:
         vert_out = GPUStageInterfaceInfo("batch_rect_iface")
@@ -500,7 +500,7 @@ def _get_batch_rect_shader() -> gpu.types.GPUShader:
 
 
 def _get_batch_rect_border_shader() -> gpu.types.GPUShader:
-    """Custom batched rounded rectangle border shader."""
+    """Return a batched rounded-rectangle border shader."""
     global _BATCH_RECT_BORDER_SHADER
     if _BATCH_RECT_BORDER_SHADER is None:
         vert_out = GPUStageInterfaceInfo("batch_rect_border_iface")
@@ -527,7 +527,7 @@ def _get_batch_rect_border_shader() -> gpu.types.GPUShader:
 
 
 def _get_batch_noodle_shader() -> gpu.types.GPUShader:
-    """Batched curved noodle shader measuring distance to each quad's chord."""
+    """Return a batched curved noodle shader that measures distance to each quad's chord."""
 
     global _BATCH_NOODLE_SHADER
     if _BATCH_NOODLE_SHADER is None:
@@ -557,9 +557,9 @@ def _build_pill_batch(
     wires: list[tuple[float, float, float, float]],
     thickness: float,
 ) -> tuple[Any, Any]:
-    """Bake pill-shaped wires into a GPU batch; returns ``(shader, batch)``.
+    """Bake pill-shaped wires into a GPU batch and return ``(shader, batch)``.
 
-    Both are None when *wires* is empty. The color is left as a draw-time
+    Return None for both when *wires* is empty. The color remains a draw-time
     uniform so one batch per distinct color suffices.
     """
     if not wires:
@@ -639,7 +639,7 @@ def _build_noodle_batch(
     wires: list[tuple[float, float, float, float, float, float, float, float]],
     half_thick: float,
 ) -> tuple[Any, Any]:
-    """Bake curved noodle wires as capsule quads; returns ``(shader, batch)``.
+    """Bake curved noodle wires as capsule quads and return ``(shader, batch)``.
 
     Each *wire* is ``(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y)`` in baked space
     defining a cubic Bezier with horizontal handles. The curve is uniformly

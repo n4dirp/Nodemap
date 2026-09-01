@@ -1,4 +1,4 @@
-"""Modal operator for minimap interaction."""
+"""Provide a modal operator for minimap interaction."""
 
 import logging
 
@@ -274,6 +274,7 @@ class NODEMAP_OT_restore_keymap(Operator):
 
     @classmethod
     def poll(cls, context: Context) -> bool:
+        """Return True when the toggle shortcut is missing and can be restored."""
         window_manager = context.window_manager
         user_keyconfig = window_manager.keyconfigs.user
         if not user_keyconfig:
@@ -557,7 +558,7 @@ class NODEMAP_OT_navigate(Operator):
     def _minimap_event_context(self, context: Context):
         """Resolve the shared per-event values used by the event handlers.
 
-        Returns the minimap state, the add-on (if registered), its settings, and
+        Return the minimap state, the add-on (if registered), its settings, and
         whether the cursor is currently over the minimap.
         """
         state = self._state

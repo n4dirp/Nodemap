@@ -28,7 +28,7 @@ logging.Logger.trace = _trace_logger
 
 
 def _update_logger_from_prefs():
-    """Configures the logger based on user preferences (Opt-in logging)."""
+    """Configure the logger based on user preferences (Opt-in logging)."""
     logger = logging.getLogger(__package__)
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
@@ -100,7 +100,7 @@ def _update_invalidate_batches(self, context):
 
 
 class AddonLogFormatter(logging.Formatter):
-    """Custom formatter to provide timestamped and addon-prefixed logs."""
+    """Provide timestamped and addon-prefixed logs."""
 
     def __init__(self, with_level=False):
         super().__init__()
@@ -108,7 +108,7 @@ class AddonLogFormatter(logging.Formatter):
         self.with_level = with_level
 
     def format(self, record):
-        """Formats the log record with relative timestamps."""
+        """Format the log record with relative timestamps."""
         rel_time = record.created - self.start_time
         minutes, seconds = divmod(rel_time, 60)
         timestamp = f"{int(minutes):02d}:{seconds:06.3f}"
@@ -129,7 +129,7 @@ _CLICK_ACTION_ITEMS = [
 
 
 class NODEMAP_PG_settings(PropertyGroup):
-    """Preferences for the Nodes Minimap."""
+    """Store preferences for the Nodes Minimap."""
 
     show_by_default: BoolProperty(
         name="Show by Default",
@@ -527,7 +527,7 @@ class NODEMAP_PG_settings(PropertyGroup):
 
 
 class NODEMAP_AddonPreferences(AddonPreferences):
-    """Add-on preferences for Nodes Minimap."""
+    """Store add-on preferences for the Nodes Minimap."""
 
     bl_idname = __package__
 

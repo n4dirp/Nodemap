@@ -1,4 +1,4 @@
-"""GPU batch building for minimap content."""
+"""Provide GPU batch building for minimap content."""
 
 import logging
 import math
@@ -34,7 +34,7 @@ _CULL_MARGIN_PX = _BATCH_DRIFT_PX + 32.0
 
 
 def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
-    """Helper to populate triangular indices sequentially for quad batches."""
+    """Return triangular indices for quad batches."""
     indices = []
     for i in range(n):
         base = i * 4
@@ -44,14 +44,7 @@ def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
 
 
 def _compute_frame_depths(node_infos: list[dict]) -> dict[int, int]:
-    """Return ``{frame ptr: nesting depth}`` for every frame node.
-
-    Depth 0 is the outermost level; a frame's depth counts how many other
-    frames strictly contain its rectangle (edge-inclusive). Frames are few
-    enough that the quadratic containment scan is trivial. Computed from live
-    node rects here (not tree_compile) so position-only drag patches never
-    leave stale nesting levels.
-    """
+    """Return ``{frame ptr: nesting depth}`` for every frame node."""
     frames = [
         (
             info["ptr"],
@@ -76,16 +69,7 @@ def _compute_frame_depths(node_infos: list[dict]) -> dict[int, int]:
 
 
 def _resolve_frame_label_layout(entries: list[dict], ui_scale: float) -> list[dict]:
-    """Slide colliding frame labels apart, dropping labels that cannot fit.
-
-    Outer frames (lower nesting depth, then higher on screen) place first; a
-    label overlapping an already placed one is pushed down just below the
-    blocker with a one-pixel clearance gap. A label that would need more than
-    half its frame's baked height of travel to clear its blockers is dropped
-    so deep-nesting labels yield to the outer frames instead of drifting away.
-    Returns only the entries that keep collision-free baked-space rects, which
-    the uniform content matrix preserves at any zoom.
-    """
+    """Return frame labels with collisions resolved and unplaceable labels dropped."""
     if not entries:
         return []
     gap = 1.0 * ui_scale
@@ -159,18 +143,7 @@ def _ensure_minimap_batches(
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
 ):
-    """Bake content batches in map-local space, rebuilding only when stale.
-
-    Vertex data is stored relative to ``tree_data["origin"]`` at the bake-time
-    scale, so pan/drag frames only need the matrix transform applied by the
-    caller (see draw_minimap). Rebuilds happen when tree positions change,
-    the scale drifts past the bucket width (radius/thickness/font buckets),
-    styling keys change, or the anchor drifts too far for culling to stay
-    conservative. When *highlight_border* is an RGBA color, nodes whose type
-    matches ``minimap_state.list.hovered_type_label`` (or whose name matches
-    ``minimap_state.interaction.hovered_node_id``) get a separate outside
-    outline instead of recolouring their own border.
-    """
+    """Bake content batches in map-local space, rebuilding only when stale."""
     tree_data = minimap_state.cache.tree_data
     if tree_data is None:
         return
@@ -722,11 +695,7 @@ def _rebuild_wire_marker_batches(
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
 ) -> None:
-    """Bake wire batches (noodle strips when curved, pills otherwise) and group markers.
-
-    Called only when tree structure, UI scale, or the scale bucket changed —
-    never on position-only drag refreshes.
-    """
+    """Bake wire batches and group markers."""
 
     # Wires — cubic noodle strips when curvature is on, straight pills at 0.
     # The user wire_thickness multiplier scales the baked thickness.

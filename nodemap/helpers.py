@@ -1,4 +1,4 @@
-"""Shared helper utilities for node minimap."""
+"""Provide shared helper utilities for the node minimap."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def _get_ui_scale() -> float:
 
 
 def _get_node_dims(node: bpy.types.Node, ui_scale: float | None = None) -> tuple[float, float]:
-    """Robust extraction of width and height ensuring positive float values."""
+    """Return width and height ensuring positive float values."""
     if ui_scale is None:
         ui_scale = _get_ui_scale()
     if getattr(node, "hide", False):
@@ -108,7 +108,7 @@ def _expand_bounds_margin(
 
 
 def _find_node_at(nodes: bpy.types.Nodes, tree_x: float, tree_y: float) -> bpy.types.Node | None:
-    """Accurately finds hovered node via true box intersection, favoring top-level over frames."""
+    """Find the hovered node via true box intersection, favoring top-level over frames."""
     best_node = None
     for node in nodes:
         node_w, node_h = _get_node_dims(node)
@@ -124,7 +124,7 @@ def _find_node_at(nodes: bpy.types.Nodes, tree_x: float, tree_y: float) -> bpy.t
 
 
 def _get_area_and_region_under_mouse(context, event) -> tuple:
-    """Find the area and WINDOW region under the mouse cursor using screen coordinates."""
+    """Return the area and WINDOW region under the mouse cursor."""
     window = getattr(context, "window", None)
     if not window:
         return None, None
@@ -165,9 +165,9 @@ def _get_safe_bounds(
 def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, float, float]:
     """Return ``(x_margin, y_margin, margin_bottom)`` based on corner and visible UI elements.
 
-    Adjusts margins when the breadcrumb context path or compositing asset shelf
-    occupies space near the minimap's corner.
-    ``margin_bottom`` is the additional margin on the edge opposite the header.
+    Adjust margins when the breadcrumb context path or compositing asset shelf
+    occupies space near the minimap corner. ``margin_bottom`` is the
+    additional margin on the edge opposite the header.
     """
     is_compositor = space.node_tree is not None and space.node_tree.type == "COMPOSITING"
     show_asset_shelf = getattr(space, "show_region_asset_shelf", False)
@@ -197,7 +197,7 @@ def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, fl
 
 
 def _get_node_initials(name: str) -> str:
-    """Extract uppercase initials from each word of a node label."""
+    """Return uppercase initials from each word of a node label."""
     name = name.strip()
     if not name:
         return "?"
@@ -213,7 +213,7 @@ def _get_node_initials(name: str) -> str:
 
 
 def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: float, max_lines: int = 3) -> list[str]:
-    """Word-wrap a label into up to max_lines, each fitting within max_width pixels."""
+    """Wrap a label into up to max_lines, each fitting within max_width pixels."""
     blf.size(font_id, font_size)
     words = label.split()
     if not words:
@@ -390,5 +390,5 @@ def _get_tree_snapshot(
 
 
 def get_tree_fingerprint(node_tree, include_selection: bool = True) -> tuple:
-    """Generate a lightweight fingerprint of the node tree structure and selection states."""
+    """Return a lightweight fingerprint of the node tree structure and selection states."""
     return _get_tree_snapshot(node_tree, include_selection)[0]

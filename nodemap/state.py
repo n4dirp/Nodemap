@@ -1,4 +1,4 @@
-"""Minimap state management."""
+"""Provide per-area minimap state."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ Vec2 = tuple[float, float]
 
 
 class ResizeHandle(StrEnum):
-    """Resize handle identifiers for the minimap edge/corner interaction."""
+    """Define resize handle identifiers for the minimap edge and corner interaction."""
 
     W = "W"
     H = "H"
@@ -26,6 +26,8 @@ class ResizeHandle(StrEnum):
 
 @dataclass
 class ViewState:
+    """Store viewport geometry and zoom for the minimap content rect."""
+
     rect: Rect = (0.0, 0.0, 0.0, 0.0)
     tree_bounds: Rect = (0.0, 0.0, 0.0, 0.0)
     outer_margin: float = 10.0
@@ -40,12 +42,16 @@ class ViewState:
 
 @dataclass
 class ButtonState:
+    """Store hit rects and hover for the minimap frame buttons."""
+
     rects: dict[str, Rect] = field(default_factory=dict)
     hovered_button_id: str | None = None
 
 
 @dataclass
 class InteractionState:
+    """Store transient hover and press state for minimap interaction."""
+
     hovered_node_id: str | None = None
     hovered_handle: ResizeHandle | None = None
     resize_active: ResizeHandle | None = None
@@ -54,6 +60,8 @@ class InteractionState:
 
 @dataclass
 class ListState:
+    """Store geometry and animation state for the node-type list zone."""
+
     list_width: float = 0.0
     dragging_width: float | None = None
     width_clamped: bool = False
@@ -82,6 +90,8 @@ class ListState:
 
 @dataclass
 class RenderCache:
+    """Cache compiled tree data and GPU batches."""
+
     fingerprint: Any = None
     pending_timer: Any = None
     pending_timer_deadline: float = 0.0
@@ -141,10 +151,10 @@ class RenderCache:
         self.list_swatches_batch = None
 
     def invalidate_batches_only(self) -> None:
-        """Clear GPU batch data while preserving tree_data and fingerprints.
+        """Clear GPU batch data while preserving tree data and fingerprints.
 
-        Used by display-only preference changes (size, position, opacity, etc.)
-        that affect how content is rendered but not what tree data is needed.
+        Use for display-only preference changes that affect rendering, not
+        tree data.
         """
         self.backdrops_batch = None
         self.borders_batch = None
@@ -168,6 +178,8 @@ class RenderCache:
 
 @dataclass
 class MinimapState:
+    """Store per-area minimap state combining view, interaction, and cache."""
+
     enabled: bool = True
     view: ViewState = field(default_factory=ViewState)
     interaction: InteractionState = field(default_factory=InteractionState)
@@ -185,9 +197,9 @@ _minimap_state: dict[int, MinimapState] = {}
 _minimap_window_operators: dict[int, Any] = {}
 _registration_state: dict[str, bool] = {"done": False}
 
-# Interactive minimap buttons as (id, show-preference attr).
-# Order defines the top-edge horizontal capsule (right-aligned); "LIST" renders standalone.
-# Frame order left-to-right: SELECTED, VIEW, ALL.
+# Define interactive minimap buttons as (id, show-preference attribute).
+# Order defines the top-edge horizontal capsule (right-aligned).
+# Frame order left to right: SELECTED, VIEW, ALL.
 _MINIMAP_BUTTONS: tuple[tuple[str, str], ...] = (
     ("SELECTED", "show_frame_selected_btn"),
     ("VIEW", "show_frame_view_btn"),

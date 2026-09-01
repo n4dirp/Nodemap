@@ -1,4 +1,4 @@
-"""Coordinate transforms and geometry for the minimap."""
+"""Provide coordinate transforms and geometry for the minimap."""
 
 import logging
 from typing import Any
@@ -28,7 +28,7 @@ def _get_map_content_rect_for_width(
 def _get_map_content_rect(minimap_state: MinimapState) -> tuple[float, float, float, float]:
     """Return ``(left, bottom, width, height)`` of the map content area.
 
-    Subtracts the type-list zone plus a margin from the left edge so node
+    Subtract the type-list zone plus a margin from the left edge so node
     framing and panning never place tree content behind the list.
     """
     return _get_map_content_rect_for_width(minimap_state, minimap_state.list.list_width)
@@ -39,7 +39,7 @@ def _preserve_view_for_list_width(
 ) -> None:
     """Adjust ``minimap_state.view.pan/zoom`` so the same world rect stays framed after width change.
 
-    Keeps the world rectangle that previously filled the map content rect
+    Keep the world rectangle that previously filled the map content rect
     filling the new content rect with the same relative position (centered).
     This is the automatic equivalent of re-running ``frame_view``/``frame_all``
     after toggling the type list, as requested: if width goes 100→75 the
@@ -157,7 +157,7 @@ def _compute_base_map_geom(
 ) -> tuple[float, float, float, float, float, float, float, float, float]:
     """Return the scale-independent geometry shared by all map transforms.
 
-    Computes ``(inner_l, inner_b, inner_w, inner_h, bbox_w, bbox_h, base_scale,
+    Compute ``(inner_l, inner_b, inner_w, inner_h, bbox_w, bbox_h, base_scale,
     tree_center_x, tree_center_y)`` from the current state. Pure: no prefs
     lookups, no mutation of *minimap_state*.
     """
@@ -197,7 +197,7 @@ def _get_minimap_transform(
     region: Any = None,
     visible: tuple[float, float, float, float] | None = None,
 ) -> tuple[float, float, float, float, float]:
-    """Computes internal transformations representing scale, zoom, and panning inside the minimap."""
+    """Compute internal transformations representing scale, zoom, and panning inside the minimap."""
     if minimap_state is None:
         minimap_state = _state()
     anchor_zoom = minimap_state.view.anchor_zoom
@@ -308,7 +308,7 @@ def _get_visible_rect(
 ) -> tuple[float, float, float, float] | None:
     """Return the visible viewport rectangle in tree coordinates, or None if unavailable.
 
-    Accounts for Blender UI scaling to return unscaled tree coordinates.
+    Account for Blender UI scaling to return unscaled tree coordinates.
     """
     try:
         region_w, region_h = region.width, region.height

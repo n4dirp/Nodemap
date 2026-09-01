@@ -1,4 +1,4 @@
-"""Viewport and node-tree framing logic for the minimap."""
+"""Provide viewport and node-tree framing logic for the minimap."""
 
 import bpy
 
@@ -25,9 +25,8 @@ def _compute_frame_all_targets(
 ) -> tuple[float, float, float] | None:
     """Compute target zoom and pan to frame the entire node tree.
 
-    Updates ``minimap_state.view.tree_bounds`` immediately (required for correct
-    targets and drawing during animation). Returns ``(zoom, pan_x, pan_y)`` or
-    ``None`` when data is unavailable.
+    Update ``minimap_state.view.tree_bounds`` immediately and return
+    ``(zoom, pan_x, pan_y)`` or ``None`` when data is unavailable.
     """
     minimap_state = _state(area_ptr)
     if space is None:
@@ -103,7 +102,7 @@ def _compute_frame_to_bounds_targets(
 ) -> tuple[float, float, float]:
     """Compute target zoom and pan to frame the given bounds without applying them.
 
-    Returns ``(zoom, pan_x, pan_y)``.
+    Return ``(zoom, pan_x, pan_y)``.
     """
     minimap_state = _state(area_ptr)
 
@@ -175,9 +174,9 @@ def _compute_frame_selected_targets(
 ) -> tuple[float | None, float, float] | None:
     """Compute target zoom and pan for the selected nodes without applying them.
 
-    Returns ``(zoom, pan_x, pan_y)`` where *zoom* is ``None`` when the current
-    zoom should be kept (single regular node selected). Returns ``None`` when
-    nothing is selected or data is unavailable.
+    Return ``(zoom, pan_x, pan_y)`` where *zoom* is ``None`` when the current
+    zoom should be kept. Return ``None`` when nothing is selected or data is
+    unavailable.
     """
     minimap_state = _state(area_ptr)
     if space is None:
@@ -219,8 +218,8 @@ def _compute_editor_frame_selected_targets(
 ) -> tuple[float, float, float, float] | None:
     """Compute the editor viewport rect that frames the selected nodes.
 
-    Fits multiple selections or a single frame node with a margin; centers a
-    single regular node while keeping the current viewport size. Returns
+    Fit multiple selections or a single frame node with a margin; center a
+    single regular node while keeping the current viewport size. Return
     tree-space ``(left, bottom, right, top)`` or ``None`` when unavailable.
     """
     if space is None:
@@ -271,9 +270,9 @@ def frame_selected(
     region: bpy.types.Region | None = None,
     area_ptr: int | None = None,
 ) -> None:
-    """Adjust minimap zoom/pan to frame the selected node(s).
+    """Adjust minimap zoom and pan to frame the selected nodes.
 
-    Zooms to fit multiple selections or a single frame; centers a single
+    Zoom to fit multiple selections or a single frame; center a single
     regular node without changing the zoom level.
     """
     targets = _compute_frame_selected_targets(space, region, area_ptr)
@@ -321,7 +320,7 @@ def frame_view(
 
 
 def _redraw() -> None:
-    """Trigger a redraw of all NODE_EDITOR areas."""
+    """Redraw all NODE_EDITOR areas."""
     from .helpers import redraw_ui
 
     redraw_ui("NODE_EDITOR")

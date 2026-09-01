@@ -1,4 +1,4 @@
-"""Theme and color utilities for the node minimap."""
+"""Provide theme and color utilities for the minimap."""
 
 from typing import Any
 
@@ -98,7 +98,7 @@ def _theme_int(path: str, default: int) -> int:
 def _get_wire_curvature(settings) -> int:
     """Return the effective level of curved-wire rendering (0 = straight).
 
-    Uses the add-on's custom value when enabled, otherwise the Blender theme's
+    Use the add-on custom value when enabled, otherwise use the Blender theme
     ``node_editor.noodle_curving`` so the minimap follows the node-graph look.
     """
     if settings.use_custom_wire_curvature:

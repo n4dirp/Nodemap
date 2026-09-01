@@ -1,4 +1,4 @@
-"""Minimap rendering in the Node Editor."""
+"""Provide minimap rendering in the Node Editor."""
 
 import logging
 import math
@@ -173,7 +173,7 @@ def _setup_scissor(
 ) -> tuple[bool, bool, tuple[int, int, int, int]]:
     """Enable scissor test to clip content to minimap interior.
 
-    Returns ``(success, was_active, old_rect)`` for restoring later.
+    Return ``(success, was_active, old_rect)`` for restoring later.
     """
     scissor_saved = (False, (0, 0, 0, 0))
     try:
@@ -345,8 +345,6 @@ def _draw_view_fill(
     visible: tuple[float, float, float, float] | None = None,
 ) -> None:
     """Draw a filled rect over the active view region, behind nodes and wires."""
-    # if not settings.viewport_fill_rect:
-    #     return
     if visible is None:
         visible = _get_visible_rect(space, region)
     if not visible:
@@ -463,8 +461,6 @@ def _draw_viewport_overlay(
         if settings.viewport_fill_rect:
             outline_color = settings.viewport_fill_color
         border_width = 0.5 * ui_scale
-        # shadow = (0, 0, 0, 0.15 * master_alpha)
-        # _draw_rounded_rect_border(vx - 1, vy - 1, vw + 2, vh + 2, node_r, shadow, border)
         _draw_rounded_rect_border(
             view_x, view_y, view_w, view_h, node_roundness, _alpha_mul(outline_color, master_alpha), border_width
         )
@@ -492,11 +488,6 @@ def _draw_node_count(
 
     text_x = map_x + (map_w - text_w) - _HANDLE_THICKNESS * ui_scale
     text_y = map_y + (_HANDLE_THICKNESS * ui_scale)
-
-    # state = _state()
-    # btn_bottoms = [rect[1] for rect in state.buttons.rects.values() if rect]
-    # if btn_bottoms and min(btn_bottoms) <= text_y + font_size:
-    #     return
 
     text_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
 
@@ -836,7 +827,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
 
 
 def draw_minimap() -> None:
-    """Main entry point — orchestrate minimap drawing in the Node Editor."""
+    """Orchestrate minimap drawing in the Node Editor."""
     context = bpy.context
     space = context.space_data
     region = context.region

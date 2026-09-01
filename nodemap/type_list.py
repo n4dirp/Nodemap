@@ -1,4 +1,4 @@
-"""Interactive node-type list zone and scrollbar drawing."""
+"""Provide an interactive node-type list zone and scrollbar drawing."""
 
 import logging
 import math
@@ -49,7 +49,7 @@ def _get_scrollbar_style(ui_scale: float) -> tuple[int, int]:
 
 
 def _scrollbar_thickness(ui_scale: float, active: bool = False) -> int:
-    """Return the scrollbar thumb thickness; expanded while hovered or dragged."""
+    """Return the scrollbar thumb thickness; expand while hovered or dragged."""
     thick, _ = _get_scrollbar_style(ui_scale)
     if not active:
         return thick
@@ -190,7 +190,7 @@ def _draw_minimap_scrollbars(
 def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: float) -> None:
     """Advance the animated type-list zone width for this frame.
 
-    Snaps directly when no animation is running; otherwise eases from the
+    Snap directly when no animation is running; otherwise eases from the
     recorded start width toward the locked target. An expansion waits (up to
     a timeout) for the pending compile to expose measurable type stats
     before starting its clock.
@@ -473,7 +473,7 @@ def _draw_list_glyph_batch(state: MinimapState, zone_x: float, view_y: float) ->
 
 
 def _header_type_color(label: str, children: dict, node_colors: dict, type_colors: dict, colors: dict) -> tuple:
-    """Return the header swatch color: the first child's own node color.
+    """Return the header swatch color: the first child own node color.
 
     *children* are the alphabetically sorted sub-lists for the type, so the
     first entry is the first row shown under the expanded header. Falls back

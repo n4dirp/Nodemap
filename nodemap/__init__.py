@@ -1,5 +1,12 @@
-# Nodemap - Blender Extension
-# Minimap overlay for the Node Editor
+"""Register the Nodemap entry point.
+
+Register add-on classes, draw handlers, header UI, keymaps, and preset
+paths. The POST_PIXEL handler in the Node Editor drives minimap rendering,
+while the modal operator auto-starts per window when interactive mode is on.
+"""
+
+# Nodemap - Blender Extension.
+# Minimap overlay for the Node Editor.
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import logging
@@ -35,6 +42,7 @@ addon_keymap_bindings: list[tuple[bpy.types.KeyMap, bpy.types.KeyMapItem]] = []
 
 
 def _register_keymaps():
+    """Register the Ctrl+M toggle shortcut in the add-on keyconfig."""
     window_manager = bpy.context.window_manager
     addon_keyconfig = window_manager.keyconfigs.addon
     if not addon_keyconfig:
@@ -45,12 +53,14 @@ def _register_keymaps():
 
 
 def _unregister_keymaps():
+    """Remove all keymap items registered by this add-on."""
     for node_editor_keymap, toggle_keymap_item in addon_keymap_bindings:
         node_editor_keymap.keymap_items.remove(toggle_keymap_item)
     addon_keymap_bindings.clear()
 
 
 def register():
+    """Register classes, draw handler, header button, and keymaps."""
     for cls in classes:
         bpy.utils.register_class(cls)
 
@@ -78,6 +88,7 @@ def register():
 
 
 def unregister():
+    """Unregister preset paths, keymaps, draw handler, and classes."""
 
     bpy.utils.unregister_preset_path(ADDON_DIR)
 

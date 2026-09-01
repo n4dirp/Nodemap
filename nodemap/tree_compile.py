@@ -1,4 +1,4 @@
-"""Tree compilation and incremental position updates."""
+"""Provide tree compilation and incremental position updates."""
 
 import logging
 import time
@@ -30,10 +30,7 @@ _MOVE_REFRESH_MIN_INTERVAL = 0.016
 
 
 class _Timer:
-    """Context manager that logs elapsed milliseconds at TRACE level.
-
-    Becomes a no-op when TRACE logging is not enabled (zero overhead).
-    """
+    """Log elapsed milliseconds at TRACE level and become a no-op when disabled."""
 
     __slots__ = ("_name", "_start", "_active")
 
@@ -53,19 +50,12 @@ class _Timer:
 
 
 def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
-    """True when two fingerprints differ only in the position-sum slot."""
+    """Return Return True when two fingerprints differ only in the position-sum slot."""
     return old is not None and len(old) == len(current) and old[:1] == current[:1] and old[2:] == current[2:]
 
 
 def _debounced_compile(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
-    """Timer callback: compile tree data after fingerprint settles, then force redraw.
-
-    When ``minimap_state.cache.pending_settle_flush`` is set (drag position
-    refreshes happened), an unchanged fingerprint only needs the tree-data
-    generation bumped so frozen wire/marker batches snap to the
-    already-patched positions. A position-only diff is patched
-    incrementally; anything else recompiles.
-    """
+    """Compile tree data after the fingerprint settles, then force a redraw."""
     include_selection = settings.show_node_outline
     current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
     old_fingerprint = minimap_state.cache.fingerprint
@@ -588,9 +578,9 @@ def _group_socket_dots(by_node: dict[int, list[tuple[tuple, float, float]]]) -> 
 
 
 def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
-    """Patch cached tree data in place after pure position changes (drag).
+    """Patch cached tree data in place after pure position changes.
 
-    Refreshes node positions, socket/wire endpoints, and group markers
+    Refresh node positions, socket/wire endpoints, and group markers
     without recomputing colors, labels, or type stats. Socket indicator
     dots are rebuilt only for the moved nodes and regrouped by color.
     Returns True when applied; False when cached tables are missing and a
