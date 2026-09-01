@@ -446,8 +446,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Type List Width %",
         description="Width of the node-type list as a percentage of the minimap width",
         default=40,
-        min=15,
-        max=50,
+        min=1,
+        max=80,
         subtype="PERCENTAGE",
         update=_update_invalidate_batches,
     )

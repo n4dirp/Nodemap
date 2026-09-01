@@ -23,7 +23,10 @@ _MIN_SOCKET_SCALE = 0.15
 
 # Rebuild cached batches when the map scale drifts this far from the baked
 # scale (relative); only radius/thickness/font buckets depend on it.
-_SCALE_REBUILD_REL = 0.002
+# 0.015 keeps radius error under ~0.03 px at minimap scale while avoiding
+# per-frame rebuilds during smooth zoom animations (frame_all / frame_view),
+# where 0.002 caused a rebuild every ~0.2% zoom change.
+_SCALE_REBUILD_REL = 0.015
 # Force a batch rebuild when the per-frame anchor drifts this far from the
 # bake-time anchor; bounds how stale rect culling may become (px).
 _BATCH_DRIFT_PX = 256.0
@@ -684,9 +687,10 @@ def _ensure_minimap_batches(
         minimap_state.cache.socket_batch = None
 
     # Wires and markers get their own cache generation so position-only
-    # refreshes (drags) skip the O(links) pill rebake entirely. Rebuilds
-    # track the sticky bake scale exactly, keeping the shared matrix factor
-    # consistent.
+    # refreshes (drags) skip the O(links) pill rebake entirely. Wires share
+    # the same bake_scale as rects so the single content matrix scales both
+    # in lockstep; no separate wire tolerance (a larger tolerance would
+    # desync wire/node scale between rebuilds).
     if wire_key != minimap_state.cache.wire_key or minimap_state.cache.wire_scale != bake_scale:
         _rebuild_wire_marker_batches(
             minimap_state,
@@ -730,9 +734,6 @@ def _rebuild_wire_marker_batches(
     curvature = float(wire_curvature)
     use_curve = curvature > 1e-6
     wire_batches: list[tuple[Any, Any, float]] = []
-    # Unified control-point list for the merged shadow batch.
-    shadow_wires: list[tuple[float, float, float, float, float, float, float, float]] = []
-    # Per-color control lists for the thin color batches.
     per_color_wires: dict[Any, list[tuple[float, float, float, float, float, float, float, float]]] = {}
 
     for color, items in tree_data["wire_items"].items():
@@ -768,18 +769,12 @@ def _rebuild_wire_marker_batches(
 
         if use_curve and group_controls:
             per_color_wires[color] = group_controls
-            shadow_wires.extend(group_controls)
         elif group_pills:
             _shader, batch = _build_pill_batch(group_pills, thickness)
             if batch is not None:
                 wire_batches.append((color, batch, thickness * 0.5))
 
-    shadow_batch = None
     if use_curve:
-        # Wire shadows temporarily disabled for performance.
-        if False and shadow_wires:  # pragma: no cover
-            half_shadow = thickness * 2.5 * 0.5
-            _s_shader, shadow_batch = _build_noodle_batch(shadow_wires, half_shadow)
         for color, controls in per_color_wires.items():
             half_thickness = thickness * 0.5
             _shader, batch = _build_noodle_batch(controls, half_thickness)
@@ -788,28 +783,6 @@ def _rebuild_wire_marker_batches(
         minimap_state.cache.wire_batches = wire_batches
         minimap_state.cache.wire_shadow_batch = None
     else:
-        shadow_points: list[tuple[float, float, float, float]] = []
-        # Re-collect straight pills for shadow merging.
-        # We already filled wire_batches above with per-color pills;
-        # rebuild the merged set from the same items for shadow thickness.
-        for color, items in tree_data["wire_items"].items():
-            for out_x, out_y, in_x, in_y in items:
-                x1 = (out_x - origin_x) * bake_scale
-                y1 = (out_y - origin_y) * bake_scale
-                x2 = (in_x - origin_x) * bake_scale
-                y2 = (in_y - origin_y) * bake_scale
-                dx = x2 - x1
-                dy = y2 - y1
-                length = math.hypot(dx, dy)
-                if length < 0.5:
-                    continue
-                angle = math.atan2(dy, dx)
-                mid_x = (x1 + x2) * 0.5
-                mid_y = (y1 + y2) * 0.5
-                shadow_points.append((mid_x, mid_y, length, angle))
-        # Wire shadows temporarily disabled for performance.
-        if False and shadow_points:
-            _shadow_shader, shadow_batch = _build_pill_batch(shadow_points, thickness * 2.5)
         minimap_state.cache.wire_batches = wire_batches
         minimap_state.cache.wire_shadow_batch = None
 

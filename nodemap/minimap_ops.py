@@ -707,7 +707,7 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_resize_handle
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
-                self._list_width_start_pct = settings.type_list_width_pct if settings else 35
+                self._list_width_start_pct = settings.type_list_width_pct
                 map_x, map_y, map_w, map_h = state.view.rect
                 self._list_width_start_map_w = map_w
                 cursor = _CURSOR_MAP[divider_resize_handle]

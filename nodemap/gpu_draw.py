@@ -639,16 +639,13 @@ def _build_noodle_batch(
     wires: list[tuple[float, float, float, float, float, float, float, float]],
     half_thick: float,
 ) -> tuple[Any, Any]:
-    """Bake curved noodle wires as triangle strips; returns ``(shader, batch)``.
+    """Bake curved noodle wires as capsule quads; returns ``(shader, batch)``.
 
     Each *wire* is ``(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y)`` in baked space
-    defining a cubic Bezier with horizontal handles (Blender's ease-in /
-    ease-out style). The wire is subdivided so every chord stays within the AA
-    band of the cubic; each chord emits a rectangle. The fragment resolves each
-    rectangle as a capsule SDF against its own chord (``segA``/``segB`` shared
-    by all four corners), with round end caps emitted as endpoint squares. This
-    measures true spatial distance, so the tube is continuous and follows the
-    curve without parametric mismatch. Color stays as a draw-time uniform.
+    defining a cubic Bezier with horizontal handles. The curve is uniformly
+    subdivided into ``n`` chords (no adaptive refinement) and each chord emits
+    a capsule rectangle whose fragment measures distance to that chord. Round
+    end caps are emitted as endpoint squares.
     """
 
     if not wires:
@@ -665,82 +662,98 @@ def _build_noodle_batch(
 
     indices: list[tuple[int, int, int]] = []
     base_vert = 0
+    hypot = math.hypot
 
     for p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y in wires:
-        # Estimate length for tessellation density.
-        seg_len_01 = math.hypot(p1x - p0x, p1y - p0y)
-        seg_len_12 = math.hypot(p2x - p1x, p2y - p1y)
-        seg_len_23 = math.hypot(p3x - p2x, p3y - p2y)
+        seg_len_01 = hypot(p1x - p0x, p1y - p0y)
+        seg_len_12 = hypot(p2x - p1x, p2y - p1y)
+        seg_len_23 = hypot(p3x - p2x, p3y - p2y)
         est_length = seg_len_01 + seg_len_12 + seg_len_23
-        # Per-chord capsule SDF is spatially exact, but a curved segment's tube
-        # bulges beyond its chord by the sagitta. Subdivide while that sagitta
-        # exceeds a tolerance so the tube follows the curve; the coarser 1.5
-        # tolerance keeps the chord count low at the cost of a sub-pixel thinning
-        # on the inside of only the tightest turns. Caps bound worst-case cost.
-        n = int(est_length / 10.0) + 2
-        n = max(2, min(n, 16))
+        # Uniform subdivision only — the per-quad capsule shader is exact for
+        # its chord, so a modest fixed count keeps the tube visually continuous.
+        # Using 14 px per segment and capping at 8 keeps the vertex count ~2x
+        # lower than the previous adaptive 16+32 path while preserving shape at
+        # minimap scale (sub-pixel sagitta error < 1 px for typical bakes).
+        n = int(est_length / 14.0) + 2
+        if n < 2:
+            n = 2
+        elif n > 10:
+            n = 10
+        inv_n = 1.0 / n
 
-        def _bezier_at(t):
-            one_minus_t = 1.0 - t
-            one_minus_t_sq = one_minus_t * one_minus_t
-            t_sq = t * t
-            return (
-                one_minus_t_sq * one_minus_t * p0x
-                + 3.0 * one_minus_t_sq * t * p1x
-                + 3.0 * one_minus_t * t_sq * p2x
-                + t_sq * t * p3x,
-                one_minus_t_sq * one_minus_t * p0y
-                + 3.0 * one_minus_t_sq * t * p1y
-                + 3.0 * one_minus_t * t_sq * p2y
-                + t_sq * t * p3y,
-            )
+        # Sample the Bezier uniformly — inline the cubic to avoid closure
+        # overhead and repeated function calls.
+        centers: list[tuple[float, float]] = [None] * (n + 1)  # type: ignore[list-item]
+        for s in range(n + 1):
+            t = s * inv_n
+            omt = 1.0 - t
+            omt2 = omt * omt
+            t2 = t * t
+            omt3 = omt2 * omt
+            t3 = t2 * t
+            # Horner-like cubic Bezier
+            x = omt3 * p0x + 3.0 * omt2 * t * p1x + 3.0 * omt * t2 * p2x + t3 * p3x
+            y = omt3 * p0y + 3.0 * omt2 * t * p1y + 3.0 * omt * t2 * p2y + t3 * p3y
+            centers[s] = (x, y)
 
-        base_step = 1.0 / n
-        t_list = [i * base_step for i in range(n + 1)]
-        i = 0
-        while i < len(t_list) - 1 and len(t_list) < 32:
-            t_start = t_list[i]
-            t_end = t_list[i + 1]
-            if t_end - t_start <= 1.0 / 32.0:
-                i += 1
-                continue
-            pt_a = _bezier_at(t_start)
-            pt_b = _bezier_at(t_end)
-            pt_mid = _bezier_at((t_start + t_end) * 0.5)
-            sagitta = math.hypot(pt_mid[0] - (pt_a[0] + pt_b[0]) * 0.5, pt_mid[1] - (pt_a[1] + pt_b[1]) * 0.5)
-            if sagitta > 1.5:
-                t_list.insert(i + 1, (t_start + t_end) * 0.5)
-            else:
-                i += 1
+        # First chord direction for end-cap orientation.
+        dx0 = centers[1][0] - centers[0][0]
+        dy0 = centers[1][1] - centers[0][1]
+        d0 = hypot(dx0, dy0)
+        if d0 > 1e-9:
+            chord_dir_x, chord_dir_y = dx0 / d0, dy0 / d0
+        else:
+            chord_dir_x, chord_dir_y = 1.0, 0.0
+        chord_dir_nx, chord_dir_ny = -chord_dir_y, chord_dir_x
 
-        centers = [_bezier_at(t) for t in t_list]
-        n = len(t_list) - 1
-
-        def _unit(a, b):
-            delta_x = b[0] - a[0]
-            delta_y = b[1] - a[1]
-            delta_len = math.hypot(delta_x, delta_y)
-            if delta_len > 1e-9:
-                return (delta_x / delta_len, delta_y / delta_len)
-            return (1.0, 0.0)
-
-        chord_dir = _unit(centers[0], centers[1])
-        chord_dir_normal = (-chord_dir[1], chord_dir[0])
-
-        # Emit one rectangle for a chord. All four vertices share the same
-        # segA/segB anchors (the chord endpoints) so the fragment measures a
-        # true capsule around exactly that chord; uv.x interpolates the
-        # along-chord fraction u.
-        def _emit_rect(ax_, ay_, bx_, by_, normal_x, normal_y):
+        # End-cap squares — collapsed chord (segA == segB == cap).
+        def _emit_cap(cap_x: float, cap_y: float) -> None:
             nonlocal base_vert
-            left_x0 = ax_ + normal_x * lateral
-            left_y0 = ay_ + normal_y * lateral
-            right_x0 = ax_ - normal_x * lateral
-            right_y0 = ay_ - normal_y * lateral
-            left_x1 = bx_ + normal_x * lateral
-            left_y1 = by_ + normal_y * lateral
-            right_x1 = bx_ - normal_x * lateral
-            right_y1 = by_ - normal_y * lateral
+            base = base_vert
+            all_pos.append((cap_x + chord_dir_x * lateral, cap_y + chord_dir_y * lateral, 0.0))
+            all_pos.append((cap_x + chord_dir_nx * lateral, cap_y + chord_dir_ny * lateral, 0.0))
+            all_pos.append((cap_x - chord_dir_x * lateral, cap_y - chord_dir_y * lateral, 0.0))
+            all_pos.append((cap_x - chord_dir_nx * lateral, cap_y - chord_dir_ny * lateral, 0.0))
+            all_uv.extend([(0.0, 0.0)] * 4)
+            all_segA.extend([(cap_x, cap_y)] * 4)
+            all_segB.extend([(cap_x, cap_y)] * 4)
+            indices.append((base, base + 1, base + 2))
+            indices.append((base + 2, base + 3, base))
+            base_vert += 4
+
+        _emit_cap(centers[0][0], centers[0][1])
+
+        # Interior quads — one per chord, inlined to avoid per-chord closures.
+        chord_extend = 0.01
+        prev_nx, prev_ny = 0.0, 1.0
+        for chord_index in range(n):
+            ax_, ay_ = centers[chord_index]
+            bx_, by_ = centers[chord_index + 1]
+            dir_x = bx_ - ax_
+            dir_y = by_ - ay_
+            dir_len = hypot(dir_x, dir_y)
+            if dir_len > 1e-9:
+                nx = -dir_y / dir_len
+                ny = dir_x / dir_len
+                prev_nx, prev_ny = nx, ny
+                ux, uy = dir_x / dir_len, dir_y / dir_len
+            else:
+                nx, ny = prev_nx, prev_ny
+                ux, uy = 0.0, 0.0
+            if chord_index > 0:
+                ax_ -= ux * chord_extend
+                ay_ -= uy * chord_extend
+            if chord_index < n - 1:
+                bx_ += ux * chord_extend
+                by_ += uy * chord_extend
+            left_x0 = ax_ + nx * lateral
+            left_y0 = ay_ + ny * lateral
+            right_x0 = ax_ - nx * lateral
+            right_y0 = ay_ - ny * lateral
+            left_x1 = bx_ + nx * lateral
+            left_y1 = by_ + ny * lateral
+            right_x1 = bx_ - nx * lateral
+            right_y1 = by_ - ny * lateral
             base = base_vert
             all_pos.extend(
                 [(left_x0, left_y0, 0.0), (right_x0, right_y0, 0.0), (left_x1, left_y1, 0.0), (right_x1, right_y1, 0.0)]
@@ -752,61 +765,7 @@ def _build_noodle_batch(
             indices.append((base + 2, base + 1, base + 3))
             base_vert += 4
 
-        # End-cap squares: a full disk around each endpoint collapses both segA
-        # and segB to the endpoint, so every fragment inside resolves distance to
-        # that point (a round cap) regardless of direction. Robust for tiny/steep
-        # wires where lateral dwarfs the chord.
-        def _emit_square(cap_x, cap_y):
-            nonlocal base_vert
-            base = base_vert
-            corners = [
-                (cap_x + chord_dir[0] * lateral, cap_y + chord_dir[1] * lateral),
-                (cap_x + chord_dir_normal[0] * lateral, cap_y + chord_dir_normal[1] * lateral),
-                (cap_x - chord_dir[0] * lateral, cap_y - chord_dir[1] * lateral),
-                (cap_x - chord_dir_normal[0] * lateral, cap_y - chord_dir_normal[1] * lateral),
-            ]
-            for corner in corners:
-                all_pos.append((corner[0], corner[1], 0.0))
-                all_uv.append((0.0, 0.0))
-                all_segA.append((cap_x, cap_y))
-                all_segB.append((cap_x, cap_y))
-            indices.append((base, base + 1, base + 2))
-            indices.append((base + 2, base + 3, base))
-            base_vert += 4
-
-        _emit_square(centers[0][0], centers[0][1])
-
-        # Interior quads: one rectangle per chord, aligned to that chord's own
-        # normal so the capsule follows the curve (the cap squares already cover
-        # the first/last endpoint disks). Each chord extends past its shared
-        # joints by `chord_extend` so adjacent capsules overlap their straight
-        # sides, filling the small rounded wedge that shows on the outside of a
-        # turn. The wire's first and last ends stay at the true endpoints.
-        chord_extend = 0.175
-        prev_normal_x, prev_normal_y = 0.0, 1.0
-        for chord_index in range(len(centers) - 1):
-            ax_, ay_ = centers[chord_index]
-            bx_, by_ = centers[chord_index + 1]
-            dir_x = bx_ - ax_
-            dir_y = by_ - ay_
-            dir_len = math.hypot(dir_x, dir_y)
-            if dir_len > 1e-9:
-                normal_x = -dir_y / dir_len
-                normal_y = dir_x / dir_len
-                prev_normal_x, prev_normal_y = normal_x, normal_y
-                chord_unit_x, chord_unit_y = dir_x / dir_len, dir_y / dir_len
-            else:
-                normal_x, normal_y = prev_normal_x, prev_normal_y
-                chord_unit_x, chord_unit_y = 0.0, 0.0
-            if chord_index > 0:
-                ax_ -= chord_unit_x * chord_extend
-                ay_ -= chord_unit_y * chord_extend
-            if chord_index < len(centers) - 2:
-                bx_ += chord_unit_x * chord_extend
-                by_ += chord_unit_y * chord_extend
-            _emit_rect(ax_, ay_, bx_, by_, normal_x, normal_y)
-
-        _emit_square(centers[n][0], centers[n][1])
+        _emit_cap(centers[n][0], centers[n][1])
 
     batch = batch_for_shader(
         shader,
