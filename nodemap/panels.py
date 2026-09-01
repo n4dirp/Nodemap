@@ -68,8 +68,8 @@ class NODEMAP_PT_popup(Panel):
             sub.prop(settings, "show_frame_labels", text="Frame Labels")
             grid.prop(settings, "show_node_colors", text="Node Colors")
             grid.prop(settings, "show_node_labels", text="Node Labels")
-            grid.prop(settings, "show_socket_indicators", text="Node Sockets")
             grid.prop(settings, "show_node_outline", text="Node Outline")
+            grid.prop(settings, "show_socket_indicators", text="Node Sockets")
             grid.prop(settings, "show_node_count", text="Total Count")
             sub = grid.row()
             sub.active = settings.interactive

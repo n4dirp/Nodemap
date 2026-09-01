@@ -738,6 +738,7 @@ def _draw_type_list(
                 ("header", label) if kind == "header" else ("child", label, node_name)
                 for kind, label, node_name, *_rest in visible_rows
             ]
+            state.list.visible_row_index_map = {key: idx for idx, key in enumerate(state.list.visible_row_keys)}
 
             # Labels with any visible row (a child row carries its type label, so a
             # header scrolled out of view while its children remain still registers).

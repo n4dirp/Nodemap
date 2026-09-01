@@ -746,10 +746,7 @@ class NODEMAP_OT_navigate(Operator):
                     if not event.shift and not event.ctrl:
                         child_label, child_node_name = child_row
                         key = ("child", child_label, child_node_name)
-                        try:
-                            self._list_last_row_index = state.list.visible_row_keys.index(key)
-                        except ValueError:
-                            self._list_last_row_index = -1
+                        self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                 else:
                     row_label = _list_row_at(self._mouse_x, self._mouse_y, state)
                     if row_label:
@@ -760,10 +757,7 @@ class NODEMAP_OT_navigate(Operator):
                             self._list_row_pressed = row_label
                             if not event.shift and not event.ctrl:
                                 key = ("header", row_label)
-                                try:
-                                    self._list_last_row_index = state.list.visible_row_keys.index(key)
-                                except ValueError:
-                                    self._list_last_row_index = -1
+                                self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                 return {"RUNNING_MODAL"}
             if addon:
                 resize_handle = self._get_handle_at(context, event)
@@ -885,10 +879,7 @@ class NODEMAP_OT_navigate(Operator):
                     else:
                         self._select_single_node(context, node_name)
                         key = ("child", child_label, node_name)
-                        try:
-                            self._list_last_row_index = state.list.visible_row_keys.index(key)
-                        except ValueError:
-                            self._list_last_row_index = -1
+                        self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                     if not (event.shift or event.ctrl):
                         if not self._view_selected_animated(context, settings):
                             try:
@@ -919,10 +910,7 @@ class NODEMAP_OT_navigate(Operator):
                     else:
                         self._select_type_nodes(context, row_label)
                         key = ("header", row_label)
-                        try:
-                            self._list_last_row_index = state.list.visible_row_keys.index(key)
-                        except ValueError:
-                            self._list_last_row_index = -1
+                        self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                     if not (event.shift or event.ctrl):
                         if not self._view_selected_animated(context, settings):
                             try:
@@ -1288,10 +1276,14 @@ class NODEMAP_OT_navigate(Operator):
         plain-clicked row so repeated Shift-clicks expand from the same origin.
         """
         keys = state.list.visible_row_keys
-        try:
-            target_idx = keys.index(target_key)
-        except ValueError:
-            return
+        index_map = state.list.visible_row_index_map
+        target_idx = index_map.get(target_key)
+        if target_idx is None:
+            # Fallback for stale map.
+            try:
+                target_idx = keys.index(target_key)
+            except ValueError:
+                return
         last = self._list_last_row_index
         if last < 0 or last >= len(keys):
             lo, hi = target_idx, target_idx

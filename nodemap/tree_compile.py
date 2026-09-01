@@ -50,7 +50,7 @@ class _Timer:
 
 
 def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
-    """Return Return True when two fingerprints differ only in the position-sum slot."""
+    """Return True when two fingerprints differ only in the position-sum slot."""
     return old is not None and len(old) == len(current) and old[:1] == current[:1] and old[2:] == current[2:]
 
 
@@ -373,12 +373,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
         if show_socket_indicators:
             dots: list[tuple[tuple, float, float]] = []
             for is_output, sock_list in [(False, node.inputs), (True, node.outputs)]:
-                try:
-                    visible = [s for s in sock_list if not s.hide and s.enabled]
-                except AttributeError:
-                    visible = [
-                        s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)
-                    ]
+                visible = [s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)]
 
                 x_base = top_x + (node_w if is_output else 0)
                 visible_count = len(visible)
@@ -699,12 +694,7 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
         if show_indicators:
             dots: list[tuple[tuple, float, float]] = []
             for is_output, sock_list in ((False, node.inputs), (True, node.outputs)):
-                try:
-                    visible = [s for s in sock_list if not s.hide and s.enabled]
-                except AttributeError:
-                    visible = [
-                        s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)
-                    ]
+                visible = [s for s in sock_list if getattr(s, "hide", False) is False and getattr(s, "enabled", True)]
                 x_base = node_left_x + (w if is_output else 0.0)
                 visible_count = len(visible)
                 for socket_index, socket in enumerate(visible):

@@ -60,21 +60,23 @@ def _get_node_dims(node: bpy.types.Node, ui_scale: float | None = None) -> tuple
         ui_scale = _get_ui_scale()
     if getattr(node, "hide", False):
         return 100.0, 30.0
-    try:
-        dims = node.dimensions
-        node_w = abs(dims[0])
-        if node_w == 0:
-            node_w = abs(node.width)
-    except (AttributeError, TypeError, IndexError):
-        node_w = abs(node.width)
-
-    try:
-        dims = node.dimensions
-        node_h = abs(dims[1])
-        if node_h == 0:
-            node_h = abs(getattr(node, "height", 30.0))
-    except (AttributeError, TypeError, IndexError):
-        node_h = abs(getattr(node, "height", 30.0))
+    dims = getattr(node, "dimensions", None)
+    if dims is not None and len(dims) >= 2:
+        try:
+            node_w = abs(float(dims[0]))
+            if node_w == 0:
+                node_w = abs(float(node.width))
+        except (TypeError, ValueError, IndexError):
+            node_w = abs(float(node.width))
+        try:
+            node_h = abs(float(dims[1]))
+            if node_h == 0:
+                node_h = abs(float(getattr(node, "height", 30.0)))
+        except (TypeError, ValueError, IndexError):
+            node_h = abs(float(getattr(node, "height", 30.0)))
+    else:
+        node_w = abs(float(node.width))
+        node_h = abs(float(getattr(node, "height", 30.0)))
 
     return max(node_w / ui_scale, 5.0), max(node_h / ui_scale, 5.0)
 

@@ -706,9 +706,9 @@ def _layout_minimap_buttons(
                 to_hide = cand
                 break
         if to_hide is None:
-            # Fallback: hide leftmost (first in current order)
+            # Fallback: hide leftmost (first in current order).
             to_hide = culled_frame_button_ids[0]
-        culled_frame_button_ids.remove(to_hide)
+        culled_frame_button_ids = [bid for bid in culled_frame_button_ids if bid != to_hide]
 
     rects: dict[str, tuple[float, float, float]] = {}
     frame_button_count = len(culled_frame_button_ids)
@@ -750,6 +750,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
     # Sort by x to find the leftmost (first) and rightmost (last) buttons,
     # which carry the only rounded corners of the row.
     frame_buttons_ordered = sorted(frame_button_ids, key=lambda bid: rects[bid][0])
+    order_index = {bid: idx for idx, bid in enumerate(frame_buttons_ordered)}
     if is_combined:
         # Draw each frame button as its own box, edge-to-edge with no gap.
         # Only the external corners round, inner corners meet square; each
@@ -794,7 +795,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
                 # Per-corner radii (top-left, top-right, bottom-right, bottom-left):
                 # only the row's external corners round, inner corners stay square.
                 hr = max(2.0, radius - 1)
-                button_index = frame_buttons_ordered.index(button_id)
+                button_index = order_index.get(button_id, -1)
                 is_first = button_index == 0
                 is_last = button_index == len(frame_buttons_ordered) - 1
                 if is_first:
