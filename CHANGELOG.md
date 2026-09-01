@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.0] - 2026-08-26
+## [2.0.0] [Unreleased]
 
 ### Added
 - Interactive node-type list with per-type counts
@@ -12,6 +12,7 @@
 - Curved wires in the minimap that match Blender's link curves
 - More theme customization options for colors and appearance
 - All extension options now available in the addon preferences panel
+- Per-tree minimap view: pan/zoom restored on returning to a node-tree
 
 ### Changed
 - Frame Selected now adjusts the zoom to fit multiple nodes or a frame
