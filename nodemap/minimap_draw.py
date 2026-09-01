@@ -915,6 +915,51 @@ def draw_minimap() -> None:
     state.view.outer_margin = y_margin
     state.view.inner_padding = padding
 
+    # Per-tree view persistence: reset pan/zoom when switching node trees,
+    # but restore the saved view when revisiting the same tree.
+    try:
+        tree_ptr = node_tree.as_pointer() if node_tree else None
+    except ReferenceError:
+        tree_ptr = None
+    if tree_ptr is not None:
+        if state.last_tree_ptr is None:
+            saved = state.tree_views.get(tree_ptr)
+            if saved is not None:
+                sz, spx, spy = saved
+                state.view.user_zoom = sz
+                state.view.anchor_zoom = sz
+                state.view.pan = (spx, spy)
+            state.last_tree_ptr = tree_ptr
+        elif state.last_tree_ptr != tree_ptr:
+            # Save view for tree being left.
+            state.tree_views[state.last_tree_ptr] = (
+                state.view.user_zoom,
+                state.view.pan[0],
+                state.view.pan[1],
+            )
+            saved = state.tree_views.get(tree_ptr)
+            if saved is not None:
+                sz, spx, spy = saved
+                state.view.user_zoom = sz
+                state.view.anchor_zoom = sz
+                state.view.pan = (spx, spy)
+            else:
+                # No saved view — reset to frame-all for the new tree.
+                from .framing import _compute_frame_all_targets
+
+                area_ptr = None
+                try:
+                    area_ptr = bpy.context.area.as_pointer()
+                except (AttributeError, ReferenceError):
+                    pass
+                targets = _compute_frame_all_targets(space, region, area_ptr)
+                if targets is not None:
+                    sz, spx, spy = targets
+                    state.view.anchor_zoom = sz
+                    state.view.user_zoom = sz
+                    state.view.pan = (spx, spy)
+            state.last_tree_ptr = tree_ptr
+
     # Reserve the type-list zone before computing the map transform so
     # node framing and panning never place tree content behind the list.
     with _Timer("type_list_width"):
@@ -1242,6 +1287,14 @@ def draw_minimap() -> None:
     _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, corner, state)
 
     _draw_node_count(settings, content_count, map_x, map_y, map_w, colors, master_alpha, ui_scale)
+
+    # Persist current view for this tree so it can be restored when revisiting.
+    try:
+        current_ptr = node_tree.as_pointer() if node_tree else None
+    except ReferenceError:
+        current_ptr = None
+    if current_ptr is not None:
+        state.tree_views[current_ptr] = (state.view.user_zoom, state.view.pan[0], state.view.pan[1])
 
     _teardown_scissor(scissor_state)
     try:

@@ -174,6 +174,8 @@ class MinimapState:
     list: ListState = field(default_factory=ListState)
     cache: RenderCache = field(default_factory=RenderCache)
     buttons: ButtonState = field(default_factory=ButtonState)
+    last_tree_ptr: int | None = None
+    tree_views: dict[int, tuple[float, float, float]] = field(default_factory=dict)
 
 
 # Socket indicator pill size multiplier (in tree units).
