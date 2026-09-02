@@ -1,17 +1,25 @@
 """Provide a modal operator for minimap interaction."""
 
 import logging
+import time
 
 import bpy
 from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
 from .. import __package__ as base_package
-from ..core.constants import HANDLE_THICKNESS, SCROLLBAR_HIT_PAD
+from ..core.constants import (
+    DOCK_DWELL_MS,
+    HANDLE_THICKNESS,
+    SCROLLBAR_HIT_PAD,
+)
 from ..core.helpers import (
     _expand_bounds_margin,
     _get_area_and_region_under_mouse,
+    _get_minimap_margins,
     _get_node_tree_bounds,
+    _get_safe_bounds,
     _get_ui_scale,
+    clamp_free_rect,
     get_addon_preferences,
     redraw_ui,
     start_list_width_animation,
@@ -161,9 +169,14 @@ def _apply_list_scroll_drag(mouse_x: int, mouse_y: int, grab: float, state: Mini
 
 
 _CURSOR_MAP: dict[ResizeHandle, str] = {
-    ResizeHandle.W: "MOVE_X",
-    ResizeHandle.H: "MOVE_Y",
-    ResizeHandle.C: "SCROLL_XY",
+    ResizeHandle.LEFT: "MOVE_X",
+    ResizeHandle.RIGHT: "MOVE_X",
+    ResizeHandle.TOP: "MOVE_Y",
+    ResizeHandle.BOTTOM: "MOVE_Y",
+    ResizeHandle.TOP_LEFT: "SCROLL_XY",
+    ResizeHandle.TOP_RIGHT: "SCROLL_XY",
+    ResizeHandle.BOTTOM_LEFT: "SCROLL_XY",
+    ResizeHandle.BOTTOM_RIGHT: "SCROLL_XY",
     ResizeHandle.LIST: "MOVE_X",
 }
 
@@ -281,7 +294,14 @@ class NODEMAP_OT_navigate(Operator):
     _resize_handle: str | None = None
     _resize_start_mouse: tuple[int, int] | None = None
     _resize_start_values: tuple[int, int] | None = None
+    _resize_start_offset: tuple[int, int] | None = None
     _list_width_dragging: bool = False
+    _moving: bool = False
+    _move_start_mouse: tuple[int, int] | None = None
+    _move_start_offset: tuple[int, int] | None = None
+    _snap_candidate: tuple[float, float, str] | None = None
+    _snap_dwell: float = 0.0
+    _snap_last_time: float = 0.0
     _list_width_start_x: int = 0
     _list_width_start_pct: int = 0
     _list_width_start_map_w: float = 0.0
@@ -325,6 +345,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._list_mmb_dragging
             or self._resize_handle is not None
             or self._list_width_dragging
+            or self._moving
             or self._drag_start is not None
             or self._list_scroll_pressed
             or self._anim.anim_active
@@ -468,6 +489,17 @@ class NODEMAP_OT_navigate(Operator):
         state, addon, settings, in_minimap = self._minimap_event_context(context)
         # --- Release ---
         if event.value == "RELEASE":
+            if self._moving:
+                self._moving = False
+                self._move_start_mouse = None
+                self._move_start_offset = None
+                self._snap_candidate = None
+                self._snap_dwell = 0.0
+                state.view.moving = False
+                state.view.snapped = False
+                state.cache.invalidate_batches_only()
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
             if self._list_width_dragging:
                 self._list_width_dragging = False
                 state.list.dragging_width = None
@@ -540,6 +572,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._resize_handle = None
                 self._resize_start_mouse = None
                 self._resize_start_values = None
+                self._resize_start_offset = None
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
                 state.view.width_clamped = False
@@ -593,6 +626,10 @@ class NODEMAP_OT_navigate(Operator):
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
             self._anim.cancel_smooth(context)
+            # Move-grip drag: reposition the whole minimap freely.
+            if resize.get_drag_handle(state, self._mouse_x, self._mouse_y):
+                self._start_move(context, state, settings)
+                return {"RUNNING_MODAL"}
             armed_button_id = _frame_button_at(self._mouse_x, self._mouse_y, state)
             if armed_button_id:
                 self._armed_button = armed_button_id
@@ -669,6 +706,7 @@ class NODEMAP_OT_navigate(Operator):
                         int(map_w / ui_scale),
                         int(map_h / ui_scale),
                     )
+                    self._resize_start_offset = (settings.offset_x, settings.offset_y)
                     cursor = _CURSOR_MAP[resize_handle]
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
@@ -703,6 +741,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._resize_handle = None
                 self._resize_start_mouse = None
                 self._resize_start_values = None
+                self._resize_start_offset = None
                 context.window.cursor_modal_set("DEFAULT")
                 self._last_cursor = ""
                 state.view.width_clamped = False
@@ -830,6 +869,7 @@ class NODEMAP_OT_navigate(Operator):
                         int(map_w / ui_scale),
                         int(map_h / ui_scale),
                     )
+                    self._resize_start_offset = (settings.offset_x, settings.offset_y)
                     cursor = _CURSOR_MAP[resize_handle]
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
@@ -850,6 +890,9 @@ class NODEMAP_OT_navigate(Operator):
 
     def _handle_mouse_move(self, context: Context, event: Event) -> set[str]:
         state, addon, settings, in_minimap = self._minimap_event_context(context)
+        if self._moving:
+            self._apply_move_drag(context, state, settings)
+            return {"RUNNING_MODAL"}
         if self._list_width_dragging:
             resize.apply_list_width_drag(self, context)
             self._redraw_ui()
@@ -1265,6 +1308,17 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.hovered_handle = None
                 state.interaction.resize_active = None
                 state.cache.invalidate_batches_only()
+        if self._moving:
+            self._moving = False
+            self._move_start_mouse = None
+            self._move_start_offset = None
+            self._snap_candidate = None
+            self._snap_dwell = 0.0
+            self._snap_last_time = 0.0
+            state = self._state
+            if state:
+                state.view.moving = False
+                state.view.snapped = False
         context.window.cursor_modal_set("DEFAULT")
         self._last_cursor = ""
         self._armed_button = None
@@ -1327,6 +1381,100 @@ class NODEMAP_OT_navigate(Operator):
             context.window.cursor_modal_set(cursor)
             self._last_cursor = cursor
 
+    def _start_move(self, context: Context, state: MinimapState, settings) -> None:
+        """Begin dragging the whole minimap from the move-grip button.
+
+        Preserves the current screen position by converting it into a FREE
+        offset, then lets the map follow the cursor freely until it snaps to a
+        border or corner.
+        """
+        ui_scale = _get_ui_scale()
+        sx, sy, ex, ey = _get_safe_bounds(self._area, self._region)
+        x_margin, y_margin, margin = _get_minimap_margins(self._space, "FREE", ui_scale)
+        map_x, map_y, _map_w, _map_h = state.view.rect
+        offset_x = int(round((map_x - (sx + x_margin)) / ui_scale))
+        offset_y = int(round((map_y - (sy + y_margin)) / ui_scale))
+        self._moving = True
+        self._move_start_mouse = (self._mouse_x, self._mouse_y)
+        self._move_start_offset = (offset_x, offset_y)
+        self._snap_candidate = None
+        self._snap_dwell = 0.0
+        self._snap_last_time = time.perf_counter()
+        from ..core.state import suppress_update_callbacks
+
+        with suppress_update_callbacks():
+            settings.position = "FREE"
+            settings.offset_x = offset_x
+            settings.offset_y = offset_y
+        state.view.moving = True
+        state.view.snapped = False
+        self._redraw_ui()
+
+    def _apply_move_drag(self, context: Context, state: MinimapState, settings) -> None:
+        """Update the FREE offset from the cursor delta and snap to borders."""
+        ui_scale = _get_ui_scale()
+        sx, sy, ex, ey = _get_safe_bounds(self._area, self._region)
+        x_margin, y_margin, margin = _get_minimap_margins(self._space, "FREE", ui_scale)
+        dx = (self._mouse_x - self._move_start_mouse[0]) / ui_scale
+        dy = (self._mouse_y - self._move_start_mouse[1]) / ui_scale
+        offset_x = int(round(self._move_start_offset[0] + dx))
+        offset_y = int(round(self._move_start_offset[1] + dy))
+
+        from ..core.state import suppress_update_callbacks
+
+        with suppress_update_callbacks():
+            settings.position = "FREE"
+            settings.offset_x = offset_x
+            settings.offset_y = offset_y
+
+        # Recompute the live rect from the offset so snapping does not lag one
+        # frame behind the cursor, then clamp the origin to the same insets the
+        # drawing pass applies. A map pushed past an edge therefore pins itself
+        # to the border (where it can snap) instead of shrinking away.
+        safe_width = ex - sx
+        safe_height = ey - sy
+        map_w = min(settings.minimap_width * ui_scale, (safe_width - x_margin) * settings.max_width_pct / 100.0)
+        map_h = min(
+            settings.minimap_height * ui_scale, (safe_height - y_margin - margin) * settings.max_height_pct / 100.0
+        )
+        map_x = sx + x_margin + offset_x * ui_scale
+        map_y = sy + y_margin + offset_y * ui_scale
+        safe = (sx, sy, ex, ey)
+        map_x, map_y = clamp_free_rect(map_x, map_y, map_w, map_h, safe, x_margin, y_margin, margin)
+        cand = (
+            resize._nearest_dock(map_x, map_y, map_w, map_h, safe, x_margin, y_margin, margin, ui_scale)
+            if settings.snap_to_borders
+            else None
+        )
+
+        now = time.perf_counter()
+        if cand and cand == self._snap_candidate:
+            self._snap_dwell += (now - self._snap_last_time) * 1000.0
+        else:
+            self._snap_candidate = cand
+            self._snap_dwell = 0.0
+        self._snap_last_time = now
+
+        snapped = cand is not None and self._snap_dwell >= DOCK_DWELL_MS
+        if snapped:
+            if settings.position != cand[2]:
+                with suppress_update_callbacks():
+                    settings.position = cand[2]
+                # Re-anchor the drag at the latching dock so releasing the snap
+                # continues from the snapped position instead of leaping back to
+                # where the drag originally started.
+                self._move_start_offset = (
+                    int(round((cand[0] - (sx + x_margin)) / ui_scale)),
+                    int(round((cand[1] - (sy + y_margin)) / ui_scale)),
+                )
+                self._move_start_mouse = (self._mouse_x, self._mouse_y)
+        elif settings.position != "FREE":
+            # Not (yet) snapped: revert to the free offset position.
+            with suppress_update_callbacks():
+                settings.position = "FREE"
+        state.view.snapped = snapped
+        self._redraw_ui()
+
     def _get_handle_at(self, context: Context, event: Event) -> str | None:
         state = self._state
         if not state:
@@ -1336,7 +1484,9 @@ class NODEMAP_OT_navigate(Operator):
             return None
         corner = addon.settings.position
         ui_scale = _get_ui_scale()
-        return resize.get_resize_handle(state, corner, self._mouse_x, self._mouse_y, ui_scale)
+        return resize.get_resize_handle(
+            state, corner, self._mouse_x, self._mouse_y, ui_scale, self._space, self._area, self._region
+        )
 
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":
@@ -1354,6 +1504,12 @@ class NODEMAP_OT_navigate(Operator):
         self._list_width_start_x = 0
         self._list_width_start_pct = 35
         self._list_width_start_map_w = 0.0
+        self._moving = False
+        self._move_start_mouse = None
+        self._move_start_offset = None
+        self._snap_candidate = None
+        self._snap_dwell = 0.0
+        self._snap_last_time = 0.0
         self._anim = AnimationController(self)
         _minimap_window_operators[self._window_ptr] = self
         context.window_manager.modal_handler_add(self)
@@ -1370,6 +1526,8 @@ class NODEMAP_OT_navigate(Operator):
         if self._state is not None:
             self._state.view.width_clamped = False
             self._state.view.height_clamped = False
+            self._state.view.moving = False
+            self._state.view.snapped = False
             self._state.interaction.hovered_handle = None
             self._state.interaction.resize_active = None
             self._state.buttons.hovered_button_id = None
@@ -1385,6 +1543,12 @@ class NODEMAP_OT_navigate(Operator):
         self._list_scroll_grab = 0.0
         self._list_last_row_index = -1
         self._list_width_dragging = False
+        self._moving = False
+        self._move_start_mouse = None
+        self._move_start_offset = None
+        self._snap_candidate = None
+        self._snap_dwell = 0.0
+        self._snap_last_time = 0.0
 
 
 class NODEMAP_OT_open_preferences(Operator):

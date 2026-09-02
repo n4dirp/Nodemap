@@ -36,12 +36,17 @@ def suppress_update_callbacks():
 
 
 class ResizeHandle(StrEnum):
-    """Define resize handle identifiers for the minimap edge and corner interaction."""
+    """Identify which minimap edge or corner a resize grab is attached to."""
 
-    W = "W"
-    H = "H"
-    C = "C"
     LIST = "LIST"
+    LEFT = "LEFT"
+    RIGHT = "RIGHT"
+    TOP = "TOP"
+    BOTTOM = "BOTTOM"
+    TOP_LEFT = "TOP_LEFT"
+    TOP_RIGHT = "TOP_RIGHT"
+    BOTTOM_LEFT = "BOTTOM_LEFT"
+    BOTTOM_RIGHT = "BOTTOM_RIGHT"
 
 
 @dataclass
@@ -58,6 +63,8 @@ class ViewState:
     pan: Vec2 = (0.0, 0.0)
     width_clamped: bool = False
     height_clamped: bool = False
+    moving: bool = False
+    snapped: bool = False
 
 
 @dataclass
@@ -66,6 +73,7 @@ class ButtonState:
 
     rects: dict[str, Rect] = field(default_factory=dict)
     hovered_button_id: str | None = None
+    node_count_anchor: tuple[float, float] | None = None
 
 
 @dataclass

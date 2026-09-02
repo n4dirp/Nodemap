@@ -28,6 +28,9 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
     preset_values = [
         # Layout.
         "settings.position",
+        "settings.offset_x",
+        "settings.offset_y",
+        "settings.snap_to_borders",
         "settings.show_node_count",
         "settings.show_frames",
         "settings.show_node_outline",
@@ -43,6 +46,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_frame_view_btn",
         "settings.show_frame_selected_btn",
         "settings.show_list_toggle_btn",
+        "settings.show_move_btn",
         "settings.show_node_labels",
         "settings.compact_node_labels",
         "settings.show_frame_labels",

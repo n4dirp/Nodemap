@@ -136,14 +136,42 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     position: EnumProperty(
         name="Position",
-        description="Minimap corner position",
+        description="Minimap dock position. Dock to a corner, an edge, or move it freely",
         items=[
-            ("TOP_LEFT", "Top Left", "Display in the top-left corner"),
-            ("TOP_RIGHT", "Top Right", "Display in the top-right corner"),
-            ("BOTTOM_LEFT", "Bottom Left", "Display in the bottom-left corner"),
-            ("BOTTOM_RIGHT", "Bottom Right", "Display in the bottom-right corner"),
+            ("TOP_LEFT", "Corner: Top-Left", "Dock in the top-left corner"),
+            ("TOP_RIGHT", "Corner: Top-Right", "Dock in the top-right corner"),
+            ("BOTTOM_LEFT", "Corner: Bottom-Left", "Dock in the bottom-left corner"),
+            ("BOTTOM_RIGHT", "Corner: Bottom-Right", "Dock in the bottom-right corner"),
+            ("TOP_BORDER", "Edge: Top", "Dock along the top edge"),
+            ("BOTTOM_BORDER", "Edge: Bottom", "Dock along the bottom edge"),
+            ("LEFT_BORDER", "Edge: Left", "Dock along the left edge"),
+            ("RIGHT_BORDER", "Edge: Right", "Dock along the right edge"),
+            ("FREE", "Floating", "Position the minimap freely by dragging its handle"),
         ],
         default="TOP_LEFT",
+        update=_update_invalidate_batches,
+    )
+
+    offset_x: IntProperty(
+        name="Offset X",
+        description="Free horizontal offset from the default dock position, in pixels",
+        default=0,
+        subtype="PIXEL",
+        update=_update_invalidate_batches,
+    )
+
+    offset_y: IntProperty(
+        name="Offset Y",
+        description="Free vertical offset from the default dock position, in pixels",
+        default=0,
+        subtype="PIXEL",
+        update=_update_invalidate_batches,
+    )
+
+    snap_to_borders: BoolProperty(
+        name="Snap to Borders",
+        description="Snap the minimap to editor borders and corners when dragging it",
+        default=True,
         update=_update_invalidate_batches,
     )
 
@@ -302,6 +330,13 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_list_toggle_btn: BoolProperty(
         name="List Toggle Button",
         description="Show a button in the minimap to toggle the node-type list",
+        default=True,
+        update=_update_invalidate_batches,
+    )
+
+    show_move_btn: BoolProperty(
+        name="Move Button",
+        description="Show a button in the minimap to drag and reposition the minimap",
         default=True,
         update=_update_invalidate_batches,
     )
@@ -621,6 +656,12 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group.prop(settings, "position", text="Position")
 
         col = group.column(align=True)
+        col.active = settings.position == "FREE"
+        col.prop(settings, "offset_x", text="Offset X")
+        col.prop(settings, "offset_y", text="Offset Y")
+        group.prop(settings, "snap_to_borders", text="Snap to Borders")
+
+        col = group.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
         col.prop(settings, "minimap_height", text="Y")
 
@@ -660,6 +701,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         if not settings.follow_view:
             sub.prop(settings, "show_frame_selected_btn", text="Frame Selected")
         sub.prop(settings, "show_list_toggle_btn", text="List Toggle")
+        sub.prop(settings, "show_move_btn", text="Move")
 
         group.separator()
         box = group.box().column()

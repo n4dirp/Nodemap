@@ -14,6 +14,22 @@ MIN_MAP_HEIGHT: int = 80
 HANDLE_THICKNESS: int = 6
 
 # ---------------------------------------------------------------------------
+# Dock / snap-to-border
+# ---------------------------------------------------------------------------
+MAP_SNAP_TOLERANCE: float = 8.0
+DOCK_DWELL_MS: float = 120.0
+
+# Corners snap from farther away than plain edges so they win whenever the map
+# is near one. The centered edge docks are narrow: the map center must sit
+# within this percentage of the safe axis span from the border's midpoint.
+MAP_CORNER_SNAP_RADIUS: float = 20.0
+MAP_SNAP_CENTER_ZONE_PCT: float = 10.0
+
+# Position categories for the free-drag / docked minimap.
+CORNER_POSITIONS: frozenset[str] = frozenset({"TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT"})
+BORDER_POSITIONS: frozenset[str] = frozenset({"TOP_BORDER", "BOTTOM_BORDER", "LEFT_BORDER", "RIGHT_BORDER"})
+
+# ---------------------------------------------------------------------------
 # Framing / zoom
 # ---------------------------------------------------------------------------
 MAX_FRAME_ZOOM: float = 20.0

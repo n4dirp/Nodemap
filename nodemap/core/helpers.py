@@ -168,6 +168,31 @@ def _get_safe_bounds(
     return int(left), int(bottom), int(right), int(top)
 
 
+def clamp_free_rect(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    safe: tuple[float, float, float, float],
+    x_margin: float,
+    y_margin: float,
+    margin: float,
+) -> tuple[float, float]:
+    """Return a ``(x, y)`` origin clamped so the ``(w, h)`` rect stays fully inside safe bounds.
+
+    Only the origin moves; the rect is never shrunk, so free dragging stops at
+    the borders instead of squeezing the map away. ``y_margin`` guards the top
+    edge (context path) and ``margin`` the bottom edge (asset shelf), matching
+    the insets the docked positions use.
+    """
+    sx, sy, ex, ey = safe
+    min_x = sx + x_margin
+    max_x = ex - x_margin - w
+    min_y = sy + margin
+    max_y = ey - y_margin - h
+    return min(max(x, min_x), max_x), min(max(y, min_y), max_y)
+
+
 def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, float, float]:
     """Return ``(x_margin, y_margin, margin_bottom)`` based on corner and visible UI elements.
 
@@ -184,20 +209,22 @@ def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, fl
     y_margin = x_margin
     margin_bottom = x_margin
 
-    adjusted_margin = (map_padding + 25) * ui_scale
+    adjusted_margin = (map_padding + 32) * ui_scale
 
-    match corner:
-        case "TOP_RIGHT" | "TOP_LEFT":
-            if show_context_path:
-                y_margin = adjusted_margin
-            if is_compositor and show_asset_shelf:
-                margin_bottom = adjusted_margin
-
-        case "BOTTOM_RIGHT" | "BOTTOM_LEFT":
-            if is_compositor and show_asset_shelf:
-                y_margin = adjusted_margin
-            if show_context_path:
-                margin_bottom = adjusted_margin
+    # Classify the dock by which vertical edge it sits near: top corners and
+    # the top border treat the context path above and the asset shelf below;
+    # bottom docks mirror that.
+    docks_bottom = corner in ("BOTTOM_RIGHT", "BOTTOM_LEFT", "BOTTOM_BORDER")
+    if docks_bottom:
+        if is_compositor and show_asset_shelf:
+            y_margin = adjusted_margin
+        if show_context_path:
+            margin_bottom = adjusted_margin
+    else:
+        if show_context_path:
+            y_margin = adjusted_margin
+        if is_compositor and show_asset_shelf:
+            margin_bottom = adjusted_margin
 
     return x_margin, y_margin, margin_bottom
 

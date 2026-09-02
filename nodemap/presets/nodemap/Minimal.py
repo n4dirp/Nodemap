@@ -16,6 +16,7 @@ settings.show_frame_all_btn = False
 settings.show_frame_view_btn = False
 settings.show_frame_selected_btn = False
 settings.show_list_toggle_btn = False
+settings.show_move_btn = False
 settings.show_node_labels = False
 settings.compact_node_labels = True
 settings.show_frame_labels = False
