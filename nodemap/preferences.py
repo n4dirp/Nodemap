@@ -7,16 +7,12 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.types import AddonPreferences, PropertyGroup
 
-from .helpers import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
+from .constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
 from .panels import NODEMAP_PT_presets
+from .state import _suppress_update
 
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, "TRACE")
-
-# Guard flag: set True during handle drags to suppress property update
-# callbacks, preventing tree_data invalidation and the resulting one-frame
-# content flash.
-_suppress_update = False
 
 
 def _trace_logger(self, msg, *args, **kwargs):

@@ -5,8 +5,10 @@ import logging
 import bpy
 from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
+from . import resize, selection
+from .animations import AnimationController
+from .constants import HANDLE_THICKNESS, SCROLLBAR_HIT_PAD
 from .framing import (
-    _compute_editor_frame_selected_targets,
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
@@ -15,19 +17,9 @@ from .framing import (
     frame_view,
 )
 from .helpers import (
-    _HANDLE_THICKNESS,
-    _SCROLLBAR_HIT_PAD,
-    _TYPE_LIST_MAX_WIDTH_PCT,
-    _TYPE_LIST_MIN_WIDTH,
-    MIN_MAP_HEIGHT,
-    MIN_MAP_WIDTH,
     _expand_bounds_margin,
-    _find_node_at,
     _get_area_and_region_under_mouse,
-    _get_minimap_margins,
-    _get_node_dims,
     _get_node_tree_bounds,
-    _get_safe_bounds,
     _get_ui_scale,
     redraw_ui,
     start_list_width_animation,
@@ -99,7 +91,7 @@ def _in_list_zone(region_x: int, region_y: int, state: MinimapState) -> bool:
     if state.list.list_width <= 0 or not state.view.rect:
         return False
     map_x, map_y, _, map_h = state.view.rect
-    hit_pad = _HANDLE_THICKNESS * _get_ui_scale()
+    hit_pad = HANDLE_THICKNESS * _get_ui_scale()
     zone_left = map_x + hit_pad
     zone_right = map_x + state.view.inner_padding + state.list.list_width
     zone_rect = state.list.list_zone_rect
@@ -139,7 +131,7 @@ def _list_scrollbar_hit(region_x: int, region_y: int, state: MinimapState) -> bo
     if not scrollbar_track or state.list.scroll_max <= 0:
         return False
     x, y, w, h = scrollbar_track
-    hit_pad = _SCROLLBAR_HIT_PAD * _get_ui_scale()
+    hit_pad = SCROLLBAR_HIT_PAD * _get_ui_scale()
     # The scrollbar sits inside the zone, so the right hit pad must not bleed
     # into the list/map divider band where the LIST resize handle owns hover.
     right = x + w + hit_pad
@@ -172,77 +164,6 @@ _CURSOR_MAP: dict[ResizeHandle, str] = {
     ResizeHandle.C: "SCROLL_XY",
     ResizeHandle.LIST: "MOVE_X",
 }
-
-
-def _get_list_divider_handle(state: MinimapState, region_x: int, region_y: int, ui_scale: float) -> ResizeHandle | None:
-    """Return ``LIST`` when the cursor is over the divider between list and map.
-
-    The divider spans the gap (``6*scale``) between the list zone's right edge
-    and the map content's left edge and uses the same hit thickness as the
-    outer resize borders.
-    """
-    if state.list.list_width <= 0 or not state.list.list_zone_rect or not state.view.rect:
-        return None
-    zone_x, zone_y, zone_w, zone_h = state.list.list_zone_rect
-    # Hit zone starts at the zone's right edge (never reaching into the
-    # scrollbar) and extends right into the map gutter for reachability.
-    zone_right_edge = zone_x + zone_w
-    hit_half_width = (_HANDLE_THICKNESS - 1) * ui_scale
-    if zone_right_edge <= region_x <= zone_right_edge + hit_half_width and zone_y <= region_y <= zone_y + zone_h:
-        return ResizeHandle.LIST
-    return None
-
-
-def _get_resize_handle(
-    state: MinimapState, corner: str, region_x: int, region_y: int, ui_scale: float
-) -> ResizeHandle | None:
-    map_x, map_y, map_w, map_h = state.view.rect
-    if map_w <= 0 or map_h <= 0:
-        return None
-    half_w = _HANDLE_THICKNESS * ui_scale
-
-    def is_near_edge(value, target):
-        return target - half_w <= value <= target + half_w
-
-    match corner:
-        case "TOP_RIGHT":
-            on_left = map_x <= region_x <= map_x + half_w
-            on_bottom = map_y <= region_y <= map_y + half_w
-            if on_left and on_bottom:
-                return ResizeHandle.C
-            if on_left:
-                return ResizeHandle.W
-            if on_bottom:
-                return ResizeHandle.H
-        case "TOP_LEFT":
-            on_right = map_x + map_w - half_w <= region_x <= map_x + map_w
-            on_bottom = map_y <= region_y <= map_y + half_w
-            if on_right and on_bottom:
-                return ResizeHandle.C
-            if on_right:
-                return ResizeHandle.W
-            if on_bottom:
-                return ResizeHandle.H
-        case "BOTTOM_RIGHT":
-            on_left = map_x <= region_x <= map_x + half_w
-            on_top = map_y + map_h - half_w <= region_y <= map_y + map_h
-            if on_left and on_top:
-                return ResizeHandle.C
-            if on_left:
-                return ResizeHandle.W
-            if on_top:
-                return ResizeHandle.H
-        case "BOTTOM_LEFT":
-            on_right = map_x + map_w - half_w <= region_x <= map_x + map_w
-            on_top = map_y + map_h - half_w <= region_y <= map_y + map_h
-            if on_right and on_top:
-                return ResizeHandle.C
-            if on_right:
-                return ResizeHandle.W
-            if on_top:
-                return ResizeHandle.H
-        case _:
-            return None
 
 
 class NODEMAP_OT_toggle(Operator):
@@ -375,33 +296,7 @@ class NODEMAP_OT_navigate(Operator):
     _list_mmb_drag_start: tuple[int, int] | None = None
     _list_last_row_index: int = -1
 
-    _smooth_timer: str | None = None
-    _inertia_active: bool = False
-    _inertia_mode: str | None = None
-    _smooth_velocity: list[float]
-    _anim_active: bool = False
-    _anim_target: list[float]
-    _anim_applied: list[float]
-    _anim_progress: float
-    _anim_acc: list[float]
-    _drag_target: list[float]
-    _drag_active: bool = False
-    _frame_anim_active: bool = False
-    _frame_anim_start_zoom: float = 1.0
-    _frame_anim_start_pan: list[float]
-    _frame_anim_target_zoom: float = 1.0
-    _frame_anim_target_pan: list[float]
-    _editor_anim_active: bool = False
-    _editor_anim_progress: float = 0.0
-    _editor_anim_start_rect: list[float]
-    _editor_anim_target_rect: list[float]
-
-    def _animations_enabled(self, settings, context, default=True) -> bool:
-        if context.preferences.view.use_reduce_motion:
-            return False
-        if settings is None:
-            return default
-        return settings.animations
+    _anim: AnimationController
 
     def _override_ctx(self, context: Context):
         return context.temp_override(
@@ -430,11 +325,11 @@ class NODEMAP_OT_navigate(Operator):
             or self._list_width_dragging
             or self._drag_start is not None
             or self._list_scroll_pressed
-            or self._anim_active
-            or self._inertia_active
-            or self._drag_active
-            or self._frame_anim_active
-            or self._editor_anim_active
+            or self._anim.anim_active
+            or self._anim.inertia_active
+            or self._anim.drag_active
+            or self._anim.frame_anim_active
+            or self._anim.editor_anim_active
         )
 
         if not is_interactive:
@@ -484,7 +379,7 @@ class NODEMAP_OT_navigate(Operator):
             case "MIDDLEMOUSE":
                 if event.value == "PRESS" and in_minimap:
                     state.interaction.pressed = True
-                    self._cancel_smooth(context)
+                    self._anim.cancel_smooth(context)
                     if _in_list_zone(self._mouse_x, self._mouse_y, state):
                         self._list_mmb_dragging = True
                         self._list_mmb_drag_start = (self._mouse_x, self._mouse_y)
@@ -504,15 +399,15 @@ class NODEMAP_OT_navigate(Operator):
                     self._mmb_dragging = False
                     self._mmb_drag_start = None
                     _clamp_pan_to_viewport(self._space, self._region, state)
-                    if settings and self._animations_enabled(settings, context):
-                        speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                    if settings and self._anim._animations_enabled(settings, context):
+                        speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
                         if speed > 2.0:
-                            self._inertia_active = True
-                            self._inertia_mode = "PAN"
-                            self._create_timer(context)
+                            self._anim.inertia_active = True
+                            self._anim.inertia_mode = "PAN"
+                            self._anim.create_timer(context)
                             self._redirect_acc = [0.0, 0.0]
                             return {"RUNNING_MODAL"}
-                    self._smooth_velocity = [0.0, 0.0]
+                    self._anim.smooth_velocity = [0.0, 0.0]
                     self._redirect_acc = [0.0, 0.0]
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
@@ -536,20 +431,20 @@ class NODEMAP_OT_navigate(Operator):
                 return {"PASS_THROUGH"}
 
             case "TIMER":
-                if self._drag_active:
-                    self._apply_smooth_drag(context)
+                if self._anim.drag_active:
+                    self._anim.apply_smooth_drag(context)
                     return {"RUNNING_MODAL"}
-                if self._inertia_active:
-                    self._apply_inertia(context)
+                if self._anim.inertia_active:
+                    self._anim.apply_inertia(context)
                     return {"RUNNING_MODAL"}
-                if self._frame_anim_active:
-                    self._apply_frame_animation(context)
+                if self._anim.frame_anim_active:
+                    self._anim.apply_frame_animation(context)
                     return {"RUNNING_MODAL"}
-                if self._editor_anim_active:
-                    self._apply_editor_animation(context)
+                if self._anim.editor_anim_active:
+                    self._anim.apply_editor_animation(context)
                     return {"RUNNING_MODAL"}
-                if self._anim_active:
-                    self._apply_center_animation(context)
+                if self._anim.anim_active:
+                    self._anim.apply_center_animation(context)
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
             case _:
@@ -601,11 +496,11 @@ class NODEMAP_OT_navigate(Operator):
                 if _in_list_zone(self._mouse_x, self._mouse_y, state) and still_over:
                     state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, state, ("child", label, node_name))
+                        selection.apply_list_range(self, context, state, ("child", label, node_name))
                     elif event.ctrl:
-                        self._select_single_node(context, node_name, toggle=True)
+                        selection.select_single_node(self, context, node_name, toggle=True)
                     else:
-                        self._select_single_node(context, node_name)
+                        selection.select_single_node(self, context, node_name)
                 return {"RUNNING_MODAL"}
             if self._list_toggle_pressed:
                 label = self._list_toggle_pressed
@@ -633,11 +528,11 @@ class NODEMAP_OT_navigate(Operator):
                 ):
                     state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, state, ("header", label))
+                        selection.apply_list_range(self, context, state, ("header", label))
                     elif event.ctrl:
-                        self._select_type_nodes(context, label, toggle=True)
+                        selection.select_type_nodes(self, context, label, toggle=True)
                     else:
-                        self._select_type_nodes(context, label)
+                        selection.select_type_nodes(self, context, label)
                 return {"RUNNING_MODAL"}
             if self._resize_handle:
                 self._resize_handle = None
@@ -655,20 +550,20 @@ class NODEMAP_OT_navigate(Operator):
             if self._dragging:
                 self._dragging = False
                 self._drag_start = None
-                if self._drag_active:
-                    self._pan_acc[0] += self._drag_target[0]
-                    self._pan_acc[1] += self._drag_target[1]
-                    self._drag_target = [0.0, 0.0]
-                    self._drag_active = False
-                if settings and self._animations_enabled(settings, context):
-                    speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                if self._anim.drag_active:
+                    self._pan_acc[0] += self._anim.drag_target[0]
+                    self._pan_acc[1] += self._anim.drag_target[1]
+                    self._anim.drag_target = [0.0, 0.0]
+                    self._anim.drag_active = False
+                if settings and self._anim._animations_enabled(settings, context):
+                    speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
                     if speed > 2.0:
-                        self._inertia_active = True
-                        self._inertia_mode = "VIEW"
-                        if not self._smooth_timer:
-                            self._create_timer(context)
+                        self._anim.inertia_active = True
+                        self._anim.inertia_mode = "VIEW"
+                        if not self._anim.smooth_timer:
+                            self._anim.create_timer(context)
                         return {"RUNNING_MODAL"}
-                self._smooth_velocity = [0.0, 0.0]
+                self._anim.smooth_velocity = [0.0, 0.0]
                 pan_x = int(self._pan_acc[0])
                 pan_y = int(self._pan_acc[1])
                 self._pan_acc = [0.0, 0.0]
@@ -678,13 +573,13 @@ class NODEMAP_OT_navigate(Operator):
                             bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
                     except RuntimeError:
                         pass
-                self._destroy_timer(context)
+                self._anim.destroy_timer(context)
                 return {"RUNNING_MODAL"}
             if not self._dragging and self._was_in_minimap:
                 if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
                     state.cache.force_immediate = True
-                    self._handle_click_selection(
-                        context, event, state, frame=settings.left_click_action == "SELECT_FRAME"
+                    selection.handle_click_selection(
+                        self, context, event, state, frame=settings.left_click_action == "SELECT_FRAME"
                     )
                 self._was_in_minimap = False
                 self._drag_start = None
@@ -695,14 +590,14 @@ class NODEMAP_OT_navigate(Operator):
         # --- Press ---
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
-            self._cancel_smooth(context)
+            self._anim.cancel_smooth(context)
             armed_button_id = _frame_button_at(self._mouse_x, self._mouse_y, state)
             if armed_button_id:
                 self._armed_button = armed_button_id
                 return {"RUNNING_MODAL"}
             # List/map divider — same style as outer resize borders, percent width.
             ui_scale = _get_ui_scale()
-            divider_resize_handle = _get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
+            divider_resize_handle = resize.get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
             if divider_resize_handle:
                 self._list_width_dragging = True
                 state.interaction.resize_active = divider_resize_handle
@@ -818,20 +713,20 @@ class NODEMAP_OT_navigate(Operator):
             if self._dragging:
                 self._dragging = False
                 self._drag_start = None
-                if self._drag_active:
-                    self._pan_acc[0] += self._drag_target[0]
-                    self._pan_acc[1] += self._drag_target[1]
-                    self._drag_target = [0.0, 0.0]
-                    self._drag_active = False
-                if settings and self._animations_enabled(settings, context):
-                    speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
+                if self._anim.drag_active:
+                    self._pan_acc[0] += self._anim.drag_target[0]
+                    self._pan_acc[1] += self._anim.drag_target[1]
+                    self._anim.drag_target = [0.0, 0.0]
+                    self._anim.drag_active = False
+                if settings and self._anim._animations_enabled(settings, context):
+                    speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
                     if speed > 2.0:
-                        self._inertia_active = True
-                        self._inertia_mode = "VIEW"
-                        if not self._smooth_timer:
-                            self._create_timer(context)
+                        self._anim.inertia_active = True
+                        self._anim.inertia_mode = "VIEW"
+                        if not self._anim.smooth_timer:
+                            self._anim.create_timer(context)
                         return {"RUNNING_MODAL"}
-                self._smooth_velocity = [0.0, 0.0]
+                self._anim.smooth_velocity = [0.0, 0.0]
                 pan_x = int(self._pan_acc[0])
                 pan_y = int(self._pan_acc[1])
                 self._pan_acc = [0.0, 0.0]
@@ -841,7 +736,7 @@ class NODEMAP_OT_navigate(Operator):
                             bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
                     except RuntimeError:
                         pass
-                self._destroy_timer(context)
+                self._anim.destroy_timer(context)
                 return {"RUNNING_MODAL"}
             self._was_in_minimap = False
             self._drag_start = None
@@ -849,9 +744,9 @@ class NODEMAP_OT_navigate(Operator):
         # --- Press ---
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
-            self._cancel_smooth(context)
+            self._anim.cancel_smooth(context)
             ui_scale = _get_ui_scale()
-            divider_handle_r = _get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
+            divider_handle_r = resize.get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
             if divider_handle_r:
                 self._list_width_dragging = True
                 state.interaction.resize_active = divider_handle_r
@@ -873,15 +768,15 @@ class NODEMAP_OT_navigate(Operator):
                     child_label, node_name = child_row
                     state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, state, ("child", child_label, node_name))
+                        selection.apply_list_range(self, context, state, ("child", child_label, node_name))
                     elif event.ctrl:
-                        self._select_single_node(context, node_name, toggle=True)
+                        selection.select_single_node(self, context, node_name, toggle=True)
                     else:
-                        self._select_single_node(context, node_name)
+                        selection.select_single_node(self, context, node_name)
                         key = ("child", child_label, node_name)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                     if not (event.shift or event.ctrl):
-                        if not self._view_selected_animated(context, settings):
+                        if not self._anim.view_selected_animated(context, settings):
                             try:
                                 with self._override_ctx(context):
                                     bpy.ops.node.view_selected()
@@ -904,15 +799,15 @@ class NODEMAP_OT_navigate(Operator):
                         return {"RUNNING_MODAL"}
                     state.cache.force_immediate = True
                     if event.shift:
-                        self._apply_list_range(context, state, ("header", row_label))
+                        selection.apply_list_range(self, context, state, ("header", row_label))
                     elif event.ctrl:
-                        self._select_type_nodes(context, row_label, toggle=True)
+                        selection.select_type_nodes(self, context, row_label, toggle=True)
                     else:
-                        self._select_type_nodes(context, row_label)
+                        selection.select_type_nodes(self, context, row_label)
                         key = ("header", row_label)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                     if not (event.shift or event.ctrl):
-                        if not self._view_selected_animated(context, settings):
+                        if not self._anim.view_selected_animated(context, settings):
                             try:
                                 with self._override_ctx(context):
                                     bpy.ops.node.view_selected()
@@ -939,7 +834,9 @@ class NODEMAP_OT_navigate(Operator):
                     return {"RUNNING_MODAL"}
             if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
                 state.cache.force_immediate = True
-                self._handle_click_selection(context, event, state, frame=settings.right_click_action == "SELECT_FRAME")
+                selection.handle_click_selection(
+                    self, context, event, state, frame=settings.right_click_action == "SELECT_FRAME"
+                )
             if settings and settings.right_click_action in ("PAN", "SELECT_PAN"):
                 self._drag_start = (self._mouse_x, self._mouse_y)
                 self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
@@ -952,11 +849,11 @@ class NODEMAP_OT_navigate(Operator):
     def _handle_mouse_move(self, context: Context, event: Event) -> set[str]:
         state, addon, settings, in_minimap = self._minimap_event_context(context)
         if self._list_width_dragging:
-            self._apply_list_width_drag(context)
+            resize.apply_list_width_drag(self, context)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         if self._resize_handle:
-            self._resize_apply_delta(context, event)
+            resize.resize_apply_delta(self, context, event)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         if self._list_scroll_pressed and state.list.scrollbar_dragging:
@@ -1014,11 +911,11 @@ class NODEMAP_OT_navigate(Operator):
             dx = self._mouse_x - self._mmb_drag_start[0]
             dy = self._mouse_y - self._mmb_drag_start[1]
             if abs(dx) <= 1 and abs(dy) <= 1:
-                self._smooth_velocity[0] *= 0.15
-                self._smooth_velocity[1] *= 0.15
+                self._anim.smooth_velocity[0] *= 0.15
+                self._anim.smooth_velocity[1] *= 0.15
             else:
-                self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + dx * 0.4
-                self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + dy * 0.4
+                self._anim.smooth_velocity[0] = self._anim.smooth_velocity[0] * 0.6 + dx * 0.4
+                self._anim.smooth_velocity[1] = self._anim.smooth_velocity[1] * 0.6 + dy * 0.4
             pan_before = state.view.pan
             state.view.pan = (state.view.pan[0] + dx, state.view.pan[1] + dy)
             _clamp_pan_to_viewport(self._space, self._region, state)
@@ -1036,12 +933,14 @@ class NODEMAP_OT_navigate(Operator):
             dx = self._mouse_x - self._drag_start[0]
             dy = self._mouse_y - self._drag_start[1]
             if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
-                if not self._dragging and (self._anim_active or self._frame_anim_active or self._editor_anim_active):
-                    self._cancel_smooth(context)
+                if not self._dragging and (
+                    self._anim.anim_active or self._anim.frame_anim_active or self._anim.editor_anim_active
+                ):
+                    self._anim.cancel_smooth(context)
                 self._dragging = True
                 if self._was_in_minimap:
                     state.interaction.pressed = True
-                    smooth = settings and self._animations_enabled(settings, context, default=False)
+                    smooth = settings and self._anim._animations_enabled(settings, context, default=False)
                     self._pan_view(context, dx, dy, smooth)
                     self._drag_start = (self._mouse_x, self._mouse_y)
             return {"RUNNING_MODAL"}
@@ -1134,273 +1033,6 @@ class NODEMAP_OT_navigate(Operator):
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
 
-    def _node_select_location(self, node) -> tuple[float, float]:
-        """Tree-space coordinate to emulate a click on *node*.
-
-        Native Blender only selects frame nodes when clicked on their
-        header/border, so frames are redirected to their header. Other nodes
-        reuse the minimap hit-test dims so collapsed or never-drawn nodes
-        probe inside their actual drawn bounds.
-        """
-        if node.type == "FRAME":
-            return node.location_absolute.x + 15, node.location_absolute.y - 15
-        w, h = _get_node_dims(node)
-        return node.location_absolute.x + w / 2.0, node.location_absolute.y - h / 2.0
-
-    def _node_fallback_location(self, node) -> tuple[float, float]:
-        """Tree-space point near the node's top-left interior edge.
-
-        Falls inside a collapsed node's header strip whatever its drawn label
-        width, covering center probes that miss due to stale dimensions.
-        """
-        x, y = node.location_absolute.x, node.location_absolute.y
-        if node.type == "FRAME":
-            return x + 15, y - 15
-        return x + 10.0, y - 10.0
-
-    def _project_tree_to_region(self, tree_x: float, tree_y: float) -> tuple[int, int] | None:
-        """Project a tree-space point to editor region pixels via view2d.
-
-        View2d coordinates are tree coordinates scaled by the UI scale factor
-        (mirroring ``_get_visible_rect``), so the point is scaled here first.
-        """
-        view2d = self._region.view2d if self._region else None
-        if not view2d:
-            return None
-        ui = _get_ui_scale()
-        pt = view2d.view_to_region(tree_x * ui, tree_y * ui, clip=False)
-        if not pt:
-            return None
-        return int(pt[0]), int(pt[1])
-
-    def _select_node_via_operator(self, context: Context, node, extend: bool, deselect_all: bool) -> bool:
-        """Select *node* via the native ``node.select`` operator.
-
-        Projects candidate tree positions into the editor's region coordinates
-        and passes those to ``bpy.ops.node.select``, emulating a standard UI
-        click. This avoids the NodeTree "modified" tag that Python property
-        assignment (``node.select = True``) triggers, which forces a full EEVEE
-        material rebuild. Probes run from the node center to its header edge
-        and each pick is verified against ``node.select``, so a silent miss
-        retries instead of reporting success; returns False only when no probe
-        selects the node so callers can fall back to the property API.
-        """
-        if not self._region or not self._region.view2d:
-            return False
-        probes = [self._node_select_location(node)]
-        fallback = self._node_fallback_location(node)
-        if fallback != probes[0]:
-            probes.append(fallback)
-
-        tree_nodes = getattr(getattr(node, "id_data", None), "nodes", None)
-        for probe_index, (probe_tx, probe_ty) in enumerate(probes):
-            projected = self._project_tree_to_region(probe_tx, probe_ty)
-            if projected is None:
-                continue
-            proj_x, proj_y = projected
-            keep = None
-            if probe_index and extend and tree_nodes:
-                keep = {n.name for n in tree_nodes if n.select}
-            kwargs: dict = {"extend": extend}
-            if bpy.app.version >= (3, 0, 0):
-                kwargs["location"] = (proj_x, proj_y)
-                kwargs["deselect_all"] = deselect_all
-            else:
-                kwargs["mouse_x"] = proj_x
-                kwargs["mouse_y"] = proj_y
-            try:
-                with self._override_ctx(context):
-                    bpy.ops.node.select(**kwargs)
-            except Exception as e:
-                logger.debug("Failed to select via operator: %s", e)
-                continue
-            try:
-                if not node.select:
-                    continue
-            except ReferenceError:
-                return False
-            if keep is not None and tree_nodes:
-                # Release neighbors an overlapping retry probe picked up unintentionally.
-                for other in tree_nodes:
-                    if other.select and other.name != node.name and other.name not in keep:
-                        other.select = False
-            return True
-        return False
-
-    def _handle_click_selection(self, context: Context, event: Event, state: dict, frame: bool = False) -> None:
-        space = self._space
-        if not space or space.type != "NODE_EDITOR":
-            return
-        node_tree = space.edit_tree
-        if not node_tree or not node_tree.nodes:
-            return
-
-        tree_coord = _region_to_tree(self._mouse_x, self._mouse_y, state)
-        if tree_coord is None:
-            return
-
-        node = _find_node_at(node_tree.nodes, tree_coord[0], tree_coord[1])
-        if node:
-            if not self._select_node_via_operator(context, node, extend=event.shift, deselect_all=not event.shift):
-                # Fallback for API changes (may trigger EEVEE compile)
-                if event.shift:
-                    node.select = not node.select
-                    if node.select:
-                        node_tree.nodes.active = node
-                else:
-                    for n in node_tree.nodes:
-                        n.select = False
-                    node.select = True
-                    node_tree.nodes.active = node
-
-            if frame:
-                addon = context.preferences.addons.get(__package__)
-                settings = addon.preferences.settings if addon else None
-                if not (settings and self._view_selected_animated(context, settings)):
-                    try:
-                        with self._override_ctx(context):
-                            bpy.ops.node.view_selected()
-                    except RuntimeError:
-                        pass
-
-        state.list.hovered_list_row = None
-        state.interaction.hovered_node_id = None
-        self._redraw_ui()
-
-    def _apply_list_range(self, context: Context, state: MinimapState, target_key: tuple) -> None:
-        """Select all visible rows between the last-clicked and *target_key*.
-
-        Replaces the current selection with the contiguous range, matching
-        standard file-explorer Shift-click behaviour.  The anchor
-        (``_list_last_row_index``) is **not** moved — it stays at the last
-        plain-clicked row so repeated Shift-clicks expand from the same origin.
-        """
-        keys = state.list.visible_row_keys
-        index_map = state.list.visible_row_index_map
-        target_idx = index_map.get(target_key)
-        if target_idx is None:
-            # Fallback for stale map.
-            try:
-                target_idx = keys.index(target_key)
-            except ValueError:
-                return
-        last = self._list_last_row_index
-        if last < 0 or last >= len(keys):
-            lo, hi = target_idx, target_idx
-        else:
-            lo, hi = min(last, target_idx), max(last, target_idx)
-
-        # Deselect everything first so the range *replaces* the selection.
-        space = self._space
-        node_tree = space.edit_tree if space else None
-        if not node_tree:
-            return
-        try:
-            with self._override_ctx(context):
-                bpy.ops.node.select_all(action="DESELECT")
-        except RuntimeError:
-            pass
-
-        for key_idx in range(lo, hi + 1):
-            key = keys[key_idx]
-            if key[0] == "header":
-                self._select_type_nodes(context, key[1], extend=True)
-            elif key[0] == "child":
-                node = node_tree.nodes.get(key[2])
-                if node:
-                    if not self._select_node_via_operator(context, node, extend=True, deselect_all=False):
-                        node.select = True
-        self._redraw_ui()
-
-    def _select_type_nodes(self, context: Context, label: str, extend: bool = False, toggle: bool = False) -> None:
-        """Select all editor nodes whose compiled type label matches *label*.
-
-        When *extend* is True the current selection is preserved and the
-        matching nodes are added.  When *toggle* is True the behaviour
-        depends on the current state: if every matching node is already
-        selected they are all deselected, otherwise they are all selected.
-        """
-        space = self._space
-        state = self._state
-        if not space or space.type != "NODE_EDITOR" or not state:
-            return
-        node_tree = space.edit_tree
-        if not node_tree:
-            return
-        type_nodes = (state.cache.tree_data or {}).get("type_nodes") or {}
-        names = type_nodes.get(label)
-        if not names:
-            return
-
-        if toggle:
-            all_sel = all((node_tree.nodes.get(n) is not None and node_tree.nodes[n].select) for n in names)
-            if all_sel:
-                # Deselect only this type group, preserving other selections.
-                for name in names:
-                    node = node_tree.nodes.get(name)
-                    if node and node.select:
-                        node.select = False
-                self._redraw_ui()
-                return
-            else:
-                deselect = False
-                extend = True
-        else:
-            deselect = not extend
-
-        if deselect:
-            try:
-                with self._override_ctx(context):
-                    bpy.ops.node.select_all(action="DESELECT")
-            except RuntimeError:
-                pass
-        # After the upfront deselect the selection is empty, so every
-        # addition must use extend to accumulate the whole group. Passing
-        # extend=False would replace the previous node on each iteration
-        # and leave only the last one selected (and framed).
-        node_extend = extend or deselect
-        for name in names:
-            node = node_tree.nodes.get(name)
-            if node:
-                # Native operator keeps selection/additive state and sets the
-                # active node without tagging the NodeTree for an EEVEE rebuild.
-                if not self._select_node_via_operator(context, node, extend=node_extend, deselect_all=False):
-                    node.select = True
-        self._redraw_ui()
-
-    def _select_single_node(self, context: Context, node_name: str, extend: bool = False, toggle: bool = False) -> None:
-        """Select only the editor node whose compiled name matches *node_name*.
-
-        When *extend* is True the current selection is preserved and the
-        node is added.  When *toggle* is True the node's selection state
-        is flipped instead of replaced.
-        """
-        space = self._space
-        state = self._state
-        if not space or space.type != "NODE_EDITOR" or not state:
-            return
-        node_tree = space.edit_tree
-        if not node_tree:
-            return
-        node = node_tree.nodes.get(node_name)
-        if not node:
-            return
-        if toggle:
-            node.select = not node.select
-            if node.select:
-                node_tree.nodes.active = node
-        else:
-            if not extend:
-                try:
-                    with self._override_ctx(context):
-                        bpy.ops.node.select_all(action="DESELECT")
-                except RuntimeError:
-                    pass
-            if not self._select_node_via_operator(context, node, extend=extend, deselect_all=False):
-                node.select = True
-                node_tree.nodes.active = node
-        self._redraw_ui()
-
     def _activate_armed_button(self, context: Context, settings) -> None:
         """Release the armed minimap button; run its action when still under the cursor."""
         button_id = self._armed_button
@@ -1433,14 +1065,14 @@ class NODEMAP_OT_navigate(Operator):
         state = self._state
         if not state:
             return
-        smooth = bool(settings) and self._animations_enabled(settings, context)
+        smooth = bool(settings) and self._anim._animations_enabled(settings, context)
         area_ptr = self._area.as_pointer() if self._area else 0
         match button_id:
             case "ALL":
                 if smooth:
                     targets = _compute_frame_all_targets(self._space, self._region, area_ptr)
                     if targets:
-                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                        self._anim.start_frame_animation(context, targets[0], [targets[1], targets[2]])
                 else:
                     frame_all(self._space, self._region, area_ptr)
             case "VIEW":
@@ -1458,7 +1090,7 @@ class NODEMAP_OT_navigate(Operator):
                             )
                         fill = settings.frame_view_fill
                         targets = _compute_frame_to_bounds_targets(visible, fill, area_ptr)
-                        self._start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                        self._anim.start_frame_animation(context, targets[0], [targets[1], targets[2]])
                 else:
                     frame_view(self._space, self._region, area_ptr)
             case "SELECTED":
@@ -1466,7 +1098,7 @@ class NODEMAP_OT_navigate(Operator):
                     targets = _compute_frame_selected_targets(self._space, self._region, area_ptr)
                     if targets:
                         target_zoom = targets[0] if targets[0] is not None else state.view.user_zoom
-                        self._start_frame_animation(context, target_zoom, [targets[1], targets[2]])
+                        self._anim.start_frame_animation(context, target_zoom, [targets[1], targets[2]])
                 else:
                     frame_selected(self._space, self._region, area_ptr)
 
@@ -1485,18 +1117,18 @@ class NODEMAP_OT_navigate(Operator):
         view_delta_x = (dx / scale) * view_zoom_x
         view_delta_y = (dy / scale) * view_zoom_y
         if abs(dx) <= 1 and abs(dy) <= 1:
-            self._smooth_velocity[0] *= 0.15
-            self._smooth_velocity[1] *= 0.15
+            self._anim.smooth_velocity[0] *= 0.15
+            self._anim.smooth_velocity[1] *= 0.15
         else:
-            self._smooth_velocity[0] = self._smooth_velocity[0] * 0.6 + view_delta_x * 0.4
-            self._smooth_velocity[1] = self._smooth_velocity[1] * 0.6 + view_delta_y * 0.4
+            self._anim.smooth_velocity[0] = self._anim.smooth_velocity[0] * 0.6 + view_delta_x * 0.4
+            self._anim.smooth_velocity[1] = self._anim.smooth_velocity[1] * 0.6 + view_delta_y * 0.4
 
         if smooth:
-            self._drag_target[0] += view_delta_x
-            self._drag_target[1] += view_delta_y
-            if not self._drag_active:
-                self._drag_active = True
-                self._create_timer(context)
+            self._anim.drag_target[0] += view_delta_x
+            self._anim.drag_target[1] += view_delta_y
+            if not self._anim.drag_active:
+                self._anim.drag_active = True
+                self._anim.create_timer(context)
             return
 
         self._pan_acc[0] += view_delta_x
@@ -1584,13 +1216,13 @@ class NODEMAP_OT_navigate(Operator):
         state.interaction.pressed = True
         addon = context.preferences.addons.get(__package__)
         settings = addon.preferences.settings if addon else None
-        if settings and self._animations_enabled(settings, context):
-            self._anim_target = [float(pan_x), float(pan_y)]
-            self._anim_applied = [0.0, 0.0]
-            self._anim_progress = 0.0
-            self._anim_acc = [0.0, 0.0]
-            self._anim_active = True
-            self._create_timer(context)
+        if settings and self._anim._animations_enabled(settings, context):
+            self._anim.anim_target = [float(pan_x), float(pan_y)]
+            self._anim.anim_applied = [0.0, 0.0]
+            self._anim.anim_progress = 0.0
+            self._anim.anim_acc = [0.0, 0.0]
+            self._anim.anim_active = True
+            self._anim.create_timer(context)
         else:
             try:
                 with self._override_ctx(context):
@@ -1599,26 +1231,13 @@ class NODEMAP_OT_navigate(Operator):
             except RuntimeError:
                 pass
 
-    def _create_timer(self, context: Context) -> None:
-        if self._smooth_timer:
-            return
-        self._smooth_timer = context.window_manager.event_timer_add(1 / 60, window=context.window)
-
-    def _destroy_timer(self, context: Context) -> None:
-        if self._smooth_timer:
-            try:
-                context.window_manager.event_timer_remove(self._smooth_timer)
-            except (RuntimeError, ValueError):
-                pass
-            self._smooth_timer = None
-
     def _cancel_interaction(self, context: Context) -> None:
-        self._cancel_smooth(context)
+        self._anim.cancel_smooth(context)
         if self._dragging or self._drag_start is not None:
             self._dragging = False
             self._drag_start = None
-            self._drag_active = False
-            self._drag_target = [0.0, 0.0]
+            self._anim.drag_active = False
+            self._anim.drag_target = [0.0, 0.0]
         if self._mmb_dragging:
             self._mmb_dragging = False
             self._mmb_drag_start = None
@@ -1663,340 +1282,6 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.pressed = False
         self._redraw_ui()
 
-    def _cancel_smooth(self, context: Context) -> None:
-        if self._inertia_active:
-            self._inertia_active = False
-            self._inertia_mode = None
-            self._smooth_velocity = [0.0, 0.0]
-            self._destroy_timer(context)
-        if self._anim_active:
-            if self._anim_applied[0] != self._anim_target[0] or self._anim_applied[1] != self._anim_target[1]:
-                remaining_x = self._anim_target[0] - self._anim_applied[0]
-                remaining_y = self._anim_target[1] - self._anim_applied[1]
-                if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
-                    try:
-                        with self._override_ctx(context):
-                            bpy.ops.view2d.pan(deltax=int(remaining_x), deltay=int(remaining_y))
-                    except RuntimeError:
-                        pass
-            self._anim_active = False
-            self._destroy_timer(context)
-        if self._frame_anim_active:
-            state = self._state
-            if state:
-                state.view.anchor_zoom = self._frame_anim_target_zoom
-                state.view.user_zoom = self._frame_anim_target_zoom
-                state.view.pan = (self._frame_anim_target_pan[0], self._frame_anim_target_pan[1])
-                _clamp_pan_to_viewport(self._space, self._region, state)
-            self._frame_anim_active = False
-            self._frame_anim_progress = 0.0
-            self._destroy_timer(context)
-        if self._editor_anim_active:
-            self._cancel_editor_animation(context)
-
-    def _apply_inertia(self, context: Context) -> None:
-        decay = 0.92
-        self._smooth_velocity[0] *= decay
-        self._smooth_velocity[1] *= decay
-        speed = max(abs(self._smooth_velocity[0]), abs(self._smooth_velocity[1]))
-        if speed < 0.5:
-            self._inertia_active = False
-            self._inertia_mode = None
-            self._destroy_timer(context)
-            return
-        if self._inertia_mode == "PAN":
-            state = self._state
-            if state:
-                self._pan_acc[0] += self._smooth_velocity[0]
-                self._pan_acc[1] += self._smooth_velocity[1]
-                dx = int(self._pan_acc[0])
-                dy = int(self._pan_acc[1])
-                self._pan_acc[0] -= dx
-                self._pan_acc[1] -= dy
-                if dx != 0 or dy != 0:
-                    state.view.pan = (state.view.pan[0] + dx, state.view.pan[1] + dy)
-                    _clamp_pan_to_viewport(self._space, self._region, state)
-        elif self._inertia_mode == "VIEW":
-            self._pan_acc[0] += self._smooth_velocity[0]
-            self._pan_acc[1] += self._smooth_velocity[1]
-            dx = int(self._pan_acc[0])
-            dy = int(self._pan_acc[1])
-            self._pan_acc[0] -= dx
-            self._pan_acc[1] -= dy
-            if dx != 0 or dy != 0:
-                try:
-                    with self._override_ctx(context):
-                        bpy.ops.view2d.pan(deltax=dx, deltay=dy)
-                except RuntimeError:
-                    pass
-                _clamp_pan_to_viewport(self._space, self._region, self._state)
-        self._redraw_ui()
-
-    def _apply_smooth_drag(self, context: Context) -> None:
-        if not self._drag_active:
-            return
-        magnitude = (self._drag_target[0] ** 2 + self._drag_target[1] ** 2) ** 0.5
-        raw = magnitude / 200.0
-        follow = 0.25 + raw * 0.55
-        follow = min(follow, 0.8)
-        max_move = 120.0 + magnitude * 0.15
-        max_move = min(max_move, 800.0)
-        dx = self._drag_target[0] * follow
-        dy = self._drag_target[1] * follow
-        dx = max(min(dx, max_move), -max_move)
-        dy = max(min(dy, max_move), -max_move)
-        self._pan_acc[0] += dx
-        self._pan_acc[1] += dy
-        self._drag_target[0] -= dx
-        self._drag_target[1] -= dy
-        pan_x = int(self._pan_acc[0])
-        pan_y = int(self._pan_acc[1])
-        self._pan_acc[0] -= pan_x
-        self._pan_acc[1] -= pan_y
-        if pan_x != 0 or pan_y != 0:
-            try:
-                with self._override_ctx(context):
-                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-            except RuntimeError:
-                pass
-            _clamp_pan_to_viewport(self._space, self._region, self._state)
-        if not self._dragging:
-            self._drag_active = False
-        self._redraw_ui()
-
-    def _apply_center_animation(self, context: Context) -> None:
-        if not self._anim_active:
-            return
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
-        speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
-        self._anim_progress += 1 / frames
-        if self._anim_progress >= 1.0:
-            remaining_x = self._anim_target[0] - self._anim_applied[0]
-            remaining_y = self._anim_target[1] - self._anim_applied[1]
-            if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
-                try:
-                    with self._override_ctx(context):
-                        bpy.ops.view2d.pan(deltax=int(remaining_x), deltay=int(remaining_y))
-                except RuntimeError:
-                    pass
-            self._anim_active = False
-            self._destroy_timer(context)
-            return
-        eased = 1.0 - (1.0 - self._anim_progress) ** 3
-        desired_x = self._anim_target[0] * eased
-        desired_y = self._anim_target[1] * eased
-        delta_x = desired_x - self._anim_applied[0]
-        delta_y = desired_y - self._anim_applied[1]
-        self._anim_applied[0] += delta_x
-        self._anim_applied[1] += delta_y
-        self._anim_acc[0] += delta_x
-        self._anim_acc[1] += delta_y
-        dx = int(self._anim_acc[0])
-        dy = int(self._anim_acc[1])
-        self._anim_acc[0] -= dx
-        self._anim_acc[1] -= dy
-        if dx != 0 or dy != 0:
-            try:
-                with self._override_ctx(context):
-                    bpy.ops.view2d.pan(deltax=dx, deltay=dy)
-            except RuntimeError:
-                pass
-        self._redraw_ui()
-
-    def _start_frame_animation(self, context: Context, target_zoom: float, target_pan: list[float]) -> None:
-        state = self._state
-        if not state:
-            return
-        if self._frame_anim_active:
-            self._frame_anim_active = False
-        self._frame_anim_progress = 0.0
-        self._frame_anim_start_zoom = state.view.user_zoom
-        self._frame_anim_start_pan = [state.view.pan[0], state.view.pan[1]]
-        self._frame_anim_target_zoom = target_zoom
-        self._frame_anim_target_pan = [target_pan[0], target_pan[1]]
-        self._frame_anim_active = True
-        self._create_timer(context)
-
-    def _apply_frame_animation(self, context: Context) -> None:
-        if not self._frame_anim_active:
-            return
-        state = self._state
-        if not state:
-            self._frame_anim_active = False
-            self._destroy_timer(context)
-            return
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
-        speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
-        progress = self._frame_anim_progress + 1 / frames
-        self._frame_anim_progress = progress
-        if progress >= 1.0:
-            state.view.anchor_zoom = self._frame_anim_target_zoom
-            state.view.user_zoom = self._frame_anim_target_zoom
-            state.view.pan = (self._frame_anim_target_pan[0], self._frame_anim_target_pan[1])
-            _clamp_pan_to_viewport(self._space, self._region, state)
-            self._frame_anim_active = False
-            self._frame_anim_progress = 0.0
-            self._destroy_timer(context)
-            self._redraw_ui()
-            return
-        eased = 1.0 - (1.0 - progress) ** 3
-        state.view.user_zoom = (
-            self._frame_anim_start_zoom + (self._frame_anim_target_zoom - self._frame_anim_start_zoom) * eased
-        )
-        state.view.anchor_zoom = state.view.user_zoom
-        state.view.pan = (
-            self._frame_anim_start_pan[0] + (self._frame_anim_target_pan[0] - self._frame_anim_start_pan[0]) * eased,
-            self._frame_anim_start_pan[1] + (self._frame_anim_target_pan[1] - self._frame_anim_start_pan[1]) * eased,
-        )
-        _clamp_pan_to_viewport(self._space, self._region, state)
-        self._redraw_ui()
-
-    def _view_selected_animated(self, context: Context, settings) -> bool:
-        """Ease the editor viewport onto the selected nodes; True when started.
-
-        Falls back to False so callers can run the instant ``node.view_selected``
-        operator when smooth pan is disabled or nothing is selected.
-        """
-        if not self._animations_enabled(settings, context):
-            return False
-        targets = _compute_editor_frame_selected_targets(self._space, self._region)
-        if targets is None:
-            return False
-        self._start_editor_animation(context, list(targets))
-        return True
-
-    def _start_editor_animation(self, context: Context, target_rect: list[float]) -> None:
-        """Begin animating the editor viewport toward the target tree-space rect."""
-        visible = _get_visible_rect(self._space, self._region)
-        if not visible:
-            return
-        # Already framed: skip the animation entirely so re-running focus
-        # selected on the same node does nothing instead of micro-jittering.
-        if self._editor_view_close(visible, target_rect):
-            return
-        self._editor_anim_progress = 0.0
-        self._editor_anim_start_rect = [visible[0], visible[1], visible[2], visible[3]]
-        self._editor_anim_target_rect = target_rect
-        self._editor_anim_active = True
-        self._create_timer(context)
-
-    def _apply_editor_animation(self, context: Context) -> None:
-        if not self._editor_anim_active:
-            return
-        if not self._space or not self._region or not self._state:
-            self._editor_anim_active = False
-            self._destroy_timer(context)
-            return
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
-        speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
-        progress = self._editor_anim_progress + 1 / frames
-        if progress >= 1.0:
-            self._correct_editor_view(context, self._editor_anim_target_rect)
-            self._editor_anim_active = False
-            self._editor_anim_progress = 0.0
-            self._destroy_timer(context)
-            self._redraw_ui()
-            return
-        self._editor_anim_progress = progress
-        eased = 1.0 - (1.0 - progress) ** 3
-        desired = [
-            start + (target - start) * eased
-            for start, target in zip(self._editor_anim_start_rect, self._editor_anim_target_rect)
-        ]
-        self._correct_editor_view(context, desired)
-        self._redraw_ui()
-
-    def _editor_view_close(self, visible: tuple[float, float, float, float], target: list[float]) -> bool:
-        """Return True when the editor viewport already frames *target*.
-
-        Uses the same tolerances as ``_correct_editor_view`` stop conditions
-        (0.5% size, sub-pixel center) so a node that is already framed is left
-        untouched instead of being nudged every animation frame.
-        """
-        if not self._region:
-            return False
-        cur_w = max(visible[2] - visible[0], 1e-6)
-        cur_h = max(visible[3] - visible[1], 1e-6)
-        des_w = max(target[2] - target[0], 1e-6)
-        des_h = max(target[3] - target[1], 1e-6)
-        ratio = min(max(des_w / cur_w, des_h / cur_h), 1e6)
-        if ratio < 1.0 - 0.005 or ratio > 1.0 + 0.005:
-            return False
-        vzx = self._region.width / cur_w
-        vzy = self._region.height / cur_h
-        dcx = (target[0] + target[2] - visible[0] - visible[2]) / 2
-        dcy = (target[1] + target[3] - visible[1] - visible[3]) / 2
-        return abs(dcx * vzx) <= 0.5 and abs(dcy * vzy) <= 0.5
-
-    def _correct_editor_view(self, context: Context, desired: list[float]) -> None:
-        """Nudge the editor view2d one monotonic step toward the desired rect.
-
-        Issues at most a single zoom step and a single rounded pan per call so
-        the animation can never overshoot and oscillate between frames. The
-        view is re-read live each call, keeping the correction idempotent once
-        it is within tolerance.
-        """
-        space = self._space
-        region = self._region
-        if not space or not region:
-            return
-
-        current = _get_visible_rect(space, region)
-        if not current:
-            return
-
-        cur_w = max(current[2] - current[0], 1e-6)
-        cur_h = max(current[3] - current[1], 1e-6)
-        des_w = max(desired[2] - desired[0], 1e-6)
-        des_h = max(desired[3] - desired[1], 1e-6)
-        ratio = min(max(des_w / cur_w, des_h / cur_h), 1e6)
-        if ratio < 1.0 - 0.005:
-            fac = min((1.0 - ratio) / 2.0, 0.4)
-            try:
-                with self._override_ctx(context):
-                    bpy.ops.view2d.zoom_in(zoomfacx=fac, zoomfacy=fac)
-            except RuntimeError:
-                pass
-        elif ratio > 1.0 + 0.005:
-            fac = max((1.0 / ratio - 1.0) / 2.0, -0.4)
-            try:
-                with self._override_ctx(context):
-                    bpy.ops.view2d.zoom_out(zoomfacx=fac, zoomfacy=fac)
-            except RuntimeError:
-                pass
-
-        current = _get_visible_rect(space, region)
-        if not current:
-            return
-
-        view_zoom_x, view_zoom_y = _view_zoom_factors(space, region, current)
-        dcx = (desired[0] + desired[2] - current[0] - current[2]) / 2
-        dcy = (desired[1] + desired[3] - current[1] - current[3]) / 2
-        pan_x = int(round(dcx * view_zoom_x))
-        pan_y = int(round(dcy * view_zoom_y))
-        if pan_x != 0 or pan_y != 0:
-            try:
-                with self._override_ctx(context):
-                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-            except RuntimeError:
-                pass
-
-    def _cancel_editor_animation(self, context: Context) -> None:
-        """Snap the editor viewport to the animation target and stop stepping."""
-        if not self._editor_anim_active:
-            return
-        self._editor_anim_active = False
-        self._editor_anim_progress = 0.0
-        if self._space and self._region:
-            self._correct_editor_view(context, self._editor_anim_target_rect)
-        self._destroy_timer(context)
-
     def _update_cursor(self, context: Context, event: Event) -> None:
         state = self._state
         if not state or not state.view.rect:
@@ -2013,7 +1298,7 @@ class NODEMAP_OT_navigate(Operator):
             return
         # Divider takes precedence over outer borders and list hover.
         ui_scale = _get_ui_scale()
-        divider = _get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
+        divider = resize.get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
         if divider:
             old_handle = state.interaction.hovered_handle
             state.interaction.hovered_handle = divider
@@ -2049,101 +1334,7 @@ class NODEMAP_OT_navigate(Operator):
             return None
         corner = addon.preferences.settings.position
         ui_scale = _get_ui_scale()
-        return _get_resize_handle(state, corner, self._mouse_x, self._mouse_y, ui_scale)
-
-    def _resize_apply_delta(self, context: Context, event: Event) -> None:
-        addon = context.preferences.addons.get(__package__)
-        if not addon:
-            return
-        settings = addon.preferences.settings
-        if not self._resize_start_values:
-            return
-        w0, h0 = self._resize_start_values
-        dx = self._mouse_x - self._resize_start_mouse[0]
-        dy = self._mouse_y - self._resize_start_mouse[1]
-        corner = settings.position
-
-        ui_scale = _get_ui_scale()
-        sx, sy, ex, ey = _get_safe_bounds(self._area, self._region)
-        x_margin, y_margin, margin = _get_minimap_margins(self._space, corner, ui_scale)
-
-        safe_w = ex - sx
-        safe_h = ey - sy
-        max_width_pct = settings.max_width_pct / 100.0
-        max_height_pct = settings.max_height_pct / 100.0
-        max_w = max(MIN_MAP_WIDTH, int((safe_w - 2 * x_margin) * max_width_pct))
-        max_h = max(MIN_MAP_HEIGHT, int((safe_h - y_margin - margin) * max_height_pct))
-
-        # Suppress property update callbacks during drag to avoid clearing
-        # tree_data, which causes a one-frame flash while recompiling.
-        from . import preferences as _pref_mod
-
-        _pref_mod._suppress_update = True
-        try:
-            if self._resize_handle in (ResizeHandle.W, ResizeHandle.C):
-                if corner in ("TOP_RIGHT", "BOTTOM_RIGHT"):
-                    new_w = max(MIN_MAP_WIDTH, min(max_w, int(w0 - dx / ui_scale)))
-                else:
-                    new_w = max(MIN_MAP_WIDTH, min(max_w, int(w0 + dx / ui_scale)))
-                settings.minimap_width = new_w
-
-            if self._resize_handle in (ResizeHandle.H, ResizeHandle.C):
-                if corner in ("TOP_RIGHT", "TOP_LEFT"):
-                    new_h = max(MIN_MAP_HEIGHT, min(max_h, int(h0 - dy / ui_scale)))
-                else:
-                    new_h = max(MIN_MAP_HEIGHT, min(max_h, int(h0 + dy / ui_scale)))
-                settings.minimap_height = new_h
-        finally:
-            _pref_mod._suppress_update = False
-
-        state = self._state
-        if not state:
-            return
-        state.interaction.hovered_handle = self._resize_handle
-        state.view.width_clamped = settings.minimap_width >= max_w or settings.minimap_width <= MIN_MAP_WIDTH
-        state.view.height_clamped = settings.minimap_height >= max_h or settings.minimap_height <= MIN_MAP_HEIGHT
-
-    def _apply_list_width_drag(self, context: Context) -> None:
-        """Update the type-list percent width from the current mouse delta."""
-        state = self._state
-        addon = context.preferences.addons.get(__package__)
-        if not state or not addon:
-            return
-        settings = addon.preferences.settings
-        if self._list_width_start_map_w <= 0:
-            return
-        dx = self._mouse_x - self._list_width_start_x
-        map_w = self._list_width_start_map_w
-        ui_scale = _get_ui_scale()
-        min_w = _TYPE_LIST_MIN_WIDTH * ui_scale
-        max_w = map_w * _TYPE_LIST_MAX_WIDTH_PCT
-        start_w = map_w * (self._list_width_start_pct / 100.0)
-        start_w = min(max(start_w, min_w), max_w)
-        new_w = min(max(start_w + dx, min_w), max_w)
-        new_pct = int(round(new_w / max(map_w, 1.0) * 100.0))
-        new_pct = min(max(new_pct, 15), 50)
-        from . import preferences as _pref_mod
-
-        _pref_mod._suppress_update = True
-        try:
-            settings.type_list_width_pct = new_pct
-        finally:
-            _pref_mod._suppress_update = False
-        # Preserve framing so the same world rect stays centered in the
-        # reduced/expanded available width (100→75 keeps same relative pos).
-        old_w = state.list.list_width
-        if abs(new_w - old_w) >= 0.5:
-            from .transforms import _preserve_view_for_list_width
-
-            _preserve_view_for_list_width(state, old_w, new_w, ui_scale)
-        # Drive the zone width live (per-pixel) so the pill tracks the cursor
-        # without the integer-percent quantization or a one-frame zone lag.
-        state.list.dragging_width = new_w
-        state.list.list_width = new_w
-        state.list.width_clamped = new_w <= min_w + 0.5 or new_w >= max_w - 0.5
-        # Keep state hover in sync so the pill draws during drag.
-        state.interaction.hovered_handle = ResizeHandle.LIST
-        state.interaction.resize_active = ResizeHandle.LIST
+        return resize.get_resize_handle(state, corner, self._mouse_x, self._mouse_y, ui_scale)
 
     def invoke(self, context: Context, _event: Event) -> set[str]:
         if context.area.type != "NODE_EDITOR":
@@ -2161,27 +1352,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_width_start_x = 0
         self._list_width_start_pct = 35
         self._list_width_start_map_w = 0.0
-        self._smooth_timer = None
-        self._inertia_active = False
-        self._inertia_mode = None
-        self._smooth_velocity = [0.0, 0.0]
-        self._anim_active = False
-        self._anim_target = [0.0, 0.0]
-        self._anim_applied = [0.0, 0.0]
-        self._anim_progress = 0.0
-        self._anim_acc = [0.0, 0.0]
-        self._drag_target = [0.0, 0.0]
-        self._drag_active = False
-        self._frame_anim_active = False
-        self._frame_anim_start_zoom = 1.0
-        self._frame_anim_start_pan = [0.0, 0.0]
-        self._frame_anim_target_zoom = 1.0
-        self._frame_anim_target_pan = [0.0, 0.0]
-        self._frame_anim_progress = 0.0
-        self._editor_anim_active = False
-        self._editor_anim_progress = 0.0
-        self._editor_anim_start_rect = [0.0, 0.0, 0.0, 0.0]
-        self._editor_anim_target_rect = [0.0, 0.0, 0.0, 0.0]
+        self._anim = AnimationController(self)
         _minimap_window_operators[self._window_ptr] = self
         context.window_manager.modal_handler_add(self)
         ops_keys = list(_minimap_window_operators.keys())
@@ -2193,7 +1364,7 @@ class NODEMAP_OT_navigate(Operator):
         if self._window_ptr in _minimap_window_operators:
             del _minimap_window_operators[self._window_ptr]
         logger.debug("cancel: ops_after=%s", list(_minimap_window_operators.keys()))
-        self._destroy_timer(context)
+        self._anim.destroy_timer(context)
         if self._state is not None:
             self._state.view.width_clamped = False
             self._state.view.height_clamped = False
@@ -2221,13 +1392,20 @@ class NODEMAP_OT_open_preferences(Operator):
 
     def execute(self, context):
         bpy.ops.screen.userpref_show()
-        bpy.context.preferences.active_section = "ADDONS"
-
-        window_manager = context.window_manager
-        window_manager.addon_search = "Nodemap"
-
+        context.preferences.active_section = "ADDONS"
+        context.window_manager.addon_search = "Nodemap"
         try:
-            bpy.ops.preferences.addon_expand(module="render_commander")
+            import addon_utils
+
+            module = __package__
+            mod = addon_utils.addons_fake_modules.get(module)
+
+            if mod is not None:
+                bl_info = addon_utils.module_bl_info(mod)
+
+                if not bl_info["show_expanded"]:
+                    bpy.ops.preferences.addon_expand(module=module)
+
         except RuntimeError as e:
             self.report({"WARNING"}, f"Could not expand addon: {e}")
 

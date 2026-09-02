@@ -7,7 +7,7 @@ import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from .theme import _srgb_to_linear, _theme_rgba
+from .theme import _srgb_to_linear
 
 GPUStageInterfaceInfo = gpu.types.GPUStageInterfaceInfo
 GPUShaderCreateInfo = gpu.types.GPUShaderCreateInfo
@@ -774,22 +774,6 @@ def _build_noodle_batch(
         indices=indices,
     )
     return shader, batch
-
-
-def _get_theme_colors():
-    return {
-        "bg_color": _theme_rgba("user_interface.wcol_toolbar_item.inner", (0.25, 0.25, 0.25, 1.0)),
-        "panel_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.02)),
-        "tile_default": _theme_rgba("user_interface.wcol_regular.inner", (0.25, 0.25, 0.25, 1.0)),
-        "tile_picked": _theme_rgba("user_interface.wcol_regular.inner_sel", (0.28, 0.45, 0.7, 1.0)),
-        "border_active": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
-        "tile_border": _theme_rgba("user_interface.wcol_regular.outline", (1.0, 1.0, 1.0, 0.02)),
-        "scroll_bar": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),
-        "text": _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0)),
-        "info_text": _theme_rgba("view_3d.space.text_hi", (1.0, 1.0, 1.0, 1.0)),
-        "tile_text": _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0)),
-        "tile_text_inactive": _theme_rgba("user_interface.wcol_regular.text", (1.0, 1.0, 1.0, 1.0)),
-    }
 
 
 def _draw_text_with_shadow(

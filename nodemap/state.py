@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -13,6 +14,22 @@ logger = logging.getLogger(__package__)
 
 Rect = tuple[float, float, float, float]
 Vec2 = tuple[float, float]
+
+# Guard flag: set True during handle drags to suppress property update
+# callbacks, preventing tree_data invalidation and the resulting one-frame
+# content flash.
+_suppress_update = False
+
+
+@contextmanager
+def suppress_update_callbacks():
+    """Suppress property update callbacks while the context is active."""
+    global _suppress_update
+    _suppress_update = True
+    try:
+        yield
+    finally:
+        _suppress_update = False
 
 
 class ResizeHandle(StrEnum):
@@ -128,30 +145,44 @@ class RenderCache:
     last_move_refresh: float = 0.0
     _batches_dirty: bool = False
 
+    # Field categories for declarative invalidation.
+    _BATCH_FIELDS: tuple[str, ...] = (
+        "backdrops_batch",
+        "borders_batch",
+        "highlight_borders_batch",
+        "frames_fill_batch",
+        "frames_border_batch",
+        "node_labels",
+        "wire_batches",
+        "wire_shadow_batch",
+        "marker_batches",
+        "socket_batch",
+        "socket_shadow",
+        "reroute_batch",
+        "batch_key",
+        "wire_key",
+        "list_key",
+        "list_entries",
+        "list_layout",
+        "list_children",
+        "list_nodes_by_name",
+        "list_swatches_batch",
+    )
+
+    def _reset_fields(self, field_names: tuple[str, ...]) -> None:
+        """Reset the given fields to their default values."""
+        defaults = {
+            f.name: f.default if f.default is not f.default_factory else f.default_factory()
+            for f in self.__dataclass_fields__.values()
+        }
+        for name in field_names:
+            setattr(self, name, defaults[name])
+
     def invalidate_all(self) -> None:
         """Clear all compiled batch data, fingerprints, and tree data."""
+        self._reset_fields(self._BATCH_FIELDS)
         self.fingerprint = None
         self.tree_data = None
-        self.backdrops_batch = None
-        self.borders_batch = None
-        self.highlight_borders_batch = None
-        self.frames_fill_batch = None
-        self.frames_border_batch = None
-        self.node_labels = None
-        self.wire_batches = None
-        self.wire_shadow_batch = None
-        self.marker_batches = None
-        self.socket_batch = None
-        self.socket_shadow = None
-        self.reroute_batch = None
-        self.batch_key = None
-        self.wire_key = None
-        self.list_key = None
-        self.list_entries = None
-        self.list_layout = None
-        self.list_children = {}
-        self.list_nodes_by_name = {}
-        self.list_swatches_batch = None
 
     def invalidate_batches_only(self) -> None:
         """Clear GPU batch data while preserving tree data and fingerprints.
@@ -159,25 +190,7 @@ class RenderCache:
         Use for display-only preference changes that affect rendering, not
         tree data.
         """
-        self.backdrops_batch = None
-        self.borders_batch = None
-        self.highlight_borders_batch = None
-        self.frames_fill_batch = None
-        self.frames_border_batch = None
-        self.node_labels = None
-        self.wire_batches = None
-        self.wire_shadow_batch = None
-        self.marker_batches = None
-        self.socket_batch = None
-        self.socket_shadow = None
-        self.reroute_batch = None
-        self.batch_key = None
-        self.wire_key = None
-        self.list_key = None
-        self.list_entries = None
-        self.list_layout = None
-        self.list_children = {}
-        self.list_swatches_batch = None
+        self._reset_fields(self._BATCH_FIELDS)
 
 
 @dataclass
@@ -193,9 +206,6 @@ class MinimapState:
     last_tree_ptr: int | None = None
     tree_views: dict[int, tuple[float, float, float]] = field(default_factory=dict)
 
-
-# Socket indicator pill size multiplier (in tree units).
-SOCKET_PILL_SIZE_MULTIPLIER = 2.0
 
 _minimap_state: dict[int, MinimapState] = {}
 _minimap_window_operators: dict[int, Any] = {}

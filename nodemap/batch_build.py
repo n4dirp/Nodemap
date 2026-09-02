@@ -2,11 +2,18 @@
 
 import logging
 import math
+from dataclasses import dataclass
 from typing import Any
 
 import blf
 from gpu_extras.batch import batch_for_shader
 
+from .constants import (
+    BATCH_DRIFT_PX,
+    CULL_MARGIN_PX,
+    MIN_SOCKET_SCALE,
+    SCALE_REBUILD_REL,
+)
 from .gpu_draw import (
     _build_noodle_batch,
     _build_pill_batch,
@@ -19,19 +26,6 @@ from .theme import _alpha_mul, _srgb_to_linear
 
 logger = logging.getLogger(__package__)
 
-_MIN_SOCKET_SCALE = 0.15
-
-# Rebuild cached batches when the map scale drifts this far from the baked
-# scale (relative); only radius/thickness/font buckets depend on it.
-# 0.015 keeps radius error under ~0.03 px at minimap scale while avoiding
-# per-frame rebuilds during smooth zoom animations (frame_all / frame_view),
-# where 0.002 caused a rebuild every ~0.2% zoom change.
-_SCALE_REBUILD_REL = 0.015
-# Force a batch rebuild when the per-frame anchor drifts this far from the
-# bake-time anchor; bounds how stale rect culling may become (px).
-_BATCH_DRIFT_PX = 256.0
-_CULL_MARGIN_PX = _BATCH_DRIFT_PX + 32.0
-
 
 def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
     """Return triangular indices for quad batches."""
@@ -41,6 +35,37 @@ def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:
         indices.append((base, base + 1, base + 2))
         indices.append((base + 2, base + 3, base))
     return indices
+
+
+def _emit_quad(
+    dst: dict,
+    left: float,
+    top: float,
+    right: float,
+    bottom: float,
+    uv_w: float,
+    uv_h: float,
+    radius: float,
+    color,
+    half_size: tuple[float, float] | None = None,
+    line_width: float | None = None,
+) -> None:
+    """Append one rounded-rect quad to a layer's scratch attributes.
+
+    ``left``/``right`` are the exact pos corner values so float results stay
+    identical to the inline vertex code. Sockets and reroutes pass a smaller
+    ``half_size`` than their panned uv span; everything else derives it from the
+    uv span.
+    """
+    dst["pos"].extend([(left, top, 0.0), (right, top, 0.0), (right, bottom, 0.0), (left, bottom, 0.0)])
+    dst["uv"].extend([(-uv_w, -uv_h), (uv_w, -uv_h), (uv_w, uv_h), (-uv_w, uv_h)])
+    hs = half_size if half_size is not None else (uv_w, uv_h)
+    dst["half_size"].extend([hs] * 4)
+    dst["radius"].extend([radius] * 4)
+    dst["color"].extend([color] * 4)
+    line_widths = dst.get("line_width")
+    if line_widths is not None:
+        line_widths.extend([line_width] * 4)
 
 
 def _compute_frame_depths(node_infos: list[dict]) -> dict[int, int]:
@@ -125,6 +150,425 @@ def _resolve_frame_label_layout(entries: list[dict], ui_scale: float) -> list[di
     return resolved
 
 
+@dataclass
+class _BakeContext:
+    """Bake-time shared parameters and per-layer scratch attribute buffers."""
+
+    state: MinimapState
+    tree_data: dict
+    node_infos: list
+    frame_depths: dict
+    scale: float
+    bake_scale: float
+    origin_x: float
+    origin_y: float
+    ui_scale: float
+    font_id: int
+    min_dim: float
+    cull_left: float
+    cull_right: float
+    cull_bottom: float
+    cull_top: float
+    show_borders: bool
+    hovered_type: str | None
+    hovered_node_name: str | None
+    highlight_outline: tuple | None
+    highlight_margin: float
+    highlight_line_width: float
+    frame_label_entries: list
+    node_labels: list
+    fill_attr: dict
+    frame_fill_attr: dict
+    border_attr: dict
+    frame_border_attr: dict
+    highlight_attr: dict
+
+
+def _emit_node(ctx: "_BakeContext", info: dict) -> None:
+    """Emit one node's fill/border/highlight quads plus its label scratch entries."""
+    node_w_raw = info["tree_w"] * ctx.bake_scale
+    node_h_raw = info["tree_h"] * ctx.bake_scale
+    bx = (info["tree_x"] - ctx.origin_x) * ctx.bake_scale
+    by = (info["tree_y"] - ctx.origin_y) * ctx.bake_scale
+    node_w = max(node_w_raw, 1.0)
+    node_h = max(node_h_raw, 1.0)
+    is_frame = info["is_frame"]
+
+    # Cull nodes whose quads cannot intersect the minimap interior
+    if bx >= ctx.cull_right or bx + node_w <= ctx.cull_left or by >= ctx.cull_top or by + node_h <= ctx.cull_bottom:
+        return
+
+    if is_frame:
+        node_r = info["node_r_base"] * ctx.ui_scale * 1.6
+    else:
+        node_r = info["node_r_base"] * ctx.ui_scale * (ctx.bake_scale * 2)
+
+    is_tiny = (node_w < ctx.min_dim or node_h < ctx.min_dim) and not is_frame
+
+    border_color = info["border_color"]
+    border_w = info["border_w"]
+    # The normal node border is left as-is (active/selection styling);
+    # list hover instead gets a separate outside outline (see below).
+    if ctx.highlight_outline:
+        if ctx.hovered_type is not None and info.get("type_label") == ctx.hovered_type:
+            is_hovered = True
+        elif ctx.hovered_node_name is not None and info.get("name") == ctx.hovered_node_name:
+            is_hovered = True
+        else:
+            is_hovered = False
+    else:
+        is_hovered = False
+
+    # Borders always emit vertices regardless of on-screen size so they
+    # stay visible at any zoom (hover and normal alike); the SDF shader
+    # clamps the line width for tiny nodes.
+    draw_border = ctx.show_borders
+
+    if is_tiny:
+        node_w_final = max(node_w, ctx.min_dim)
+        node_h_final = max(node_h, ctx.min_dim)
+        half_w = node_w_final / 2
+        half_h = node_h_final / 2
+        right = bx + node_w_final
+        bottom = by + node_h_final
+        _emit_quad(ctx.fill_attr, bx, by, right, bottom, half_w, half_h, node_r, info["fill_color"])
+        if draw_border:
+            _emit_quad(
+                ctx.border_attr, bx, by, right, bottom, half_w, half_h, node_r, border_color, line_width=border_w
+            )
+        if is_hovered:
+            outline_x = bx - ctx.highlight_margin
+            outline_y = by - ctx.highlight_margin
+            outline_w = node_w_final + ctx.highlight_margin * 2
+            outline_h = node_h_final + ctx.highlight_margin * 2
+            _emit_quad(
+                ctx.highlight_attr,
+                outline_x,
+                outline_y,
+                outline_x + outline_w,
+                outline_y + outline_h,
+                outline_w / 2,
+                outline_h / 2,
+                node_r,
+                ctx.highlight_outline,
+                line_width=ctx.highlight_line_width,
+            )
+    else:
+        half_w = node_w / 2
+        half_h = node_h / 2
+        right = bx + node_w
+        bottom = by + node_h
+        _emit_quad(
+            ctx.frame_fill_attr if is_frame else ctx.fill_attr,
+            bx,
+            by,
+            right,
+            bottom,
+            half_w,
+            half_h,
+            node_r,
+            info["fill_color"],
+        )
+        if draw_border:
+            _emit_quad(
+                ctx.frame_border_attr if is_frame else ctx.border_attr,
+                bx,
+                by,
+                right,
+                bottom,
+                half_w,
+                half_h,
+                node_r,
+                border_color,
+                line_width=border_w,
+            )
+        if is_hovered:
+            outline_x = bx - ctx.highlight_margin
+            outline_y = by - ctx.highlight_margin
+            outline_w = node_w + ctx.highlight_margin * 2
+            outline_h = node_h + ctx.highlight_margin * 2
+            _emit_quad(
+                ctx.highlight_attr,
+                outline_x,
+                outline_y,
+                outline_x + outline_w,
+                outline_y + outline_h,
+                outline_w / 2,
+                outline_h / 2,
+                node_r,
+                ctx.highlight_outline,
+                line_width=ctx.highlight_line_width,
+            )
+
+        if is_frame:
+            # Zoom gate evaluated live per bake (user_zoom drives scale),
+            # so labels appear/disappear at the threshold without waiting
+            # for a tree recompile.
+            if not ctx.state.view.user_zoom >= 0.8:
+                return
+            frame_label = info.get("frame_label")
+            if frame_label:
+                text, text_color, bg_label_color = frame_label
+                label_font_size = max(6, min(11, int(11 * ctx.ui_scale * ctx.bake_scale * 8)))
+                blf.size(ctx.font_id, label_font_size)
+                text_w, text_h = blf.dimensions(ctx.font_id, text)
+                label_pad = 2 * ctx.ui_scale
+                label_w = text_w + 2 * label_pad
+                label_h = text_h + 2 * label_pad
+                ctx.frame_label_entries.append(
+                    {
+                        "text": text,
+                        "text_color": text_color,
+                        "bg_label_color": bg_label_color,
+                        "font_size": label_font_size,
+                        "text_w": text_w,
+                        "text_h": text_h,
+                        "pad": label_pad,
+                        "node_r": node_r,
+                        "frame_h": node_h,
+                        "depth": ctx.frame_depths.get(info["ptr"], 0),
+                        "rect": (
+                            bx + (node_w - label_w) / 2,
+                            by + node_h + 3 * ctx.ui_scale - label_pad,
+                            label_w,
+                            label_h,
+                        ),
+                    }
+                )
+        else:
+            label_type = info.get("node_label_type")
+            label_text = info.get("node_label_text")
+            if label_type and label_text and node_w > 6 * ctx.ui_scale and node_h > 6 * ctx.ui_scale:
+                text_color = info["node_label_color"]
+                if label_type == "full":
+                    font_size = max(6, min(int(11 * ctx.ui_scale), int(min(node_w, node_h) * 0.35)))
+                    lines = _get_node_label_lines(label_text, ctx.font_id, font_size, node_w - 4 * ctx.ui_scale, 3)
+                    if lines:
+                        blf.size(ctx.font_id, font_size)
+                        line_h = blf.dimensions(ctx.font_id, "Ay")[1] + 1
+                        ascent_h = blf.dimensions(ctx.font_id, "A")[1]
+                        text_block_h = (len(lines) - 1) * line_h + ascent_h
+                        start_y = by + (node_h - text_block_h) / 2
+                        for i, line in enumerate(lines):
+                            line_w, _ = blf.dimensions(ctx.font_id, line)
+                            label_x = bx + (node_w - line_w) / 2
+                            label_y = start_y + (len(lines) - 1 - i) * line_h
+                            ctx.node_labels.append((ctx.font_id, line, label_x, label_y, text_color, font_size))
+                else:
+                    font_size = max(6, min(int(11 * ctx.ui_scale), int(min(node_w, node_h) * 0.45)))
+                    blf.size(ctx.font_id, font_size)
+                    text_w, text_h = blf.dimensions(ctx.font_id, label_text)
+                    text_x = bx + (node_w - text_w) / 2
+                    text_y = by + (node_h - text_h) / 2
+                    ctx.node_labels.append((ctx.font_id, label_text, text_x, text_y, text_color, font_size))
+
+
+def _emit_frame_labels(ctx: "_BakeContext") -> None:
+    """Resolve frame-label collisions and emit their backdrops plus text."""
+    for entry in _resolve_frame_label_layout(ctx.frame_label_entries, ctx.ui_scale):
+        rect_x, rect_y, label_w, label_h = entry["rect"]
+        label_pad = entry["pad"]
+        _emit_quad(
+            ctx.frame_fill_attr,
+            rect_x,
+            rect_y,
+            rect_x + label_w,
+            rect_y + label_h,
+            label_w / 2,
+            label_h / 2,
+            entry["node_r"],
+            entry["bg_label_color"],
+        )
+        ctx.node_labels.append(
+            (
+                ctx.font_id,
+                entry["text"],
+                rect_x + label_pad,
+                rect_y + label_pad,
+                entry["text_color"],
+                entry["font_size"],
+            )
+        )
+
+
+def _bake_rect(ctx: "_BakeContext", src: dict, get_shader, cache_field: str, has_line_width: bool) -> None:
+    """Bake one rounded-rect layer's scratch attributes into a GPU batch."""
+    cache = ctx.state.cache
+    num = len(src["pos"]) // 4
+    if num <= 0:
+        setattr(cache, cache_field, None)
+        return
+    data = {
+        "pos": src["pos"],
+        "uv": src["uv"],
+        "halfSize": src["half_size"],
+        "radius": src["radius"],
+        "color": src["color"],
+    }
+    if has_line_width:
+        data["lineWidth"] = src["line_width"]
+    setattr(cache, cache_field, batch_for_shader(get_shader(), "TRIS", data, indices=_create_quad_indices(num)))
+
+
+def _bake_sockets(ctx: "_BakeContext") -> None:
+    """Bake socket-ph, reroute label entries, and the socket pill batch."""
+    pill_h = max(1, ctx.tree_data["socket_ph_base"] * ctx.bake_scale * ctx.ui_scale)
+    pill_w = pill_h
+    ctx.state.cache.socket_ph = pill_h
+    # Extend node labels with reroute labels before socket batch cull check,
+    # keeping a single BLF measurement pass for all text.
+    reroute_labels_raw = ctx.tree_data.get("reroute_labels_raw") if ctx.tree_data.get("reroute_on") else None
+    if reroute_labels_raw and ctx.scale >= MIN_SOCKET_SCALE:
+        # Quick visibility cull for labels: skip far off-screen reroutes
+        # to avoid BLF measurement overhead.
+        for entry in reroute_labels_raw:
+            tree_x = entry.get("tree_x")
+            tree_y = entry.get("tree_y")
+            if tree_x is None or tree_y is None:
+                continue
+            baked_x = (tree_x - ctx.origin_x) * ctx.bake_scale
+            baked_y = (tree_y - ctx.origin_y) * ctx.bake_scale
+            if (
+                baked_x < ctx.cull_left - 60
+                or baked_x > ctx.cull_right + 60
+                or baked_y < ctx.cull_bottom - 20
+                or baked_y > ctx.cull_top + 40
+            ):
+                continue
+            text = entry.get("text", "")
+            if not text:
+                continue
+            text_color = entry.get("color") or _alpha_mul((1.0, 1.0, 1.0, 1.0), 1.0)
+            font_size = max(6, min(11, int(10 * ctx.ui_scale)))
+            blf.size(ctx.font_id, font_size)
+            text_w, text_h = blf.dimensions(ctx.font_id, text)
+            label_x = baked_x - text_w * 0.5
+            label_y = baked_y + pill_h * 0.5 + 3.0 * ctx.ui_scale
+            ctx.state.cache.node_labels.append((ctx.font_id, text, label_x, label_y, text_color, font_size))
+
+    if ctx.tree_data["socket_items"] and ctx.scale >= MIN_SOCKET_SCALE:
+        half_w = pill_w / 2
+        half_h = pill_h / 2
+        pill_radius = pill_h / 2
+        socket_pos = []
+        socket_uv = []
+        socket_half_size = []
+        socket_radius = []
+        socket_color = []
+        socket_attr = {
+            "pos": socket_pos,
+            "uv": socket_uv,
+            "half_size": socket_half_size,
+            "radius": socket_radius,
+            "color": socket_color,
+        }
+        socket_pad = 1.5
+        for color, positions in ctx.tree_data["socket_items"].items():
+            linear_color = _srgb_to_linear(color)
+            for sx_tree, sy_tree in positions:
+                socket_baked_x = (sx_tree - ctx.origin_x) * ctx.bake_scale
+                socket_baked_y = (sy_tree - ctx.origin_y) * ctx.bake_scale
+                _emit_quad(
+                    socket_attr,
+                    socket_baked_x - half_w - socket_pad,
+                    socket_baked_y - half_h - socket_pad,
+                    socket_baked_x + half_w + socket_pad,
+                    socket_baked_y + half_h + socket_pad,
+                    half_w + socket_pad,
+                    half_h + socket_pad,
+                    pill_radius,
+                    linear_color,
+                    half_size=(half_w, half_h),
+                )
+        num_sockets = len(socket_pos) // 4
+        if num_sockets > 0:
+            shader = _get_batch_rect_shader()
+            ctx.state.cache.socket_batch = batch_for_shader(
+                shader,
+                "TRIS",
+                {
+                    "pos": socket_pos,
+                    "uv": socket_uv,
+                    "halfSize": socket_half_size,
+                    "radius": socket_radius,
+                    "color": socket_color,
+                },
+                indices=_create_quad_indices(num_sockets),
+            )
+        else:
+            ctx.state.cache.socket_batch = None
+    else:
+        ctx.state.cache.socket_batch = None
+
+
+def _bake_reroutes(ctx: "_BakeContext") -> None:
+    """Bake the reroute pill batch, scale-gated like sockets."""
+    pill_h = max(1, ctx.tree_data["socket_ph_base"] * ctx.bake_scale * ctx.ui_scale)
+    pill_w = pill_h
+    reroute_items = ctx.tree_data.get("reroute_items") if ctx.tree_data.get("reroute_on") else None
+    if reroute_items and ctx.scale >= MIN_SOCKET_SCALE:
+        half_w = pill_w / 2
+        half_h = pill_h / 2
+        pill_radius = pill_h / 2
+        reroute_pos: list[tuple[float, float, float]] = []
+        reroute_uv: list[tuple[float, float]] = []
+        reroute_half_size: list[tuple[float, float]] = []
+        reroute_radius: list[float] = []
+        reroute_color_list: list[tuple[float, float, float, float]] = []
+        reroute_attr = {
+            "pos": reroute_pos,
+            "uv": reroute_uv,
+            "half_size": reroute_half_size,
+            "radius": reroute_radius,
+            "color": reroute_color_list,
+        }
+        pad = 1.5
+        for color, positions in reroute_items.items():
+            linear_color = _srgb_to_linear(color)
+            for rx_tree, ry_tree in positions:
+                baked_x = (rx_tree - ctx.origin_x) * ctx.bake_scale
+                baked_y = (ry_tree - ctx.origin_y) * ctx.bake_scale
+                # Cull far off-screen reroutes before emitting vertices.
+                if (
+                    baked_x < ctx.cull_left - half_w - 2
+                    or baked_x > ctx.cull_right + half_w + 2
+                    or baked_y < ctx.cull_bottom - half_h - 2
+                    or baked_y > ctx.cull_top + half_h + 2
+                ):
+                    continue
+                _emit_quad(
+                    reroute_attr,
+                    baked_x - half_w - pad,
+                    baked_y - half_h - pad,
+                    baked_x + half_w + pad,
+                    baked_y + half_h + pad,
+                    half_w + pad,
+                    half_h + pad,
+                    pill_radius,
+                    linear_color,
+                    half_size=(half_w, half_h),
+                )
+        num_reroutes = len(reroute_pos) // 4
+        if num_reroutes > 0:
+            shader = _get_batch_rect_shader()
+            ctx.state.cache.reroute_batch = batch_for_shader(
+                shader,
+                "TRIS",
+                {
+                    "pos": reroute_pos,
+                    "uv": reroute_uv,
+                    "halfSize": reroute_half_size,
+                    "radius": reroute_radius,
+                    "color": reroute_color_list,
+                },
+                indices=_create_quad_indices(num_reroutes),
+            )
+        else:
+            ctx.state.cache.reroute_batch = None
+    else:
+        ctx.state.cache.reroute_batch = None
+
+
 def _ensure_minimap_batches(
     minimap_state: MinimapState,
     map_x,
@@ -170,9 +614,9 @@ def _ensure_minimap_batches(
         key == minimap_state.cache.batch_key
         and wires_fresh
         and bake_scale > 0.0
-        and abs(scale - bake_scale) <= _SCALE_REBUILD_REL * max(bake_scale, 1e-6)
-        and abs(map_anchor_x - anchor_x) <= _BATCH_DRIFT_PX
-        and abs(map_anchor_y - anchor_y) <= _BATCH_DRIFT_PX
+        and abs(scale - bake_scale) <= SCALE_REBUILD_REL * max(bake_scale, 1e-6)
+        and abs(map_anchor_x - anchor_x) <= BATCH_DRIFT_PX
+        and abs(map_anchor_y - anchor_y) <= BATCH_DRIFT_PX
     ):
         return
 
@@ -181,7 +625,7 @@ def _ensure_minimap_batches(
     # exceeded, so fill and wire generations always share one bake scale
     # (and thus one content-matrix factor) between bucket crossings.
     prev_bake_scale = minimap_state.cache.batch_scale
-    if prev_bake_scale > 0.0 and abs(scale - prev_bake_scale) <= _SCALE_REBUILD_REL * max(prev_bake_scale, 1e-6):
+    if prev_bake_scale > 0.0 and abs(scale - prev_bake_scale) <= SCALE_REBUILD_REL * max(prev_bake_scale, 1e-6):
         bake_scale = prev_bake_scale
     else:
         bake_scale = scale
@@ -203,10 +647,10 @@ def _ensure_minimap_batches(
     # drift between rebuilds (nodes outside never reach the GPU batches).
     pivot_baked_x = (tree_center_x - origin_x) * bake_scale
     pivot_baked_y = (tree_center_y - origin_y) * bake_scale
-    cull_left = map_x - _CULL_MARGIN_PX - map_anchor_x + pivot_baked_x
-    cull_right = map_x + map_w + _CULL_MARGIN_PX - map_anchor_x + pivot_baked_x
-    cull_bottom = map_y - _CULL_MARGIN_PX - map_anchor_y + pivot_baked_y
-    cull_top = map_y + map_h + _CULL_MARGIN_PX - map_anchor_y + pivot_baked_y
+    cull_left = map_x - CULL_MARGIN_PX - map_anchor_x + pivot_baked_x
+    cull_right = map_x + map_w + CULL_MARGIN_PX - map_anchor_x + pivot_baked_x
+    cull_bottom = map_y - CULL_MARGIN_PX - map_anchor_y + pivot_baked_y
+    cull_top = map_y + map_h + CULL_MARGIN_PX - map_anchor_y + pivot_baked_y
 
     all_pos_fill = []
     all_uv_fill = []
@@ -243,516 +687,95 @@ def _ensure_minimap_batches(
 
     node_labels = []
 
+    # Scratch attribute aliases: each layer's dicts feed _emit_quad and the
+    # matching batch_for_shader call below shares the same underlying lists.
+    fill_attr = {
+        "pos": all_pos_fill,
+        "uv": all_uv_fill,
+        "half_size": all_half_size_fill,
+        "radius": all_radius_fill,
+        "color": all_color_fill,
+    }
+    frame_fill_attr = {
+        "pos": frame_pos_fill,
+        "uv": frame_uv_fill,
+        "half_size": frame_half_size_fill,
+        "radius": frame_radius_fill,
+        "color": frame_color_fill,
+    }
+    border_attr = {
+        "pos": all_pos_border,
+        "uv": all_uv_border,
+        "half_size": all_half_size_border,
+        "radius": all_radius_border,
+        "color": all_color_border,
+        "line_width": all_line_width_border,
+    }
+    frame_border_attr = {
+        "pos": frame_pos_border,
+        "uv": frame_uv_border,
+        "half_size": frame_half_size_border,
+        "radius": frame_radius_border,
+        "color": frame_color_border,
+        "line_width": frame_line_width_border,
+    }
+    highlight_attr = {
+        "pos": highlight_pos_border,
+        "uv": highlight_uv_border,
+        "half_size": highlight_half_size_border,
+        "radius": highlight_radius_border,
+        "color": highlight_color_border,
+        "line_width": highlight_line_width_border,
+    }
+
+    ctx = _BakeContext(
+        state=minimap_state,
+        tree_data=tree_data,
+        node_infos=node_infos,
+        frame_depths=frame_depths,
+        scale=scale,
+        bake_scale=bake_scale,
+        origin_x=origin_x,
+        origin_y=origin_y,
+        ui_scale=ui_scale,
+        font_id=font_id,
+        min_dim=min_dim,
+        cull_left=cull_left,
+        cull_right=cull_right,
+        cull_bottom=cull_bottom,
+        cull_top=cull_top,
+        show_borders=show_borders,
+        hovered_type=hovered_type,
+        hovered_node_name=hovered_node_name,
+        highlight_outline=highlight_outline,
+        highlight_margin=highlight_margin,
+        highlight_line_width=highlight_line_width,
+        frame_label_entries=frame_label_entries,
+        node_labels=node_labels,
+        fill_attr=fill_attr,
+        frame_fill_attr=frame_fill_attr,
+        border_attr=border_attr,
+        frame_border_attr=frame_border_attr,
+        highlight_attr=highlight_attr,
+    )
     for info in node_infos:
-        node_w_raw = info["tree_w"] * bake_scale
-        node_h_raw = info["tree_h"] * bake_scale
-        bx = (info["tree_x"] - origin_x) * bake_scale
-        by = (info["tree_y"] - origin_y) * bake_scale
-        node_w = max(node_w_raw, 1.0)
-        node_h = max(node_h_raw, 1.0)
-        is_frame = info["is_frame"]
+        _emit_node(ctx, info)
 
-        # Cull nodes whose quads cannot intersect the minimap interior
-        if bx >= cull_right or bx + node_w <= cull_left or by >= cull_top or by + node_h <= cull_bottom:
-            continue
+    # Frame labels: resolve collisions, then emit backdrop quads into the
+    # frames fill batch and text entries for the manual BLF pass.
+    _emit_frame_labels(ctx)
 
-        if is_frame:
-            node_r = info["node_r_base"] * ui_scale * 1.6
-        else:
-            node_r = info["node_r_base"] * ui_scale * (bake_scale * 2)
-
-        is_tiny = (node_w < min_dim or node_h < min_dim) and not is_frame
-
-        border_color = info["border_color"]
-        border_w = info["border_w"]
-        # The normal node border is left as-is (active/selection styling);
-        # list hover instead gets a separate outside outline (see below).
-        if highlight_outline:
-            if hovered_type is not None and info.get("type_label") == hovered_type:
-                is_hovered = True
-            elif hovered_node_name is not None and info.get("name") == hovered_node_name:
-                is_hovered = True
-            else:
-                is_hovered = False
-        else:
-            is_hovered = False
-
-        # Borders always emit vertices regardless of on-screen size so they
-        # stay visible at any zoom (hover and normal alike); the SDF shader
-        # clamps the line width for tiny nodes.
-        draw_border = show_borders
-
-        if is_tiny:
-            node_w_final = max(node_w, min_dim)
-            node_h_final = max(node_h, min_dim)
-            half_w = node_w_final / 2
-            half_h = node_h_final / 2
-            all_pos_fill.extend(
-                [
-                    (bx, by, 0.0),
-                    (bx + node_w_final, by, 0.0),
-                    (bx + node_w_final, by + node_h_final, 0.0),
-                    (bx, by + node_h_final, 0.0),
-                ]
-            )
-            all_uv_fill.extend([(-half_w, -half_h), (half_w, -half_h), (half_w, half_h), (-half_w, half_h)])
-            all_half_size_fill.extend([(half_w, half_h)] * 4)
-            all_radius_fill.extend([node_r] * 4)
-            all_color_fill.extend([info["fill_color"]] * 4)
-
-            if draw_border:
-                all_pos_border.extend(
-                    [
-                        (bx, by, 0.0),
-                        (bx + node_w_final, by, 0.0),
-                        (bx + node_w_final, by + node_h_final, 0.0),
-                        (bx, by + node_h_final, 0.0),
-                    ]
-                )
-                all_uv_border.extend([(-half_w, -half_h), (half_w, -half_h), (half_w, half_h), (-half_w, half_h)])
-                all_half_size_border.extend([(half_w, half_h)] * 4)
-                all_radius_border.extend([node_r] * 4)
-                all_color_border.extend([border_color] * 4)
-                all_line_width_border.extend([border_w] * 4)
-
-            if is_hovered:
-                outline_w = node_w_final + highlight_margin * 2
-                outline_h = node_h_final + highlight_margin * 2
-                outline_half_w = outline_w / 2
-                outline_half_h = outline_h / 2
-                outline_x = bx - highlight_margin
-                outline_y = by - highlight_margin
-                highlight_pos_border.extend(
-                    [
-                        (outline_x, outline_y, 0.0),
-                        (outline_x + outline_w, outline_y, 0.0),
-                        (outline_x + outline_w, outline_y + outline_h, 0.0),
-                        (outline_x, outline_y + outline_h, 0.0),
-                    ]
-                )
-                highlight_uv_border.extend(
-                    [
-                        (-outline_half_w, -outline_half_h),
-                        (outline_half_w, -outline_half_h),
-                        (outline_half_w, outline_half_h),
-                        (-outline_half_w, outline_half_h),
-                    ]
-                )
-                highlight_half_size_border.extend([(outline_half_w, outline_half_h)] * 4)
-                highlight_radius_border.extend([node_r] * 4)
-                highlight_color_border.extend([highlight_outline] * 4)
-                highlight_line_width_border.extend([highlight_line_width] * 4)
-        else:
-            half_w = node_w / 2
-            half_h = node_h / 2
-
-            pos_fill = frame_pos_fill if is_frame else all_pos_fill
-            uv_fill = frame_uv_fill if is_frame else all_uv_fill
-            hs_fill = frame_half_size_fill if is_frame else all_half_size_fill
-            rad_fill = frame_radius_fill if is_frame else all_radius_fill
-            col_fill = frame_color_fill if is_frame else all_color_fill
-            pos_fill.extend(
-                [
-                    (bx, by, 0.0),
-                    (bx + node_w, by, 0.0),
-                    (bx + node_w, by + node_h, 0.0),
-                    (bx, by + node_h, 0.0),
-                ]
-            )
-            uv_fill.extend([(-half_w, -half_h), (half_w, -half_h), (half_w, half_h), (-half_w, half_h)])
-            hs_fill.extend([(half_w, half_h)] * 4)
-            rad_fill.extend([node_r] * 4)
-            col_fill.extend([info["fill_color"]] * 4)
-
-            if draw_border:
-                pb = frame_pos_border if is_frame else all_pos_border
-                ub = frame_uv_border if is_frame else all_uv_border
-                hsb = frame_half_size_border if is_frame else all_half_size_border
-                rb = frame_radius_border if is_frame else all_radius_border
-                cb = frame_color_border if is_frame else all_color_border
-                lwb = frame_line_width_border if is_frame else all_line_width_border
-                pb.extend(
-                    [
-                        (bx, by, 0.0),
-                        (bx + node_w, by, 0.0),
-                        (bx + node_w, by + node_h, 0.0),
-                        (bx, by + node_h, 0.0),
-                    ]
-                )
-                ub.extend([(-half_w, -half_h), (half_w, -half_h), (half_w, half_h), (-half_w, half_h)])
-                hsb.extend([(half_w, half_h)] * 4)
-                rb.extend([node_r] * 4)
-                cb.extend([border_color] * 4)
-                lwb.extend([border_w] * 4)
-
-            if is_hovered:
-                outline_w = node_w + highlight_margin * 2
-                outline_h = node_h + highlight_margin * 2
-                outline_half_w = outline_w / 2
-                outline_half_h = outline_h / 2
-                outline_x = bx - highlight_margin
-                outline_y = by - highlight_margin
-                highlight_pos_border.extend(
-                    [
-                        (outline_x, outline_y, 0.0),
-                        (outline_x + outline_w, outline_y, 0.0),
-                        (outline_x + outline_w, outline_y + outline_h, 0.0),
-                        (outline_x, outline_y + outline_h, 0.0),
-                    ]
-                )
-                highlight_uv_border.extend(
-                    [
-                        (-outline_half_w, -outline_half_h),
-                        (outline_half_w, -outline_half_h),
-                        (outline_half_w, outline_half_h),
-                        (-outline_half_w, outline_half_h),
-                    ]
-                )
-                highlight_half_size_border.extend([(outline_half_w, outline_half_h)] * 4)
-                highlight_radius_border.extend([node_r] * 4)
-                highlight_color_border.extend([highlight_outline] * 4)
-                highlight_line_width_border.extend([highlight_line_width] * 4)
-
-            if is_frame:
-                # Zoom gate evaluated live per bake (user_zoom drives scale),
-                # so labels appear/disappear at the threshold without waiting
-                # for a tree recompile.
-                if not minimap_state.view.user_zoom >= 0.8:
-                    continue
-                frame_label = info.get("frame_label")
-                if frame_label:
-                    text, text_color, bg_label_color = frame_label
-                    label_font_size = max(6, min(11, int(11 * ui_scale * bake_scale * 8)))
-                    blf.size(font_id, label_font_size)
-                    text_w, text_h = blf.dimensions(font_id, text)
-                    label_pad = 2 * ui_scale
-                    label_w = text_w + 2 * label_pad
-                    label_h = text_h + 2 * label_pad
-                    frame_label_entries.append(
-                        {
-                            "text": text,
-                            "text_color": text_color,
-                            "bg_label_color": bg_label_color,
-                            "font_size": label_font_size,
-                            "text_w": text_w,
-                            "text_h": text_h,
-                            "pad": label_pad,
-                            "node_r": node_r,
-                            "frame_h": node_h,
-                            "depth": frame_depths.get(info["ptr"], 0),
-                            "rect": (
-                                bx + (node_w - label_w) / 2,
-                                by + node_h + 3 * ui_scale - label_pad,
-                                label_w,
-                                label_h,
-                            ),
-                        }
-                    )
-            else:
-                label_type = info.get("node_label_type")
-                label_text = info.get("node_label_text")
-                if label_type and label_text and node_w > 6 * ui_scale and node_h > 6 * ui_scale:
-                    text_color = info["node_label_color"]
-                    if label_type == "full":
-                        font_size = max(6, min(int(11 * ui_scale), int(min(node_w, node_h) * 0.35)))
-                        lines = _get_node_label_lines(label_text, font_id, font_size, node_w - 4 * ui_scale, 3)
-                        if lines:
-                            blf.size(font_id, font_size)
-                            line_h = blf.dimensions(font_id, "Ay")[1] + 1
-                            ascent_h = blf.dimensions(font_id, "A")[1]
-                            text_block_h = (len(lines) - 1) * line_h + ascent_h
-                            start_y = by + (node_h - text_block_h) / 2
-                            for i, line in enumerate(lines):
-                                line_w, _ = blf.dimensions(font_id, line)
-                                label_x = bx + (node_w - line_w) / 2
-                                label_y = start_y + (len(lines) - 1 - i) * line_h
-                                node_labels.append((font_id, line, label_x, label_y, text_color, font_size))
-                    else:
-                        font_size = max(6, min(int(11 * ui_scale), int(min(node_w, node_h) * 0.45)))
-                        blf.size(font_id, font_size)
-                        text_w, text_h = blf.dimensions(font_id, label_text)
-                        text_x = bx + (node_w - text_w) / 2
-                        text_y = by + (node_h - text_h) / 2
-                        node_labels.append((font_id, label_text, text_x, text_y, text_color, font_size))
-
-    # Frame labels: resolve collisions in baked space (outer frames win,
-    # pushed-down labels keep a clearance gap), then emit backdrop quads into
-    # the frames fill batch and text entries for the manual BLF pass.
-    for entry in _resolve_frame_label_layout(frame_label_entries, ui_scale):
-        rect_x, rect_y, label_w, label_h = entry["rect"]
-        label_pad = entry["pad"]
-        frame_pos_fill.extend(
-            [
-                (rect_x, rect_y, 0.0),
-                (rect_x + label_w, rect_y, 0.0),
-                (rect_x + label_w, rect_y + label_h, 0.0),
-                (rect_x, rect_y + label_h, 0.0),
-            ]
-        )
-        label_half_w = label_w / 2
-        label_half_h = label_h / 2
-        frame_uv_fill.extend(
-            [
-                (-label_half_w, -label_half_h),
-                (label_half_w, -label_half_h),
-                (label_half_w, label_half_h),
-                (-label_half_w, label_half_h),
-            ]
-        )
-        frame_half_size_fill.extend([(label_half_w, label_half_h)] * 4)
-        frame_radius_fill.extend([entry["node_r"]] * 4)
-        frame_color_fill.extend([entry["bg_label_color"]] * 4)
-        node_labels.append(
-            (font_id, entry["text"], rect_x + label_pad, rect_y + label_pad, entry["text_color"], entry["font_size"])
-        )
-
-    num_fills = len(all_pos_fill) // 4
-    if num_fills > 0:
-        shader = _get_batch_rect_shader()
-        minimap_state.cache.backdrops_batch = batch_for_shader(
-            shader,
-            "TRIS",
-            {
-                "pos": all_pos_fill,
-                "uv": all_uv_fill,
-                "halfSize": all_half_size_fill,
-                "radius": all_radius_fill,
-                "color": all_color_fill,
-            },
-            indices=_create_quad_indices(num_fills),
-        )
-    else:
-        minimap_state.cache.backdrops_batch = None
-
-    num_borders = len(all_pos_border) // 4
-    if num_borders > 0:
-        shader = _get_batch_rect_border_shader()
-        minimap_state.cache.borders_batch = batch_for_shader(
-            shader,
-            "TRIS",
-            {
-                "pos": all_pos_border,
-                "uv": all_uv_border,
-                "halfSize": all_half_size_border,
-                "radius": all_radius_border,
-                "color": all_color_border,
-                "lineWidth": all_line_width_border,
-            },
-            indices=_create_quad_indices(num_borders),
-        )
-    else:
-        minimap_state.cache.borders_batch = None
-
-    num_highlight_borders = len(highlight_pos_border) // 4
-    if num_highlight_borders > 0:
-        shader = _get_batch_rect_border_shader()
-        minimap_state.cache.highlight_borders_batch = batch_for_shader(
-            shader,
-            "TRIS",
-            {
-                "pos": highlight_pos_border,
-                "uv": highlight_uv_border,
-                "halfSize": highlight_half_size_border,
-                "radius": highlight_radius_border,
-                "color": highlight_color_border,
-                "lineWidth": highlight_line_width_border,
-            },
-            indices=_create_quad_indices(num_highlight_borders),
-        )
-    else:
-        minimap_state.cache.highlight_borders_batch = None
-
-    num_frame_fills = len(frame_pos_fill) // 4
-    if num_frame_fills > 0:
-        shader = _get_batch_rect_shader()
-        minimap_state.cache.frames_fill_batch = batch_for_shader(
-            shader,
-            "TRIS",
-            {
-                "pos": frame_pos_fill,
-                "uv": frame_uv_fill,
-                "halfSize": frame_half_size_fill,
-                "radius": frame_radius_fill,
-                "color": frame_color_fill,
-            },
-            indices=_create_quad_indices(num_frame_fills),
-        )
-    else:
-        minimap_state.cache.frames_fill_batch = None
-
-    num_frame_borders = len(frame_pos_border) // 4
-    if num_frame_borders > 0:
-        shader = _get_batch_rect_border_shader()
-        minimap_state.cache.frames_border_batch = batch_for_shader(
-            shader,
-            "TRIS",
-            {
-                "pos": frame_pos_border,
-                "uv": frame_uv_border,
-                "halfSize": frame_half_size_border,
-                "radius": frame_radius_border,
-                "color": frame_color_border,
-                "lineWidth": frame_line_width_border,
-            },
-            indices=_create_quad_indices(num_frame_borders),
-        )
-    else:
-        minimap_state.cache.frames_border_batch = None
-
+    _bake_rect(ctx, ctx.fill_attr, _get_batch_rect_shader, "backdrops_batch", False)
+    _bake_rect(ctx, ctx.border_attr, _get_batch_rect_border_shader, "borders_batch", True)
+    _bake_rect(ctx, ctx.highlight_attr, _get_batch_rect_border_shader, "highlight_borders_batch", True)
+    _bake_rect(ctx, ctx.frame_fill_attr, _get_batch_rect_shader, "frames_fill_batch", False)
+    _bake_rect(ctx, ctx.frame_border_attr, _get_batch_rect_border_shader, "frames_border_batch", True)
     minimap_state.cache.node_labels = node_labels
 
-    # Sockets — auto-hidden below the minimum scale
-    pill_h = max(1, tree_data["socket_ph_base"] * bake_scale * ui_scale)
-    pill_w = pill_h
-    minimap_state.cache.socket_ph = pill_h
-    # Extend node labels with reroute labels before socket batch cull check,
-    # keeping a single BLF measurement pass for all text.
-    reroute_labels_raw = tree_data.get("reroute_labels_raw") if tree_data.get("reroute_on") else None
-    if reroute_labels_raw and scale >= _MIN_SOCKET_SCALE:
-        # Quick visibility cull for labels: skip far off-screen reroutes
-        # to avoid BLF measurement overhead.
-        for entry in reroute_labels_raw:
-            tree_x = entry.get("tree_x")
-            tree_y = entry.get("tree_y")
-            if tree_x is None or tree_y is None:
-                continue
-            baked_x = (tree_x - origin_x) * bake_scale
-            baked_y = (tree_y - origin_y) * bake_scale
-            if (
-                baked_x < cull_left - 60
-                or baked_x > cull_right + 60
-                or baked_y < cull_bottom - 20
-                or baked_y > cull_top + 40
-            ):
-                continue
-            text = entry.get("text", "")
-            if not text:
-                continue
-            text_color = entry.get("color") or _alpha_mul((1.0, 1.0, 1.0, 1.0), 1.0)
-            font_size = max(6, min(11, int(10 * ui_scale)))
-            blf.size(font_id, font_size)
-            text_w, text_h = blf.dimensions(font_id, text)
-            label_x = baked_x - text_w * 0.5
-            label_y = baked_y + pill_h * 0.5 + 3.0 * ui_scale
-            minimap_state.cache.node_labels.append((font_id, text, label_x, label_y, text_color, font_size))
-
-    if tree_data["socket_items"] and scale >= _MIN_SOCKET_SCALE:
-        half_w = pill_w / 2
-        half_h = pill_h / 2
-        pill_radius = pill_h / 2
-        socket_pos = []
-        socket_uv = []
-        socket_half_size = []
-        socket_radius = []
-        socket_color = []
-        for color, positions in tree_data["socket_items"].items():
-            linear_color = _srgb_to_linear(color)
-            for sx_tree, sy_tree in positions:
-                socket_baked_x = (sx_tree - origin_x) * bake_scale
-                socket_baked_y = (sy_tree - origin_y) * bake_scale
-                socket_pad = 1.5
-                socket_pos.extend(
-                    [
-                        (socket_baked_x - half_w - socket_pad, socket_baked_y - half_h - socket_pad, 0.0),
-                        (socket_baked_x + half_w + socket_pad, socket_baked_y - half_h - socket_pad, 0.0),
-                        (socket_baked_x + half_w + socket_pad, socket_baked_y + half_h + socket_pad, 0.0),
-                        (socket_baked_x - half_w - socket_pad, socket_baked_y + half_h + socket_pad, 0.0),
-                    ]
-                )
-                socket_uv.extend(
-                    [
-                        (-half_w - socket_pad, -half_h - socket_pad),
-                        (half_w + socket_pad, -half_h - socket_pad),
-                        (half_w + socket_pad, half_h + socket_pad),
-                        (-half_w - socket_pad, half_h + socket_pad),
-                    ]
-                )
-                socket_half_size.extend([(half_w, half_h)] * 4)
-                socket_radius.extend([pill_radius] * 4)
-                socket_color.extend([linear_color] * 4)
-        num_sockets = len(socket_pos) // 4
-        if num_sockets > 0:
-            shader = _get_batch_rect_shader()
-            minimap_state.cache.socket_batch = batch_for_shader(
-                shader,
-                "TRIS",
-                {
-                    "pos": socket_pos,
-                    "uv": socket_uv,
-                    "halfSize": socket_half_size,
-                    "radius": socket_radius,
-                    "color": socket_color,
-                },
-                indices=_create_quad_indices(num_sockets),
-            )
-        else:
-            minimap_state.cache.socket_batch = None
-    else:
-        minimap_state.cache.socket_batch = None
-
-    # Reroutes — pills like sockets, auto-hidden below the minimum scale
-    reroute_items = tree_data.get("reroute_items") if tree_data.get("reroute_on") else None
-    if reroute_items and scale >= _MIN_SOCKET_SCALE:
-        half_w = pill_w / 2
-        half_h = pill_h / 2
-        pill_radius = pill_h / 2
-        reroute_pos: list[tuple[float, float, float]] = []
-        reroute_uv: list[tuple[float, float]] = []
-        reroute_half_size: list[tuple[float, float]] = []
-        reroute_radius: list[float] = []
-        reroute_color_list: list[tuple[float, float, float, float]] = []
-        for color, positions in reroute_items.items():
-            linear_color = _srgb_to_linear(color)
-            for rx_tree, ry_tree in positions:
-                baked_x = (rx_tree - origin_x) * bake_scale
-                baked_y = (ry_tree - origin_y) * bake_scale
-                # Cull far off-screen reroutes before emitting vertices.
-                if (
-                    baked_x < cull_left - half_w - 2
-                    or baked_x > cull_right + half_w + 2
-                    or baked_y < cull_bottom - half_h - 2
-                    or baked_y > cull_top + half_h + 2
-                ):
-                    continue
-                pad = 1.5
-                reroute_pos.extend(
-                    [
-                        (baked_x - half_w - pad, baked_y - half_h - pad, 0.0),
-                        (baked_x + half_w + pad, baked_y - half_h - pad, 0.0),
-                        (baked_x + half_w + pad, baked_y + half_h + pad, 0.0),
-                        (baked_x - half_w - pad, baked_y + half_h + pad, 0.0),
-                    ]
-                )
-                reroute_uv.extend(
-                    [
-                        (-half_w - pad, -half_h - pad),
-                        (half_w + pad, -half_h - pad),
-                        (half_w + pad, half_h + pad),
-                        (-half_w - pad, half_h + pad),
-                    ]
-                )
-                reroute_half_size.extend([(half_w, half_h)] * 4)
-                reroute_radius.extend([pill_radius] * 4)
-                reroute_color_list.extend([linear_color] * 4)
-        num_reroutes = len(reroute_pos) // 4
-        if num_reroutes > 0:
-            shader = _get_batch_rect_shader()
-            minimap_state.cache.reroute_batch = batch_for_shader(
-                shader,
-                "TRIS",
-                {
-                    "pos": reroute_pos,
-                    "uv": reroute_uv,
-                    "halfSize": reroute_half_size,
-                    "radius": reroute_radius,
-                    "color": reroute_color_list,
-                },
-                indices=_create_quad_indices(num_reroutes),
-            )
-        else:
-            minimap_state.cache.reroute_batch = None
-    else:
-        minimap_state.cache.reroute_batch = None
+    # Sockets and reroutes — pills auto-hidden below the minimum scale;
+    # socket-ph is shared and measured in a single BLF pass with the labels.
+    _bake_sockets(ctx)
+    _bake_reroutes(ctx)
 
     # Wires and markers get their own cache generation so position-only
     # refreshes (drags) skip the O(links) pill rebake entirely. Wires share

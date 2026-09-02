@@ -2,9 +2,8 @@
 
 import bpy
 
+from .constants import EDITOR_FIT_MARGIN, MAX_FRAME_ZOOM
 from .helpers import (
-    _EDITOR_FIT_MARGIN,
-    MAX_FRAME_ZOOM,
     _expand_bounds_margin,
     _get_node_dims,
     _get_node_tree_bounds,
@@ -251,8 +250,8 @@ def _compute_editor_frame_selected_targets(
     if len(selected) > 1 or selected[0].type == "FRAME":
         bounds_w = max(max_x - min_x, 1.0)
         bounds_h = max(max_y - min_y, 1.0)
-        margin_x = bounds_w * _EDITOR_FIT_MARGIN
-        margin_y = bounds_h * _EDITOR_FIT_MARGIN
+        margin_x = bounds_w * EDITOR_FIT_MARGIN
+        margin_y = bounds_h * EDITOR_FIT_MARGIN
         left, bottom, right, top = min_x - margin_x, min_y - margin_y, max_x + margin_x, max_y + margin_y
 
         # Limit zoom-in so tiny selections do not magnify excessively.

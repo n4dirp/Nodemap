@@ -5,6 +5,7 @@ import time
 
 import bpy
 
+from .constants import NODE_ROUNDNESS_DEFAULT
 from .helpers import (
     _get_node_dims,
     _get_node_initials,
@@ -20,8 +21,6 @@ from .theme import (
 )
 
 logger = logging.getLogger(__package__)
-
-_NODE_ROUNDNESS_DEFAULT = 2.0
 
 # Minimum interval between live position-only refreshes during drags (seconds).
 # Skipped frames fall through to the debounced compile, which flushes the
@@ -99,48 +98,22 @@ def _debounced_compile(minimap_state: MinimapState, node_tree, colors, settings,
     return None
 
 
-def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
-    """Compute tree-space data for nodes, wires, sockets, and labels.
-
-    Called only when the node tree fingerprint changes (tree topology,
-    selection, mute, active node).  Screen-space transforms (zoom/pan)
-    are NOT applied here — content batches are baked in map-local space
-    by ``_ensure_minimap_batches()`` and placed with a matrix transform.
-
-    Stores result in ``minimap_state.cache.tree_data``.
-    """
+def _classify_nodes(
+    node_tree, ui_scale: float, settings
+) -> tuple[dict[int, dict], tuple[float, float, float, float], tuple[float, float], list]:
+    """Run the single pre-pass: classify nodes, cache dims/location, compute bounds."""
     nodes = node_tree.nodes
     active_node = nodes.active
 
-    tree_data: dict = {}
-
-    # Hoisted settings lookups (avoid repeated attribute lookups in loops)
     show_frames = settings.show_frames
-    show_node_labels = settings.show_node_labels
-    show_socket_indicators = settings.show_socket_indicators
     show_reroutes = getattr(settings, "show_reroutes", True)
-    show_wires = settings.show_wires
-    show_wire_color = settings.show_wire_color
-    wire_opacity_mult = settings.wire_opacity
-    show_frame_labels = settings.show_frame_labels
-    show_node_colors = settings.show_node_colors
-    compact_labels = settings.compact_node_labels
-    show_type_list = settings.show_type_list and settings.interactive
 
-    # Single pre-pass: classify nodes + cache dims/location + compute bounds
     frames = []
     unselected_nodes = []
     selected_nodes = []
     active_node_item = None
     reroute_nodes: list = []
     node_data: dict[int, dict] = {}
-    group_markers: dict[tuple, list[tuple[float, float, float]]] = {}
-    type_counts: dict[str, int] = {}
-    type_colors: dict[str, tuple[float, float, float, float]] = {}
-    type_nodes: dict[str, list[str]] = {}
-    type_node_colors: dict[str, dict[str, tuple[float, float, float, float]]] = {}
-    type_selected_counts: dict[str, int] = {}
-    type_active_label: str | None = None
 
     bounds_min_x = float("inf")
     bounds_min_y = float("inf")
@@ -182,12 +155,12 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
                 unselected_nodes.append(node)
 
     if bounds_min_x == float("inf"):
-        tree_data["bounds"] = (0.0, 0.0, 200.0, 200.0)
+        bounds = (0.0, 0.0, 200.0, 200.0)
     else:
-        tree_data["bounds"] = (bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y)
+        bounds = (bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y)
     # Stable local-space origin for batch baking (independent of later
     # bound drift so screen transforms stay exact between rebuilds).
-    tree_data["origin"] = (
+    origin = (
         (bounds_min_x + bounds_max_x) / 2,
         (bounds_min_y + bounds_max_y) / 2,
     )
@@ -202,9 +175,30 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     if active_node_item:
         sorted_items.append((active_node_item, False))
 
-    # ------------------------------------------------------------------
-    # Combined pass: node data + sockets + wire endpoints (tree-space)
-    # ------------------------------------------------------------------
+    return node_data, bounds, origin, sorted_items
+
+
+def _build_node_infos(sorted_items, node_data, active_node, colors, settings, master_alpha) -> dict:
+    """Assemble per-node info, socket dots, wire endpoints, and type stats."""
+    # Hoisted settings lookups (avoid repeated attribute lookups in loops)
+    show_frames = settings.show_frames
+    show_node_labels = settings.show_node_labels
+    show_socket_indicators = settings.show_socket_indicators
+    show_wires = settings.show_wires
+    show_wire_color = settings.show_wire_color
+    wire_opacity_mult = settings.wire_opacity
+    show_frame_labels = settings.show_frame_labels
+    show_node_colors = settings.show_node_colors
+    compact_labels = settings.compact_node_labels
+    show_type_list = settings.show_type_list and settings.interactive
+
+    group_markers: dict[tuple, list[tuple[float, float, float]]] = {}
+    type_counts: dict[str, int] = {}
+    type_colors: dict[str, tuple[float, float, float, float]] = {}
+    type_nodes: dict[str, list[str]] = {}
+    type_node_colors: dict[str, dict[str, tuple[float, float, float, float]]] = {}
+    type_selected_counts: dict[str, int] = {}
+    type_active_label: str | None = None
 
     # Pre-compute theme colors by color_tag (avoids per-node _theme_rgba call)
     color_tag_cache: dict[str, tuple[float, float, float, float]] = {}
@@ -265,7 +259,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
             info["border_color"] = _srgb_to_linear(_alpha_mul(border_color, frame_border_alpha))
             info["frame_color"] = frame_color
             info["name"] = node.name
-            info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT
+            info["node_r_base"] = NODE_ROUNDNESS_DEFAULT
             if show_type_list and show_frames:
                 if "Frame" not in type_counts:
                     type_colors["Frame"] = frame_color
@@ -327,7 +321,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
             if node.mute:
                 border_alpha = 0.35 * master_alpha
             info["border_color"] = _srgb_to_linear(_alpha_mul(border_color, border_alpha))
-            info["node_r_base"] = _NODE_ROUNDNESS_DEFAULT * 2
+            info["node_r_base"] = NODE_ROUNDNESS_DEFAULT * 2
             info["name"] = node.name
 
             if node.type == "GROUP":
@@ -448,28 +442,82 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
                     in_dict[socket.identifier] = (x_base, socket_y, default_wire_color)
                 in_pos[node.name] = in_dict
 
-    tree_data["node_infos"] = node_infos
-    tree_data["socket_items"] = _group_socket_dots(socket_items_by_node)
-    tree_data["socket_ph_base"] = 8.0
-    tree_data["group_markers"] = group_markers
-    tree_data["type_stats"] = type_counts
-    tree_data["type_colors"] = type_colors
-    tree_data["type_node_colors"] = type_node_colors
+    return {
+        "node_infos": node_infos,
+        "socket_items_by_node": socket_items_by_node,
+        "socket_color_cache": socket_color_cache,
+        "default_socket_color": default_socket_color,
+        "default_wire_color": default_wire_color,
+        "out_pos": out_pos,
+        "in_pos": in_pos,
+        "group_markers": group_markers,
+        "type_counts": type_counts,
+        "type_colors": type_colors,
+        "type_nodes": type_nodes,
+        "type_node_colors": type_node_colors,
+        "type_selected_counts": type_selected_counts,
+        "type_active_label": type_active_label,
+    }
+
+
+def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
+    """Compute tree-space data for nodes, wires, sockets, and labels.
+
+    Called only when the node tree fingerprint changes (tree topology,
+    selection, mute, active node).  Screen-space transforms (zoom/pan)
+    are NOT applied here — content batches are baked in map-local space
+    by ``_ensure_minimap_batches()`` and placed with a matrix transform.
+
+    Stores result in ``minimap_state.cache.tree_data``.
+    """
+    nodes = node_tree.nodes
+    active_node = nodes.active
+
+    tree_data: dict = {}
+
+    # Hoisted settings lookups (avoid repeated attribute lookups in loops)
+    show_node_labels = settings.show_node_labels
+    show_socket_indicators = settings.show_socket_indicators
+    show_reroutes = getattr(settings, "show_reroutes", True)
+    show_wires = settings.show_wires
+    show_wire_color = settings.show_wire_color
+    wire_opacity_mult = settings.wire_opacity
+    compact_labels = settings.compact_node_labels
+    wire_alpha = master_alpha * wire_opacity_mult
+
+    node_data, bounds, origin, sorted_items = _classify_nodes(node_tree, ui_scale, settings)
+    tree_data["bounds"] = bounds
+    tree_data["origin"] = origin
+
+    built = _build_node_infos(sorted_items, node_data, active_node, colors, settings, master_alpha)
+    out_pos = built["out_pos"]
+    in_pos = built["in_pos"]
+    default_socket_color = built["default_socket_color"]
+
+    type_nodes = built["type_nodes"]
     # Stable child order (by name) so selecting a node — which recompiles
     # and re-iterates node_tree.nodes — never reshuffles the sub-list.
     for _lbl in type_nodes:
         type_nodes[_lbl].sort()
+
+    tree_data["node_infos"] = built["node_infos"]
+    tree_data["socket_items"] = _group_socket_dots(built["socket_items_by_node"])
+    tree_data["socket_ph_base"] = 8.0
+    tree_data["group_markers"] = built["group_markers"]
+    tree_data["type_stats"] = built["type_counts"]
+    tree_data["type_colors"] = built["type_colors"]
+    tree_data["type_node_colors"] = built["type_node_colors"]
     tree_data["type_nodes"] = type_nodes
-    tree_data["type_selected_counts"] = type_selected_counts
-    tree_data["type_active_label"] = type_active_label
+    tree_data["type_selected_counts"] = built["type_selected_counts"]
+    tree_data["type_active_label"] = built["type_active_label"]
     # Position-refresh support (see _apply_move_updates)
     tree_data["out_pos"] = out_pos
     tree_data["in_pos"] = in_pos
-    tree_data["socket_draw_colors"] = socket_color_cache
+    tree_data["socket_draw_colors"] = built["socket_color_cache"]
     tree_data["default_socket_color"] = default_socket_color
-    tree_data["default_wire_color"] = default_wire_color
+    tree_data["default_wire_color"] = built["default_wire_color"]
     tree_data["socket_indicators_on"] = show_socket_indicators
-    tree_data["socket_items_by_node"] = socket_items_by_node
+    tree_data["socket_items_by_node"] = built["socket_items_by_node"]
 
     # ------------------------------------------------------------------
     # REROUTE pills and wire endpoints (shared draw-color pass)

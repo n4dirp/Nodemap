@@ -9,7 +9,17 @@ import bpy
 import gpu
 from mathutils import Matrix
 
+from . import content_draw
 from .batch_build import _ensure_minimap_batches
+from .constants import (
+    BUTTON_HOVER_ALPHA,
+    BUTTON_MARGIN,
+    BUTTON_SIZE,
+    FONT_SIZE,
+    HANDLE_THICKNESS,
+    MIN_MAP_HEIGHT,
+    MIN_MAP_WIDTH,
+)
 from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_clipped,
@@ -19,15 +29,8 @@ from .gpu_draw import (
     _draw_rounded_rect_border,
     _draw_rounded_rect_border_varying_sides,
     _draw_text_with_shadow,
-    _get_batch_noodle_shader,
-    _get_batch_pill_shader,
-    _get_batch_rect_border_shader,
-    _get_batch_rect_shader,
 )
 from .helpers import (
-    _HANDLE_THICKNESS,
-    MIN_MAP_HEIGHT,
-    MIN_MAP_WIDTH,
     _expand_bounds_margin,
     _get_minimap_margins,
     _get_safe_bounds,
@@ -46,7 +49,6 @@ from .theme import (
     _alpha_mul,
     _get_node_editor_theme_colors,
     _get_wire_curvature,
-    _srgb_to_linear,
 )
 from .transforms import (
     _clamp_pan_to_viewport,
@@ -64,11 +66,6 @@ from .tree_compile import (
 from .type_list import _draw_minimap_scrollbars, _draw_type_list, _step_list_width
 
 logger = logging.getLogger(__package__)
-
-FONT_SIZE = 11
-BUTTON_SIZE = 20
-BUTTON_MARGIN = 0
-BUTTON_HOVER_ALPHA = 0.015
 
 
 def _early_exit(context, space, state: MinimapState) -> bool:
@@ -486,8 +483,8 @@ def _draw_node_count(
     blf.size(font_id, font_size)
     text_w, _ = blf.dimensions(font_id, info_text)
 
-    text_x = map_x + (map_w - text_w) - _HANDLE_THICKNESS * ui_scale
-    text_y = map_y + (_HANDLE_THICKNESS * ui_scale)
+    text_x = map_x + (map_w - text_w) - HANDLE_THICKNESS * ui_scale
+    text_y = map_y + (HANDLE_THICKNESS * ui_scale)
 
     text_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
 
@@ -1075,178 +1072,17 @@ def draw_minimap() -> None:
         visible,
     )
 
-    # Content batches are baked in map-local space; place them with one
-    # matrix transform (translate -> scale about the view pivot) instead of
-    # rebuilding vertex data on pan/drag frames.
-    origin = state.cache.tree_data.get("origin") if state.cache.tree_data else None
-    content_scale_factor = 1.0
-    pivot_x = 0.0
-    pivot_y = 0.0
-    if origin:
-        batch_scale = state.cache.batch_scale if state.cache.batch_scale > 0.0 else scale
-        content_scale_factor = scale / batch_scale
-        pivot_x = (tree_center_x - origin[0]) * batch_scale
-        pivot_y = (tree_center_y - origin[1]) * batch_scale
-        content_matrix = (
-            Matrix.Translation((map_anchor_x, map_anchor_y, 0.0))
-            @ Matrix.Scale(content_scale_factor, 4)
-            @ Matrix.Translation((-pivot_x, -pivot_y, 0.0))
-        )
-
-        gpu.matrix.push()
-        try:
-            gpu.matrix.multiply_matrix(content_matrix)
-
-            # Frame nodes
-            frames_fill_batch = state.cache.frames_fill_batch
-            frames_border_batch = state.cache.frames_border_batch
-            if frames_fill_batch or frames_border_batch:
-                fill_shader = _get_batch_rect_shader()
-                border_shader = _get_batch_rect_border_shader()
-                model_view_projection = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-                if frames_fill_batch:
-                    fill_shader.bind()
-                    fill_shader.uniform_float("ModelViewProjectionMatrix", model_view_projection)
-                    frames_fill_batch.draw(fill_shader)
-                if frames_border_batch:
-                    border_shader.bind()
-                    border_shader.uniform_float("ModelViewProjectionMatrix", model_view_projection)
-                    frames_border_batch.draw(border_shader)
-
-            # Link wires (baked batches; shadow underlay first, then colors)
-            wire_batches = state.cache.wire_batches or []
-            wire_shadow_batch = state.cache.wire_shadow_batch
-            if settings.show_wires and (wire_shadow_batch or wire_batches):
-                wire_curved = int(wire_curvature) > 0
-                shadow_alpha = 0.35 * master_alpha
-                model_view_projection = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
-                if wire_curved:
-                    noodle_shader = _get_batch_noodle_shader()
-                    noodle_shader.bind()
-                    noodle_shader.uniform_float("ModelViewProjectionMatrix", model_view_projection)
-                    if wire_shadow_batch is not None and shadow_alpha > 0:
-                        if isinstance(wire_shadow_batch, tuple):
-                            shadow_batch, shadow_half = wire_shadow_batch
-                        else:
-                            shadow_batch, shadow_half = wire_shadow_batch, 1.0
-                        noodle_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
-                        noodle_shader.uniform_float("halfThick", float(shadow_half))
-                        shadow_batch.draw(noodle_shader)
-                    for entry in wire_batches:
-                        if len(entry) == 3:
-                            wire_color, batch, half = entry
-                        else:
-                            wire_color, batch = entry
-                            half = 1.0
-                        noodle_shader.uniform_float("color", _srgb_to_linear(wire_color))
-                        noodle_shader.uniform_float("halfThick", float(half))
-                        batch.draw(noodle_shader)
-                else:
-                    pill_shader = _get_batch_pill_shader()
-                    pill_shader.bind()
-                    pill_shader.uniform_float("ModelViewProjectionMatrix", model_view_projection)
-                    if wire_shadow_batch is not None and shadow_alpha > 0:
-                        # Straight-wire shadow is a plain batch.
-                        shadow_batch = (
-                            wire_shadow_batch[0] if isinstance(wire_shadow_batch, tuple) else wire_shadow_batch
-                        )
-                        pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
-                        shadow_batch.draw(pill_shader)
-                    for entry in wire_batches:
-                        if len(entry) == 3:
-                            wire_color, batch = entry[0], entry[1]
-                        else:
-                            wire_color, batch = entry
-                        pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
-                        batch.draw(pill_shader)
-
-            # Node fill backgrounds
-            backdrops_batch = state.cache.backdrops_batch
-            if backdrops_batch:
-                fill_shader = _get_batch_rect_shader()
-                fill_shader.bind()
-                fill_shader.uniform_float(
-                    "ModelViewProjectionMatrix",
-                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                )
-                backdrops_batch.draw(fill_shader)
-
-            # Node borders
-            borders_batch = state.cache.borders_batch
-            if borders_batch:
-                border_shader = _get_batch_rect_border_shader()
-                border_shader.bind()
-                border_shader.uniform_float(
-                    "ModelViewProjectionMatrix",
-                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                )
-                borders_batch.draw(border_shader)
-
-            # List-hover outside outlines (drawn above normal borders)
-            highlight_borders_batch = state.cache.highlight_borders_batch
-            if highlight_borders_batch:
-                border_shader = _get_batch_rect_border_shader()
-                border_shader.bind()
-                border_shader.uniform_float(
-                    "ModelViewProjectionMatrix",
-                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                )
-                highlight_borders_batch.draw(border_shader)
-
-            # Group node underline markers (baked batches)
-            marker_batches = state.cache.marker_batches or []
-            if marker_batches:
-                pill_shader = _get_batch_pill_shader()
-                pill_shader.bind()
-                pill_shader.uniform_float(
-                    "ModelViewProjectionMatrix",
-                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                )
-                for marker_color, batch in marker_batches:
-                    pill_shader.uniform_float("color", _srgb_to_linear(marker_color))
-                    batch.draw(pill_shader)
-
-            # Socket indicator pills (single batch with per-vertex color)
-            socket_batch = state.cache.socket_batch
-            if settings.show_socket_indicators and socket_batch:
-                shader = _get_batch_rect_shader()
-                shader.bind()
-                shader.uniform_float(
-                    "ModelViewProjectionMatrix",
-                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                )
-                socket_batch.draw(shader)
-
-            # Reroute pills — same SDF as sockets, per-vertex color, batched by color
-            reroute_batch = state.cache.reroute_batch
-            if getattr(settings, "show_reroutes", True) and reroute_batch:
-                shader = _get_batch_rect_shader()
-                shader.bind()
-                shader.uniform_float(
-                    "ModelViewProjectionMatrix",
-                    gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-                )
-                reroute_batch.draw(shader)
-        finally:
-            gpu.matrix.pop()
-
-    # Text labels — mapped manually so BLF never sees the content matrix
-    label_entries = state.cache.node_labels or []
-    if label_entries and origin:
-        gpu.state.blend_set("ALPHA")
-        offset_x = map_anchor_x - content_scale_factor * pivot_x
-        offset_y = map_anchor_y - content_scale_factor * pivot_y
-        for font_id, text, label_x, label_y, text_color, font_size in label_entries:
-            _draw_text_with_shadow(
-                font_id,
-                text,
-                round(content_scale_factor * label_x + offset_x),
-                round(content_scale_factor * label_y + offset_y),
-                text_color,
-                font_size,
-                settings.show_text_shadow,
-            )
-        gpu.state.blend_set("ALPHA")
+    content_draw.draw_content_batches(
+        state,
+        settings,
+        scale,
+        tree_center_x,
+        tree_center_y,
+        map_anchor_x,
+        map_anchor_y,
+        master_alpha,
+        wire_curvature,
+    )
 
     _draw_viewport_overlay(
         settings,

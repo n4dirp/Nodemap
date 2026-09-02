@@ -11,6 +11,21 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
 from .batch_build import _create_quad_indices
+from .constants import (
+    HANDLE_THICKNESS,
+    LIST_COUNT_GAP,
+    LIST_PAD_X,
+    LIST_SWATCH,
+    LIST_SWATCH_GAP,
+    SCROLLBAR_ALPHA,
+    SCROLLBAR_INSET,
+    SCROLLBAR_MIN_THUMB,
+    SCROLLBAR_THICKNESS,
+    SCROLLBAR_THICKNESS_HOVER,
+    TYPE_LIST_ANIM_AWAIT_TIMEOUT,
+    TYPE_LIST_FONT_ID,
+    TYPE_LIST_MIN_LABEL_W,
+)
 from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_pill,
@@ -18,12 +33,6 @@ from .gpu_draw import (
     _get_batch_rect_shader,
 )
 from .helpers import (
-    _HANDLE_THICKNESS,
-    _LIST_COUNT_GAP,
-    _LIST_PAD_X,
-    _LIST_SWATCH,
-    _LIST_SWATCH_GAP,
-    TYPE_LIST_FONT_ID,
     _get_type_list_width,
     _schedule_list_anim_redraw,
 )
@@ -33,19 +42,10 @@ from .tree_compile import _Timer
 
 logger = logging.getLogger(__package__)
 
-_SCROLLBAR_THICKNESS = 3.0
-_SCROLLBAR_THICKNESS_HOVER = 6.0
-_SCROLLBAR_INSET = 2.0
-_SCROLLBAR_MIN_THUMB = 6.0
-_SCROLLBAR_ALPHA = 0.65
-
-_TYPE_LIST_ANIM_AWAIT_TIMEOUT = 1.0
-_TYPE_LIST_MIN_LABEL_W = 32.0
-
 
 def _get_scrollbar_style(ui_scale: float) -> tuple[int, int]:
     """Return the shared scrollbar (thickness, inset) scaled for the UI."""
-    return max(2, int(_SCROLLBAR_THICKNESS * ui_scale)), int(_SCROLLBAR_INSET * ui_scale)
+    return max(2, int(SCROLLBAR_THICKNESS * ui_scale)), int(SCROLLBAR_INSET * ui_scale)
 
 
 def _scrollbar_thickness(ui_scale: float, active: bool = False) -> int:
@@ -53,7 +53,7 @@ def _scrollbar_thickness(ui_scale: float, active: bool = False) -> int:
     thick, _ = _get_scrollbar_style(ui_scale)
     if not active:
         return thick
-    return max(thick + 1, int(_SCROLLBAR_THICKNESS_HOVER * ui_scale))
+    return max(thick + 1, int(SCROLLBAR_THICKNESS_HOVER * ui_scale))
 
 
 def _draw_scrollbar_thumb(
@@ -81,7 +81,7 @@ def _draw_scrollbar_thumb(
     """
     thick = _scrollbar_thickness(ui_scale, active)
     if not active:
-        color = _alpha_mul(colors["scroll_item"], master_alpha * _SCROLLBAR_ALPHA)
+        color = _alpha_mul(colors["scroll_item"], master_alpha * SCROLLBAR_ALPHA)
     else:
         rgba = colors["scroll_item"]
         if pressed:
@@ -93,7 +93,7 @@ def _draw_scrollbar_thumb(
                 rgba[3],
             )
         color = _alpha_mul(rgba, master_alpha)
-    min_thumb_len = int(_SCROLLBAR_MIN_THUMB * ui_scale)
+    min_thumb_len = int(SCROLLBAR_MIN_THUMB * ui_scale)
     thumb_len = max(min_thumb_len, int(track_len * visible_frac))
     offset = int((track_len - thumb_len) * min(max(pos_frac, 0.0), 1.0))
     if horizontal:
@@ -222,7 +222,7 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
         if target_width > 0:
             state.list.anim_target = target_width
             state.list.anim_start = time.perf_counter()
-        elif time.perf_counter() - state.list.anim_start > _TYPE_LIST_ANIM_AWAIT_TIMEOUT:
+        elif time.perf_counter() - state.list.anim_start > TYPE_LIST_ANIM_AWAIT_TIMEOUT:
             state.list.anim_active = False
             state.list.list_width = target_width
             return
@@ -347,9 +347,9 @@ def _bake_list_glyph_batch(
     expanded = state.list.expanded
     count_by_label = {label: count for label, _ct, _cw, count in entries}
 
-    pad_x = _LIST_PAD_X * ui_scale
-    swatch = _LIST_SWATCH * ui_scale
-    swatch_gap = _LIST_SWATCH_GAP * ui_scale
+    pad_x = LIST_PAD_X * ui_scale
+    swatch = LIST_SWATCH * ui_scale
+    swatch_gap = LIST_SWATCH_GAP * ui_scale
     icon_col_x = swatch + swatch_gap
     swatch_col_x = icon_col_x if show_type_colors else 0.0
 
@@ -630,10 +630,10 @@ def _draw_type_list(
     # Text baseline sits centered in the drawn (rounded) row so it stays aligned
     # with the row fill instead of drifting up to 0.5px off from the slot.
 
-    pad_x = _LIST_PAD_X * ui_scale
-    swatch = _LIST_SWATCH * ui_scale
-    swatch_gap = _LIST_SWATCH_GAP * ui_scale
-    count_gap = _LIST_COUNT_GAP * ui_scale
+    pad_x = LIST_PAD_X * ui_scale
+    swatch = LIST_SWATCH * ui_scale
+    swatch_gap = LIST_SWATCH_GAP * ui_scale
+    count_gap = LIST_COUNT_GAP * ui_scale
     icon_col_x = swatch + swatch_gap
 
     with _Timer("type_list.layout"):
@@ -645,7 +645,7 @@ def _draw_type_list(
 
         # Zone geometry: inset by the resize-handle thickness so edge resize
         # borders stay reachable around the list
-        handle_pad = _HANDLE_THICKNESS * ui_scale
+        handle_pad = HANDLE_THICKNESS * ui_scale
         zone_x = map_x + handle_pad
         zone_w = map_x + padding + state.list.list_width - 2 * ui_scale - zone_x
         zone_h = min(map_h - 2 * handle_pad, total_h + 2 * row_pad_v)
@@ -683,7 +683,7 @@ def _draw_type_list(
         label_x = content_x + icon_col_x + swatch_col_x
         # Hide counts when reserving them would squeeze the label below the
         # minimum; names then reclaim the full row width.
-        show_counts = count_right - widest_count - count_gap - label_x >= _TYPE_LIST_MIN_LABEL_W * ui_scale
+        show_counts = count_right - widest_count - count_gap - label_x >= TYPE_LIST_MIN_LABEL_W * ui_scale
         label_max_width = max(0.0, (count_right - widest_count - count_gap if show_counts else count_right) - label_x)
         text_y_off = (row_h - line_h) / 2
 

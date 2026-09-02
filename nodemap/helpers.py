@@ -8,27 +8,16 @@ import time
 import blf
 import bpy
 
+from .constants import (
+    EMPTY_FINGERPRINT,
+    LABEL_MARGIN_PX,
+    LIST_ANIM_FRAMES,
+    TYPE_LIST_FONT_SIZE,
+    TYPE_LIST_MAX_WIDTH_PCT,
+    TYPE_LIST_MIN_WIDTH,
+)
+
 logger = logging.getLogger(__package__)
-
-_HANDLE_THICKNESS: int = 6
-MAX_FRAME_ZOOM: float = 20.0
-_EDITOR_FIT_MARGIN: float = 0.15
-
-MIN_MAP_WIDTH: int = 120
-MIN_MAP_HEIGHT: int = 80
-
-TYPE_LIST_FONT_ID = 0
-TYPE_LIST_FONT_SIZE = 10
-_TYPE_LIST_MIN_WIDTH = 70.0
-_TYPE_LIST_MAX_WIDTH_PCT = 0.5
-_LIST_PAD_X = 6.0
-_LIST_SWATCH = 8.0
-_LIST_SWATCH_GAP = 5.0
-_LIST_COUNT_GAP = 8.0
-_SCROLLBAR_HIT_PAD = 6.0
-_EMPTY_FINGERPRINT = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
-_LIST_ANIM_FRAMES: dict[str, int] = {"FAST": 10, "MEDIUM": 20}
-_LABEL_MARGIN_PX = 12.0
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
@@ -105,7 +94,7 @@ def _expand_bounds_margin(
     """Expand tree bounds by a small margin so frame labels stay inside the minimap."""
     bbox_h = max(bounds[3] - bounds[1], 1.0)
     inner_h = max(map_h - 2 * padding, 1.0)
-    margin = _LABEL_MARGIN_PX * ui_scale * bbox_h / inner_h
+    margin = LABEL_MARGIN_PX * ui_scale * bbox_h / inner_h
     return (bounds[0] - margin - 50, bounds[1] - margin, bounds[2] + margin + 100, bounds[3] + margin)
 
 
@@ -243,8 +232,8 @@ def _get_type_list_width(
 ) -> float:
     """Return the type-list zone width as a percentage of *map_w* (0 when disabled).
 
-    Width is driven by ``type_list_width_pct`` (``_TYPE_LIST_MIN_WIDTH`` to
-    ``_TYPE_LIST_MAX_WIDTH_PCT`` clamp) and does not depend on content
+    Width is driven by ``type_list_width_pct`` (``TYPE_LIST_MIN_WIDTH`` to
+    ``TYPE_LIST_MAX_WIDTH_PCT`` clamp) and does not depend on content
     measurement; content clips or shows extra padding instead.
     Called before the map transform so node framing can reserve the zone.
     """
@@ -257,7 +246,7 @@ def _get_type_list_width(
 
     percent = settings.type_list_width_pct / 100.0
     raw_width = map_w * percent
-    return min(max(raw_width, _TYPE_LIST_MIN_WIDTH * ui_scale), map_w * _TYPE_LIST_MAX_WIDTH_PCT)
+    return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), map_w * TYPE_LIST_MAX_WIDTH_PCT)
 
 
 def start_list_width_animation(minimap_state, settings) -> None:
@@ -277,7 +266,7 @@ def start_list_width_animation(minimap_state, settings) -> None:
     minimap_state.list.anim_active = True
     minimap_state.list.anim_from = minimap_state.list.list_width
     minimap_state.list.anim_target = 0.0 if not settings.show_type_list else -1.0
-    frames = _LIST_ANIM_FRAMES.get(settings.pan_speed, 24)
+    frames = LIST_ANIM_FRAMES.get(settings.pan_speed, 24)
     minimap_state.list.anim_duration = frames / 60.0
     minimap_state.list.anim_start = time.perf_counter()
 
@@ -309,7 +298,7 @@ def _get_tree_snapshot(
     and REROUTE nodes.
     """
     if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
-        return _EMPTY_FINGERPRINT, (0.0, 0.0, 200.0, 200.0), 0
+        return EMPTY_FINGERPRINT, (0.0, 0.0, 200.0, 200.0), 0
     nodes = node_tree.nodes
     ui_scale = _get_ui_scale()
 
