@@ -690,7 +690,7 @@ _BUTTON_ICONS = {
 def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
     """Draw a move grip icon: two rows of four dots (like a drag handle)."""
     dot_size = 1.0 * ui_scale
-    gap = 1.5 * ui_scale
+    gap = 2.0 * ui_scale
     column_gap = 2.0 * ui_scale
     group_w = 4 * dot_size + 3 * column_gap
     group_h = 2 * dot_size + gap
