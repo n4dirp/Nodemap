@@ -13,6 +13,8 @@
 - More theme customization options for colors and appearance
 - All extension options now available in the addon preferences panel
 - Per-tree minimap view: pan/zoom restored on returning to a node-tree
+- Minimap dock positions: corners, edges, and a new Floating mode
+- Drag handle to reposition the minimap, with snap to editor borders and corners
 
 ### Changed
 - Frame Selected now adjusts the zoom to fit multiple nodes or a frame
