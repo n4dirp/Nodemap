@@ -5,23 +5,24 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from .constants import (
+from .. import __package__ as base_package
+from ..core.constants import (
     HANDLE_THICKNESS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     TYPE_LIST_MAX_WIDTH_PCT,
     TYPE_LIST_MIN_WIDTH,
 )
-from .helpers import _get_minimap_margins, _get_safe_bounds, _get_ui_scale
-from .state import ResizeHandle
+from ..core.helpers import _get_minimap_margins, _get_safe_bounds, _get_ui_scale, get_addon_preferences
+from ..core.state import ResizeHandle
 
 if TYPE_CHECKING:
     from bpy.types import Context, Event
 
-    from .minimap_ops import NODEMAP_OT_navigate
-    from .state import MinimapState
+    from ..core.state import MinimapState
+    from .navigate import NODEMAP_OT_navigate
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 def get_list_divider_handle(state: MinimapState, region_x: int, region_y: int, ui_scale: float) -> ResizeHandle | None:
@@ -97,10 +98,10 @@ def get_resize_handle(
 
 def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) -> None:
     """Apply a resize drag delta to the minimap settings."""
-    addon = context.preferences.addons.get(__package__)
+    addon = get_addon_preferences(context)
     if not addon:
         return
-    settings = addon.preferences.settings
+    settings = addon.settings
     if not op._resize_start_values:
         return
     w0, h0 = op._resize_start_values
@@ -121,7 +122,7 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 
     # Suppress property update callbacks during drag to avoid clearing
     # tree_data, which causes a one-frame flash while recompiling.
-    from .state import suppress_update_callbacks
+    from ..core.state import suppress_update_callbacks
 
     with suppress_update_callbacks():
         if op._resize_handle in (ResizeHandle.W, ResizeHandle.C):
@@ -149,10 +150,10 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
     """Update the type-list percent width from the current mouse delta."""
     state = op._state
-    addon = context.preferences.addons.get(__package__)
+    addon = get_addon_preferences(context)
     if not state or not addon:
         return
-    settings = addon.preferences.settings
+    settings = addon.settings
     if op._list_width_start_map_w <= 0:
         return
     dx = op._mouse_x - op._list_width_start_x
@@ -165,7 +166,7 @@ def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
     new_w = min(max(start_w + dx, min_w), max_w)
     new_pct = int(round(new_w / max(map_w, 1.0) * 100.0))
     new_pct = min(max(new_pct, 15), 50)
-    from .state import suppress_update_callbacks
+    from ..core.state import suppress_update_callbacks
 
     with suppress_update_callbacks():
         settings.type_list_width_pct = new_pct
@@ -173,7 +174,7 @@ def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
     # reduced/expanded available width (100→75 keeps same relative pos).
     old_w = state.list.list_width
     if abs(new_w - old_w) >= 0.5:
-        from .transforms import _preserve_view_for_list_width
+        from ..geo.transforms import _preserve_view_for_list_width
 
         _preserve_view_for_list_width(state, old_w, new_w, ui_scale)
     # Drive the zone width live (per-pixel) so the pill tracks the cursor

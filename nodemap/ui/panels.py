@@ -7,8 +7,9 @@ that exposes minimap settings, frame actions, and preset switching.
 from bl_ui.utils import PresetPanel
 from bpy.types import Panel
 
+from ..core.helpers import get_addon_preferences
+from ..core.state import _state
 from .presets import PRESET_SUBDIR
-from .state import _state
 
 
 class NODEMAP_PT_popup(Panel):
@@ -27,7 +28,9 @@ class NODEMAP_PT_popup(Panel):
     def draw(self, context):
         """Draw popover sections for framing, object visibility, and options."""
         layout = self.layout
-        prefs = context.preferences.addons.get(__package__).preferences
+        prefs = get_addon_preferences(context)
+        if prefs is None:
+            return
         settings = prefs.settings
         minimap_state = _state()
         layout.active = minimap_state.enabled

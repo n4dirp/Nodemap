@@ -5,10 +5,11 @@ from typing import Any
 
 import bpy
 
-from .helpers import _get_ui_scale
-from .state import MinimapState, _state
+from .. import __package__ as base_package
+from ..core.helpers import _get_ui_scale, get_addon_preferences
+from ..core.state import MinimapState, _state
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 def _get_map_content_rect_for_width(
@@ -63,8 +64,8 @@ def _preserve_view_for_list_width(
     # compensation there and let _get_minimap_transform / _clamp_pan_to_viewport
     # handle it.
     try:
-        addon_prefs_block = bpy.context.preferences.addons.get(__package__)
-        if addon_prefs_block and addon_prefs_block.preferences.settings.follow_view:
+        addon_prefs_block = get_addon_preferences()
+        if addon_prefs_block and addon_prefs_block.settings.follow_view:
             return
     except Exception:
         pass
@@ -207,8 +208,8 @@ def _get_minimap_transform(
     inner_l, inner_b, inner_w, inner_h, _bw, _bh, base_scale, _tree_center_x, _tree_center_y = base_geom
 
     # Dynamic Auto-Zoom if follow_view is active
-    addon_prefs_block = bpy.context.preferences.addons.get(__package__)
-    if addon_prefs_block and addon_prefs_block.preferences.settings.follow_view:
+    addon_prefs_block = get_addon_preferences()
+    if addon_prefs_block and addon_prefs_block.settings.follow_view:
         if space is None:
             space = bpy.context.space_data
         if region is None:
@@ -249,8 +250,8 @@ def _clamp_pan_to_viewport(
 
     No-op when the ``follow_view`` preference is off.
     """
-    addon_prefs_block = bpy.context.preferences.addons.get(__package__)
-    if not addon_prefs_block or not addon_prefs_block.preferences.settings.follow_view:
+    addon_prefs_block = get_addon_preferences()
+    if not addon_prefs_block or not addon_prefs_block.settings.follow_view:
         return
 
     if visible is None:

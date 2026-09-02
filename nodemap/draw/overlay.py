@@ -9,9 +9,8 @@ import bpy
 import gpu
 from mathutils import Matrix
 
-from . import content_draw
-from .batch_build import _ensure_minimap_batches
-from .constants import (
+from .. import __package__ as base_package
+from ..core.constants import (
     BUTTON_HOVER_ALPHA,
     BUTTON_MARGIN,
     BUTTON_SIZE,
@@ -20,6 +19,35 @@ from .constants import (
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
 )
+from ..core.helpers import (
+    _expand_bounds_margin,
+    _get_minimap_margins,
+    _get_safe_bounds,
+    _get_tree_snapshot,
+    _get_ui_scale,
+    get_addon_preferences,
+)
+from ..core.state import (
+    _MINIMAP_BUTTONS,
+    MinimapState,
+    ResizeHandle,
+    _minimap_window_operators,
+    _registration_state,
+    _state,
+)
+from ..core.theme import (
+    _alpha_mul,
+    _get_node_editor_theme_colors,
+    _get_wire_curvature,
+)
+from ..geo.transforms import (
+    _clamp_pan_to_viewport,
+    _get_map_content_rect,
+    _get_minimap_transform,
+    _get_visible_rect,
+)
+from . import content_draw
+from .batch_build import _ensure_minimap_batches
 from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_clipped,
@@ -30,32 +58,6 @@ from .gpu_draw import (
     _draw_rounded_rect_border_varying_sides,
     _draw_text_with_shadow,
 )
-from .helpers import (
-    _expand_bounds_margin,
-    _get_minimap_margins,
-    _get_safe_bounds,
-    _get_tree_snapshot,
-    _get_ui_scale,
-)
-from .state import (
-    _MINIMAP_BUTTONS,
-    MinimapState,
-    ResizeHandle,
-    _minimap_window_operators,
-    _registration_state,
-    _state,
-)
-from .theme import (
-    _alpha_mul,
-    _get_node_editor_theme_colors,
-    _get_wire_curvature,
-)
-from .transforms import (
-    _clamp_pan_to_viewport,
-    _get_map_content_rect,
-    _get_minimap_transform,
-    _get_visible_rect,
-)
 from .tree_compile import (
     _MOVE_REFRESH_MIN_INTERVAL,
     _apply_move_updates,
@@ -65,7 +67,7 @@ from .tree_compile import (
 )
 from .type_list import _draw_minimap_scrollbars, _draw_type_list, _step_list_width
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 def _early_exit(context, space, state: MinimapState) -> bool:
@@ -78,7 +80,7 @@ def _early_exit(context, space, state: MinimapState) -> bool:
         return True
     if not state.enabled:
         return True
-    addon = context.preferences.addons.get(__package__)
+    addon = get_addon_preferences(context)
     if not addon:
         return True
     return False
@@ -721,8 +723,8 @@ def _layout_minimap_buttons(
 
 def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha):
     """Draw the interactive minimap buttons and record their hit rects."""
-    addon = bpy.context.preferences.addons.get(__package__)
-    settings = addon.preferences.settings if addon else None
+    addon = get_addon_preferences()
+    settings = addon.settings if addon else None
     state = _state()
     state.buttons.rects.clear()
 
@@ -837,8 +839,10 @@ def draw_minimap() -> None:
         logger.debug("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
         return
 
-    addon = context.preferences.addons.get(__package__)
-    settings = addon.preferences.settings
+    prefs = get_addon_preferences(context)
+    if prefs is None:
+        return
+    settings = prefs.settings
 
     # Defer auto-launch until registration is fully complete
     # to avoid invoking the modal with a stale context.
@@ -936,7 +940,7 @@ def draw_minimap() -> None:
                 state.view.pan = (spx, spy)
             else:
                 # No saved view — reset to frame-all for the new tree.
-                from .framing import _compute_frame_all_targets
+                from ..geo.framing import _compute_frame_all_targets
 
                 area_ptr = None
                 try:

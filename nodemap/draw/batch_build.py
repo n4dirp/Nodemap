@@ -8,23 +8,24 @@ from typing import Any
 import blf
 from gpu_extras.batch import batch_for_shader
 
-from .constants import (
+from .. import __package__ as base_package
+from ..core.constants import (
     BATCH_DRIFT_PX,
     CULL_MARGIN_PX,
     MIN_SOCKET_SCALE,
     SCALE_REBUILD_REL,
 )
+from ..core.helpers import _get_node_label_lines
+from ..core.state import MinimapState
+from ..core.theme import _alpha_mul, _srgb_to_linear
 from .gpu_draw import (
     _build_noodle_batch,
     _build_pill_batch,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
-from .helpers import _get_node_label_lines
-from .state import MinimapState
-from .theme import _alpha_mul, _srgb_to_linear
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 def _create_quad_indices(n: int) -> list[tuple[int, int, int]]:

@@ -7,7 +7,7 @@ import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from .theme import _srgb_to_linear
+from ..core.theme import _srgb_to_linear
 
 GPUStageInterfaceInfo = gpu.types.GPUStageInterfaceInfo
 GPUShaderCreateInfo = gpu.types.GPUShaderCreateInfo

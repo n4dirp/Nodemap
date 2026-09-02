@@ -3,13 +3,14 @@
 import logging
 import time
 
-import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
 from bpy.types import AddonPreferences, PropertyGroup
 
-from .constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
+from .. import __package__ as base_package
+from ..core.constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
+from ..core.helpers import get_addon_preferences
+from ..core.state import _suppress_update
 from .panels import NODEMAP_PT_presets
-from .state import _suppress_update
 
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, "TRACE")
@@ -25,14 +26,14 @@ logging.Logger.trace = _trace_logger
 
 def _update_logger_from_prefs():
     """Configure the logger based on user preferences (Opt-in logging)."""
-    logger = logging.getLogger(__package__)
+    logger = logging.getLogger(base_package)
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
 
     enabled = False
     level = "INFO"
     try:
-        prefs = bpy.context.preferences.addons.get(__package__).preferences
+        prefs = get_addon_preferences()
         enabled = prefs.logging_enabled
         level = prefs.logging_level
     except (KeyError, AttributeError, ReferenceError):
@@ -63,8 +64,8 @@ def _update_invalidate_all(self, context):
     if _suppress_update:
         return
     try:
-        from .helpers import redraw_ui
-        from .state import _minimap_state
+        from ..core.helpers import redraw_ui
+        from ..core.state import _minimap_state
 
         for state in _minimap_state.values():
             state.cache.fingerprint = None
@@ -85,8 +86,8 @@ def _update_invalidate_batches(self, context):
     if _suppress_update:
         return
     try:
-        from .helpers import redraw_ui
-        from .state import _minimap_state
+        from ..core.helpers import redraw_ui
+        from ..core.state import _minimap_state
 
         for state in _minimap_state.values():
             state.cache.invalidate_batches_only()
@@ -108,7 +109,7 @@ class AddonLogFormatter(logging.Formatter):
         rel_time = record.created - self.start_time
         minutes, seconds = divmod(rel_time, 60)
         timestamp = f"{int(minutes):02d}:{seconds:06.3f}"
-        package_short_name = __package__.rsplit(".", 1)[-1]
+        package_short_name = base_package
 
         if self.with_level:
             return f"{timestamp}  {package_short_name:<16} | {record.levelname.title()}: {record.getMessage()}"
@@ -532,7 +533,7 @@ class NODEMAP_PG_settings(PropertyGroup):
 class NODEMAP_AddonPreferences(AddonPreferences):
     """Store add-on preferences for the Nodes Minimap."""
 
-    bl_idname = __package__
+    bl_idname = base_package
 
     settings: PointerProperty(type=NODEMAP_PG_settings)
 
@@ -574,7 +575,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = split.column(align=True)
         window_manager = context.window_manager
         user_keyconfig = window_manager.keyconfigs.user
-        from . import addon_keymap_bindings
+        from .. import addon_keymap_bindings
 
         row = col.row(align=True)
         row.use_property_split = False

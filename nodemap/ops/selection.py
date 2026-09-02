@@ -7,15 +7,16 @@ from typing import TYPE_CHECKING
 
 import bpy
 
-from .helpers import _find_node_at, _get_node_dims, _get_ui_scale
+from .. import __package__ as base_package
+from ..core.helpers import _find_node_at, _get_node_dims, _get_ui_scale, get_addon_preferences
 
 if TYPE_CHECKING:
     from bpy.types import Context, Event, Region
 
-    from .minimap_ops import NODEMAP_OT_navigate
-    from .state import MinimapState
+    from ..core.state import MinimapState
+    from .navigate import NODEMAP_OT_navigate
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 def node_select_location(node) -> tuple[float, float]:
@@ -129,7 +130,7 @@ def handle_click_selection(
     frame: bool = False,
 ) -> None:
     """Handle a click on the minimap: find the node under cursor and select it."""
-    from .minimap_ops import _region_to_tree
+    from .navigate import _region_to_tree
 
     space = op._space
     if not space or space.type != "NODE_EDITOR":
@@ -157,8 +158,8 @@ def handle_click_selection(
                 node_tree.nodes.active = node
 
         if frame:
-            addon = context.preferences.addons.get(__package__)
-            settings = addon.preferences.settings if addon else None
+            addon = get_addon_preferences(context)
+            settings = addon.settings if addon else None
             if not (settings and op._anim.view_selected_animated(context, settings)):
                 try:
                     with op._override_ctx(context):

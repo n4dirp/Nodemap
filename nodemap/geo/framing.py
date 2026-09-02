@@ -2,14 +2,15 @@
 
 import bpy
 
-from .constants import EDITOR_FIT_MARGIN, MAX_FRAME_ZOOM
-from .helpers import (
+from ..core.constants import EDITOR_FIT_MARGIN, MAX_FRAME_ZOOM
+from ..core.helpers import (
     _expand_bounds_margin,
     _get_node_dims,
     _get_node_tree_bounds,
     _get_ui_scale,
+    get_addon_preferences,
 )
-from .state import _state
+from ..core.state import _state
 from .transforms import (
     _compute_base_map_geom,
     _compute_map_transform,
@@ -44,8 +45,8 @@ def _compute_frame_all_targets(
     bounds = _expand_bounds_margin(bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding)
     minimap_state.view.tree_bounds = bounds
 
-    addon_prefs_block = bpy.context.preferences.addons.get(__package__)
-    follow = addon_prefs_block and addon_prefs_block.preferences.settings.follow_view
+    addon_prefs_block = get_addon_preferences()
+    follow = addon_prefs_block and addon_prefs_block.settings.follow_view
 
     if not follow:
         return 1.0, 0.0, 0.0
@@ -307,8 +308,8 @@ def frame_view(
     if not visible:
         return
 
-    addon_prefs_block = bpy.context.preferences.addons.get(__package__)
-    fill = addon_prefs_block and addon_prefs_block.preferences.settings.frame_view_fill
+    addon_prefs_block = get_addon_preferences()
+    fill = addon_prefs_block and addon_prefs_block.settings.frame_view_fill
 
     rect = minimap_state.view.rect
     _, _, map_w, map_h = rect
@@ -320,6 +321,6 @@ def frame_view(
 
 def _redraw() -> None:
     """Redraw all NODE_EDITOR areas."""
-    from .helpers import redraw_ui
+    from ..core.helpers import redraw_ui
 
     redraw_ui("NODE_EDITOR")

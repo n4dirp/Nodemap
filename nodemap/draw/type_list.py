@@ -10,8 +10,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
-from .batch_build import _create_quad_indices
-from .constants import (
+from .. import __package__ as base_package
+from ..core.constants import (
     HANDLE_THICKNESS,
     LIST_COUNT_GAP,
     LIST_PAD_X,
@@ -26,21 +26,22 @@ from .constants import (
     TYPE_LIST_FONT_ID,
     TYPE_LIST_MIN_LABEL_W,
 )
+from ..core.helpers import (
+    _get_type_list_width,
+    _schedule_list_anim_redraw,
+)
+from ..core.state import MinimapState
+from ..core.theme import _COLOR_TAG_TO_THEME_ATTR, _alpha_mul, _srgb_to_linear, _theme_rgba
+from .batch_build import _create_quad_indices
 from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_pill,
     _draw_rounded_rect_border,
     _get_batch_rect_shader,
 )
-from .helpers import (
-    _get_type_list_width,
-    _schedule_list_anim_redraw,
-)
-from .state import MinimapState
-from .theme import _COLOR_TAG_TO_THEME_ATTR, _alpha_mul, _srgb_to_linear, _theme_rgba
 from .tree_compile import _Timer
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 def _get_scrollbar_style(ui_scale: float) -> tuple[int, int]:
@@ -204,7 +205,7 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
         current_width = state.list.list_width
         new_width = state.list.dragging_width
         if abs(new_width - current_width) >= 0.5:
-            from .transforms import _preserve_view_for_list_width
+            from ..geo.transforms import _preserve_view_for_list_width
 
             _preserve_view_for_list_width(state, current_width, new_width, ui_scale)
         state.list.list_width = state.list.dragging_width
@@ -212,7 +213,7 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
     if not state.list.anim_active:
         current_width = state.list.list_width
         if abs(target_width - current_width) >= 0.5:
-            from .transforms import _preserve_view_for_list_width
+            from ..geo.transforms import _preserve_view_for_list_width
 
             _preserve_view_for_list_width(state, current_width, target_width, ui_scale)
         state.list.list_width = target_width
@@ -238,7 +239,7 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
         new_width = state.list.anim_target
     current_width = state.list.list_width
     if abs(new_width - current_width) >= 0.5:
-        from .transforms import _preserve_view_for_list_width
+        from ..geo.transforms import _preserve_view_for_list_width
 
         _preserve_view_for_list_width(state, current_width, new_width, ui_scale)
     state.list.list_width = new_width

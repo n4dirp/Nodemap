@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import gpu
 from mathutils import Matrix
 
+from ..core.theme import _srgb_to_linear
 from .content_layers import CONTENT_LAYERS
 from .gpu_draw import (
     _draw_text_with_shadow,
@@ -16,11 +17,10 @@ from .gpu_draw import (
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
-from .theme import _srgb_to_linear
 
 if TYPE_CHECKING:
-    from .preferences import NODEMAP_PG_settings
-    from .state import MinimapState
+    from ..core.state import MinimapState
+    from ..ui.preferences import NODEMAP_PG_settings
 
 
 def _content_pivot(

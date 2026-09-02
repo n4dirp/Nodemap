@@ -8,6 +8,7 @@ import time
 import blf
 import bpy
 
+from .. import __package__ as base_package
 from .constants import (
     EMPTY_FINGERPRINT,
     LABEL_MARGIN_PX,
@@ -17,7 +18,21 @@ from .constants import (
     TYPE_LIST_MIN_WIDTH,
 )
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
+
+
+def get_addon_preferences(context=None):
+    """Get addon preferences from Blender context."""
+    try:
+        ctx = context or bpy.context
+        if not ctx or not getattr(ctx, "preferences", None):
+            return None
+        addon = ctx.preferences.addons.get(base_package)
+        if addon is None:
+            return None
+        return addon.preferences
+    except (AttributeError, ReferenceError):
+        return None
 
 
 def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:

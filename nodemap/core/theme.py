@@ -4,6 +4,8 @@ from typing import Any
 
 import bpy
 
+from .helpers import get_addon_preferences
+
 _COLOR_TAG_TO_THEME_ATTR: dict[str, str] = {
     "INPUT": "input_node",
     "OUTPUT": "output_node",
@@ -128,17 +130,17 @@ def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> 
 
 def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
-    addon = bpy.context.preferences.addons.get(__package__)
+    prefs = get_addon_preferences()
     theme_bg = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
-    if addon and addon.preferences.settings.custom_bg_color:
-        bg = tuple(addon.preferences.settings.bg_color)
+    if prefs and prefs.settings.custom_bg_color:
+        bg = tuple(prefs.settings.bg_color)
     else:
         bg = theme_bg
 
     text_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     label_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
-    if addon and addon.preferences.settings.custom_text_color:
-        text_color = label_color = tuple(addon.preferences.settings.text_color)
+    if prefs and prefs.settings.custom_text_color:
+        text_color = label_color = tuple(prefs.settings.text_color)
 
     return {
         "bg": bg,

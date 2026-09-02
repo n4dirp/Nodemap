@@ -5,22 +5,23 @@ import time
 
 import bpy
 
-from .constants import NODE_ROUNDNESS_DEFAULT
-from .helpers import (
+from .. import __package__ as base_package
+from ..core.constants import NODE_ROUNDNESS_DEFAULT
+from ..core.helpers import (
     _get_node_dims,
     _get_node_initials,
     get_tree_fingerprint,
 )
-from .preferences import TRACE_LEVEL
-from .state import MinimapState
-from .theme import (
+from ..core.state import MinimapState
+from ..core.theme import (
     _COLOR_TAG_TO_THEME_ATTR,
     _alpha_mul,
     _srgb_to_linear,
     _theme_rgba,
 )
+from ..ui.preferences import TRACE_LEVEL
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 # Minimum interval between live position-only refreshes during drags (seconds).
 # Skipped frames fall through to the debounced compile, which flushes the
@@ -92,7 +93,7 @@ def _debounced_compile(minimap_state: MinimapState, node_tree, colors, settings,
     minimap_state.cache.pending_settle_flush = False
     if trace:
         logger.trace("SETTLE %s", path)
-    from .helpers import redraw_ui
+    from ..core.helpers import redraw_ui
 
     redraw_ui("NODE_EDITOR")
     return None

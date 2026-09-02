@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING
 
 import bpy
 
+from .. import __package__ as base_package
+from ..core.helpers import get_addon_preferences
+
 if TYPE_CHECKING:
     from bpy.types import Context, Region, SpaceNodeEditor
 
-    from .minimap_ops import NODEMAP_OT_navigate
-    from .state import MinimapState
+    from ..core.state import MinimapState
+    from .navigate import NODEMAP_OT_navigate
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 class AnimationController:
@@ -122,7 +125,7 @@ class AnimationController:
 
     def cancel_smooth(self, context: Context) -> None:
         """Snap all active animations to their targets and stop."""
-        from .transforms import _clamp_pan_to_viewport
+        from ..geo.transforms import _clamp_pan_to_viewport
 
         op = self._op
         if self.inertia_active:
@@ -157,7 +160,7 @@ class AnimationController:
 
     def apply_inertia(self, context: Context) -> None:
         """Decay inertia and apply pan deltas."""
-        from .transforms import _clamp_pan_to_viewport
+        from ..geo.transforms import _clamp_pan_to_viewport
 
         op = self._op
         decay = 0.92
@@ -199,7 +202,7 @@ class AnimationController:
 
     def apply_smooth_drag(self, context: Context) -> None:
         """Chase the drag target with a spring-like follow."""
-        from .transforms import _clamp_pan_to_viewport
+        from ..geo.transforms import _clamp_pan_to_viewport
 
         op = self._op
         if not self.drag_active:
@@ -238,8 +241,8 @@ class AnimationController:
         op = self._op
         if not self.anim_active:
             return
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
+        addon = get_addon_preferences(context)
+        settings = addon.settings if addon else None
         speed = settings.pan_speed if settings else "MEDIUM"
         frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
         self.anim_progress += 1 / frames
@@ -294,7 +297,7 @@ class AnimationController:
 
     def apply_frame_animation(self, context: Context) -> None:
         """Step the frame zoom+pan animation forward one frame."""
-        from .transforms import _clamp_pan_to_viewport
+        from ..geo.transforms import _clamp_pan_to_viewport
 
         op = self._op
         if not self.frame_anim_active:
@@ -304,8 +307,8 @@ class AnimationController:
             self.frame_anim_active = False
             self.destroy_timer(context)
             return
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
+        addon = get_addon_preferences(context)
+        settings = addon.settings if addon else None
         speed = settings.pan_speed if settings else "MEDIUM"
         frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
         progress = self.frame_anim_progress + 1 / frames
@@ -334,7 +337,7 @@ class AnimationController:
 
     def view_selected_animated(self, context: Context, settings) -> bool:
         """Ease the editor viewport onto the selected nodes; True when started."""
-        from .framing import _compute_editor_frame_selected_targets
+        from ..geo.framing import _compute_editor_frame_selected_targets
 
         op = self._op
         if not self._animations_enabled(settings, context):
@@ -347,7 +350,7 @@ class AnimationController:
 
     def start_editor_animation(self, context: Context, target_rect: list[float]) -> None:
         """Begin animating the editor viewport toward the target tree-space rect."""
-        from .transforms import _get_visible_rect
+        from ..geo.transforms import _get_visible_rect
 
         op = self._op
         visible = _get_visible_rect(op._space, op._region)
@@ -370,8 +373,8 @@ class AnimationController:
             self.editor_anim_active = False
             self.destroy_timer(context)
             return
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
+        addon = get_addon_preferences(context)
+        settings = addon.settings if addon else None
         speed = settings.pan_speed if settings else "MEDIUM"
         frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
         progress = self.editor_anim_progress + 1 / frames
@@ -418,7 +421,7 @@ class AnimationController:
 
     def _correct_editor_view(self, context: Context, desired: list[float]) -> None:
         """Nudge the editor view2d one monotonic step toward the desired rect."""
-        from .transforms import _get_visible_rect
+        from ..geo.transforms import _get_visible_rect
 
         op = self._op
         space: SpaceNodeEditor | None = op._space
@@ -454,7 +457,7 @@ class AnimationController:
         if not current:
             return
 
-        from .minimap_ops import _view_zoom_factors
+        from .navigate import _view_zoom_factors
 
         view_zoom_x, view_zoom_y = _view_zoom_factors(space, region, current)
         dcx = (desired[0] + desired[2] - current[0] - current[2]) / 2

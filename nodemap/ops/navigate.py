@@ -5,10 +5,24 @@ import logging
 import bpy
 from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
-from . import resize, selection
-from .animations import AnimationController
-from .constants import HANDLE_THICKNESS, SCROLLBAR_HIT_PAD
-from .framing import (
+from .. import __package__ as base_package
+from ..core.constants import HANDLE_THICKNESS, SCROLLBAR_HIT_PAD
+from ..core.helpers import (
+    _expand_bounds_margin,
+    _get_area_and_region_under_mouse,
+    _get_node_tree_bounds,
+    _get_ui_scale,
+    get_addon_preferences,
+    redraw_ui,
+    start_list_width_animation,
+)
+from ..core.state import (
+    MinimapState,
+    ResizeHandle,
+    _minimap_window_operators,
+    _state,
+)
+from ..geo.framing import (
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
@@ -16,28 +30,16 @@ from .framing import (
     frame_selected,
     frame_view,
 )
-from .helpers import (
-    _expand_bounds_margin,
-    _get_area_and_region_under_mouse,
-    _get_node_tree_bounds,
-    _get_ui_scale,
-    redraw_ui,
-    start_list_width_animation,
-)
-from .state import (
-    MinimapState,
-    ResizeHandle,
-    _minimap_window_operators,
-    _state,
-)
-from .transforms import (
+from ..geo.transforms import (
     _clamp_pan_to_viewport,
     _compute_map_transform,
     _get_minimap_transform,
     _get_visible_rect,
 )
+from . import resize, selection
+from .animations import AnimationController
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger(base_package)
 
 
 def _is_in_minimap(region_x: int, region_y: int, state: MinimapState | None = None) -> bool:
@@ -361,8 +363,8 @@ class NODEMAP_OT_navigate(Operator):
             self._mouse_x = event.mouse_x
             self._mouse_y = event.mouse_y
 
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
+        addon = get_addon_preferences(context)
+        settings = addon.settings if addon else None
         if addon and not settings.interactive:
             return {"PASS_THROUGH"}
 
@@ -457,8 +459,8 @@ class NODEMAP_OT_navigate(Operator):
         whether the cursor is currently over the minimap.
         """
         state = self._state
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
+        addon = get_addon_preferences(context)
+        settings = addon.settings if addon else None
         in_minimap = _is_in_minimap(self._mouse_x, self._mouse_y, state) if state else False
         return state, addon, settings, in_minimap
 
@@ -978,7 +980,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
 
-            prefs = addon.preferences.settings if addon else None
+            prefs = addon.settings if addon else None
             scroll_mode = prefs.scroll_wheel_mode if prefs else "MINIMAP"
             if event.alt:
                 scroll_mode = "NODE_EDITOR" if scroll_mode == "MINIMAP" else "MINIMAP"
@@ -998,7 +1000,7 @@ class NODEMAP_OT_navigate(Operator):
                 effective_zoom = state.view.user_zoom
 
                 is_constrained = False
-                if addon and addon.preferences.settings.follow_view:
+                if addon and addon.settings.follow_view:
                     if effective_zoom < state.view.anchor_zoom - 0.001:
                         is_constrained = True
 
@@ -1214,8 +1216,8 @@ class NODEMAP_OT_navigate(Operator):
             return
 
         state.interaction.pressed = True
-        addon = context.preferences.addons.get(__package__)
-        settings = addon.preferences.settings if addon else None
+        addon = get_addon_preferences(context)
+        settings = addon.settings if addon else None
         if settings and self._anim._animations_enabled(settings, context):
             self._anim.anim_target = [float(pan_x), float(pan_y)]
             self._anim.anim_applied = [0.0, 0.0]
@@ -1329,10 +1331,10 @@ class NODEMAP_OT_navigate(Operator):
         state = self._state
         if not state:
             return None
-        addon = context.preferences.addons.get(__package__)
+        addon = get_addon_preferences(context)
         if not addon:
             return None
-        corner = addon.preferences.settings.position
+        corner = addon.settings.position
         ui_scale = _get_ui_scale()
         return resize.get_resize_handle(state, corner, self._mouse_x, self._mouse_y, ui_scale)
 

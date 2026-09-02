@@ -10,7 +10,10 @@ from typing import Any
 
 import bpy
 
-logger = logging.getLogger(__package__)
+from .. import __package__ as base_package
+from .helpers import get_addon_preferences
+
+logger = logging.getLogger(base_package)
 
 Rect = tuple[float, float, float, float]
 Vec2 = tuple[float, float]
@@ -232,9 +235,9 @@ def _state(area_ptr: int | None = None) -> MinimapState:
     if area_ptr not in _minimap_state:
         state = MinimapState()
         try:
-            prefs = bpy.context.preferences.addons.get(__package__)
+            prefs = get_addon_preferences()
             if prefs:
-                state.enabled = prefs.preferences.settings.show_by_default
+                state.enabled = prefs.settings.show_by_default
         except (AttributeError, ReferenceError):
             pass
         _minimap_state[area_ptr] = state
