@@ -3,6 +3,7 @@
 ## [2.0.0] [Unreleased]
 
 ### Added
+- Highlight wires connected to selected nodes
 - Interactive node-type list with per-type counts
 - New Presets menu in the Nodemap popup
 - Added group markers beneath group nodes
