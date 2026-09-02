@@ -385,6 +385,8 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 
     from ..core.state import suppress_update_callbacks
 
+    old_w = settings.minimap_width
+    old_h = settings.minimap_height
     with suppress_update_callbacks():
         if new_w is not None:
             settings.minimap_width = new_w
@@ -417,6 +419,11 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
     state = op._state
     if not state:
         return
+    # Preserve framing so the same world point stays centered in the
+    # resized map (100→75 keeps the same relative view).
+    from ..geo.transforms import _preserve_view_for_map_resize
+
+    _preserve_view_for_map_resize(state, old_w, old_h, settings.minimap_width, settings.minimap_height, ui_scale)
     state.interaction.hovered_handle = op._resize_handle
     state.view.width_clamped = (
         settings.minimap_width <= MIN_MAP_WIDTH or settings.minimap_width >= max_w or room_capped_w

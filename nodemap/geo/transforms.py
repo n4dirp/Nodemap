@@ -153,6 +153,64 @@ def _preserve_view_for_list_width(
     minimap_state.view.pan = (pan_x, pan_y)
 
 
+def _preserve_view_for_map_resize(
+    minimap_state: MinimapState,
+    old_w: float,
+    old_h: float,
+    new_w: float,
+    new_h: float,
+    ui_scale: float | None = None,
+) -> None:
+    """Adjust ``minimap_state.view.pan`` so the same world point stays centered after a map resize.
+
+    Scale pan by the base-scale ratio between the old and new content rects,
+    keeping the world point at the content-rect center fixed. Zoom is left
+    untouched. No-op when follow_view is active, sizes are equal within 0.5px,
+    or geometry is degenerate.
+    """
+    if abs(new_w - old_w) < 0.5 and abs(new_h - old_h) < 0.5:
+        return
+    if not minimap_state.view.rect or minimap_state.view.rect[2] <= 1 or minimap_state.view.rect[3] <= 1:
+        return
+    bounds = minimap_state.view.tree_bounds
+    if not bounds or (bounds[2] - bounds[0] <= 0) or (bounds[3] - bounds[1] <= 0):
+        return
+    if ui_scale is None:
+        ui_scale = _get_ui_scale()
+
+    # Follow-view mode recomputes zoom/clamp every draw; compensating here
+    # would fight that dynamic. Skip, like _preserve_view_for_list_width.
+    try:
+        addon_prefs_block = get_addon_preferences()
+        if addon_prefs_block and addon_prefs_block.settings.follow_view:
+            return
+    except Exception:
+        pass
+
+    bbox_w = max(bounds[2] - bounds[0], 1.0)
+    bbox_h = max(bounds[3] - bounds[1], 1.0)
+    padding = minimap_state.view.inner_padding
+    list_width = minimap_state.list.list_width
+
+    def _base_scale(map_w: float, map_h: float) -> float:
+        left_inset = padding + list_width
+        if list_width > 0:
+            left_inset += 4.0 * ui_scale
+        inner_w = max(map_w * ui_scale - padding - left_inset, 1.0)
+        inner_h = max(map_h * ui_scale - 2.0 * padding, 1.0)
+        return min(inner_w / bbox_w, inner_h / bbox_h)
+
+    old_base = _base_scale(old_w, old_h)
+    new_base = _base_scale(new_w, new_h)
+    if old_base <= 0 or new_base <= 0:
+        return
+    ratio = new_base / old_base
+    if abs(ratio - 1.0) < 1e-6:
+        return
+    pan_x, pan_y = minimap_state.view.pan
+    minimap_state.view.pan = (pan_x * ratio, pan_y * ratio)
+
+
 def _compute_base_map_geom(
     minimap_state: MinimapState,
 ) -> tuple[float, float, float, float, float, float, float, float, float]:

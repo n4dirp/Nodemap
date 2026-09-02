@@ -209,7 +209,7 @@ def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, fl
     y_margin = x_margin
     margin_bottom = x_margin
 
-    adjusted_margin = (map_padding + 32) * ui_scale
+    adjusted_margin = (map_padding + 29) * ui_scale
 
     # Classify the dock by which vertical edge it sits near: top corners and
     # the top border treat the context path above and the asset shelf below;
