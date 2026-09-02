@@ -69,19 +69,15 @@ class NODEMAP_PT_popup(Panel):
             sub = grid.row()
             sub.active = settings.show_frames
             sub.prop(settings, "show_frame_labels", text="Frame Labels")
-            grid.prop(settings, "show_node_colors", text="Node Colors")
             grid.prop(settings, "show_node_labels", text="Node Labels")
             grid.prop(settings, "show_node_outline", text="Node Outline")
             grid.prop(settings, "show_socket_indicators", text="Node Sockets")
-            grid.prop(settings, "show_reroutes", text="Reroute Nodes")
+            grid.prop(settings, "show_reroutes", text="Reroutes")
             grid.prop(settings, "show_node_count", text="Total Count")
             sub = grid.row()
             sub.active = settings.interactive
             sub.prop(settings, "show_type_list", text="Type List")
             grid.prop(settings, "show_wires", text="Wires")
-            sub = grid.row()
-            sub.active = settings.show_wires
-            sub.prop(settings, "show_wire_color", text="Wire Colors")
 
             if settings.interactive:
                 header, body = layout.panel("NODEMAP_PT_buttons", default_closed=False)
@@ -97,7 +93,20 @@ class NODEMAP_PT_popup(Panel):
 
                     col = row.column()
                     col.prop(settings, "show_list_toggle_btn", text="List Toggle")
-                    col.prop(settings, "show_move_btn", text="Move")
+                    col.prop(settings, "show_move_btn", text="Move Handle")
+
+            if settings.interactive:
+                header, body = layout.panel("NODEMAP_PT_theme", default_closed=False)
+                header.label(text="Theme")
+                if body:
+                    col = body.column()
+                    col.prop(settings, "opacity", text="Opacity")
+
+                    row = col.row()
+                    row.prop(settings, "show_node_colors", text="Node Colors")
+                    sub = row.row()
+                    sub.active = settings.show_wires
+                    sub.prop(settings, "show_wire_color", text="Wire Colors")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=False)
         header.label(text="Options")

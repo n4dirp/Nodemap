@@ -335,7 +335,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     )
 
     show_move_btn: BoolProperty(
-        name="Move Button",
+        name="Show Move Handle",
         description="Show a button in the minimap to drag and reposition the minimap",
         default=True,
         update=_update_invalidate_batches,
@@ -410,7 +410,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     wire_opacity: FloatProperty(
         name="Wire Color Alpha",
         description="Multiplier applied to the alpha of minimap wire colors",
-        default=1.0,
+        default=0.5,
         min=0.0,
         max=1.0,
         precision=3,
@@ -635,7 +635,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = settings.animations
         sub.row().prop(settings, "pan_speed", expand=True)
 
-        layout.separator()
+        layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Navigation")
         col = group.column()
@@ -649,17 +649,18 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         interaction_column.prop(settings, "right_click_action", text="Right Click")
         interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
 
-        layout.separator()
+        layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Layout")
 
         group.prop(settings, "position", text="Position")
 
         col = group.column(align=True)
-        col.active = settings.position == "FREE"
-        col.prop(settings, "offset_x", text="Offset X")
-        col.prop(settings, "offset_y", text="Offset Y")
-        group.prop(settings, "snap_to_borders", text="Snap to Borders")
+        if settings.position == "FREE":
+            col.prop(settings, "offset_x", text="Offset X")
+            col.prop(settings, "offset_y", text="Y")
+            group.prop(settings, "snap_to_borders", text="Snap to Borders")
+            group.separator()
 
         col = group.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
@@ -669,19 +670,17 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "max_width_pct", text="Max Region X")
         col.prop(settings, "max_height_pct", text="Y")
 
-        layout.separator()
+        layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Objects")
-        col = group.column()
+        col = group.column(heading="Show")
         col.prop(settings, "show_frames", text="Frames")
-        col.prop(settings, "show_node_colors", text="Node Colors")
         col.prop(settings, "show_node_outline", text="Node Outline")
         col.prop(settings, "show_socket_indicators", text="Node Sockets")
-        col.prop(settings, "show_reroutes", text="Reroute Nodes")
+        col.prop(settings, "show_reroutes", text="Reroutes")
         col.prop(settings, "show_node_count", text="Total Count")
         col.prop(settings, "show_type_list", text="Type List")
         col.prop(settings, "show_wires", text="Wires")
-        col.prop(settings, "show_wire_color", text="Wire Colors")
 
         group.separator()
         col = group.column(heading="Labels")
@@ -701,14 +700,13 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         if not settings.follow_view:
             sub.prop(settings, "show_frame_selected_btn", text="Frame Selected")
         sub.prop(settings, "show_list_toggle_btn", text="List Toggle")
-        sub.prop(settings, "show_move_btn", text="Move")
+        sub.prop(settings, "show_move_btn", text="Move Handle")
 
         group.separator()
-        box = group.box().column()
-        box.label(text="Type List")
-        box.active = settings.interactive
-        col = box.column()
-        col.active = settings.show_type_list
+        group = group.column()
+        group.label(text="Type List")
+        group.active = settings.interactive and settings.show_type_list
+        col = group.column()
         row = col.row()
         row.prop(settings, "type_list_sort", text="Sort", expand=True)
         col.prop(settings, "type_list_font_size", text="Font Size")
@@ -716,7 +714,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = settings.show_node_colors
         sub.prop(settings, "show_type_colors", text="Type Colors")
 
-        layout.separator()
+        layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Theme")
         col = group.column()
@@ -747,27 +745,30 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.prop(self.settings, "text_color", text="")
 
         col.prop(settings, "show_text_shadow", text="Text Shadows")
+        col.prop(settings, "show_node_colors", text="Node Colors")
 
         group.separator()
-        box = group.box().column()
-        box.active = settings.show_wires
-        box.label(text="Wires")
-        col = box.column(heading="Noodle Curving")
+        group = group.column()
+        group.active = settings.show_wires
+        group.label(text="Wires")
+        group.prop(settings, "show_wire_color", text="Wire Colors")
+
+        col = group.column(heading="Noodle Curving")
         row = col.row(align=True, heading="")
         row.prop(settings, "use_custom_wire_curvature", text="")
         sub = row.row(align=True)
         sub.active = settings.use_custom_wire_curvature
         sub.row().prop(settings, "wire_curvature", text="", expand=True)
 
-        box.prop(settings, "wire_thickness", text="Thickness")
-        box.prop(settings, "wire_opacity", text="Opacity", slider=True)
+        group.prop(settings, "wire_thickness", text="Thickness")
+        group.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
-        layout.separator()
+        layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Performance")
         group.prop(self.settings, "debounce_interval", text="Update Delay")
 
-        layout.separator()
+        layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Development")
         row = group.row(align=True, heading="Console Logging")
