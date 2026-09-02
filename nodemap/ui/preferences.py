@@ -216,7 +216,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     opacity: FloatProperty(
         name="Opacity",
         description="Adjusts the overall opacity of the minimap",
-        default=0.95,
+        default=1.0,
         min=0.15,
         max=1.0,
         precision=3,
@@ -382,6 +382,12 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
         update=_update_invalidate_all,
     )
+    highlight_selected_wires: BoolProperty(
+        name="Highlight Selected Wires",
+        description="Draw wires connected to selected nodes in the theme selection color",
+        default=True,
+        update=_update_invalidate_all,
+    )
     use_custom_wire_curvature: BoolProperty(
         name="Custom Noodle Curving",
         description="Use the custom noodle curving value below instead of the Blender theme value",
@@ -389,8 +395,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
     wire_curvature: IntProperty(
-        name="Nodle Curving",
-        description="Curving of the noddle",
+        name="Noodle Curving",
+        description="Curving of the noodle",
         default=5,
         min=0,
         max=10,
@@ -603,10 +609,11 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         layout.prop(settings, "show_by_default", text="Show in New Editors")
 
+        layout.separator()
         split = layout.split(factor=0.4)
         sub = split.column(align=True)
         sub.alignment = "RIGHT"
-        sub.label(text="Shortcut")
+        sub.label(text="Shortcuts")
         col = split.column(align=True)
         window_manager = context.window_manager
         user_keyconfig = window_manager.keyconfigs.user
@@ -626,6 +633,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             else:
                 col.operator("nodemap.restore_keymap", text="Restore")
 
+        layout.separator()
         col = layout.column(heading="Animations")
         reduce_motion = context.preferences.view.use_reduce_motion
         col.active = not reduce_motion
@@ -752,6 +760,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group.active = settings.show_wires
         group.label(text="Wires")
         group.prop(settings, "show_wire_color", text="Wire Colors")
+        group.prop(settings, "highlight_selected_wires", text="Highlight Selection")
 
         col = group.column(heading="Noodle Curving")
         row = col.row(align=True, heading="")

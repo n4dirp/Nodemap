@@ -102,6 +102,33 @@ def _draw_layer_wires(state: MinimapState, settings: NODEMAP_PG_settings, mvp: A
             batch.draw(pill_shader)
 
 
+def _draw_layer_wire_highlight(
+    state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]
+) -> None:
+    """Draw wires connected to selected nodes (thicker stroke over regular wires)."""
+    highlight_batch = state.cache.wire_highlight_batch
+    if not (settings.show_wires and highlight_batch):
+        return
+    tree_data = state.cache.tree_data
+    wire_color = tree_data.get("wire_highlight_color") if tree_data else None
+    if wire_color is None:
+        return
+    batch, half = highlight_batch
+    if int(params["wire_curvature"]) > 0:
+        noodle_shader = _get_batch_noodle_shader()
+        noodle_shader.bind()
+        noodle_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+        noodle_shader.uniform_float("color", _srgb_to_linear(wire_color))
+        noodle_shader.uniform_float("halfThick", float(half))
+        batch.draw(noodle_shader)
+    else:
+        pill_shader = _get_batch_pill_shader()
+        pill_shader.bind()
+        pill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+        pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
+        batch.draw(pill_shader)
+
+
 def _draw_layer_backdrops(state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]) -> None:
     """Draw node fill background batches."""
     backdrops_batch = state.cache.backdrops_batch
@@ -194,6 +221,7 @@ def _draw_layer_labels(state: MinimapState, settings: NODEMAP_PG_settings, mvp: 
 _DRAW: dict[str, Callable] = {
     "frames": _draw_layer_frames,
     "wires": _draw_layer_wires,
+    "wire_highlight": _draw_layer_wire_highlight,
     "backdrops": _draw_layer_backdrops,
     "borders": _draw_layer_borders,
     "highlight": _draw_layer_highlight,

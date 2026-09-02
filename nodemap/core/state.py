@@ -135,6 +135,7 @@ class RenderCache:
     node_labels: list[tuple[int, str, float, float, tuple[float, ...], float]] | None = None
     wire_batches: list | None = None
     wire_shadow_batch: Any = None
+    wire_highlight_batch: Any = None
     marker_batches: list | None = None
     socket_batch: Any = None
     socket_shadow: list | None = None
@@ -166,6 +167,7 @@ class RenderCache:
         "node_labels",
         "wire_batches",
         "wire_shadow_batch",
+        "wire_highlight_batch",
         "marker_batches",
         "socket_batch",
         "socket_shadow",

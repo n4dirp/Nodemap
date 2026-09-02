@@ -5,11 +5,14 @@ import bpy
 addon_id = next((ext.module for ext in bpy.context.preferences.addons if ext.module.endswith("nodemap")), "nodemap")
 settings = bpy.context.preferences.addons[addon_id].preferences.settings
 
+settings.animations = True
 settings.show_node_count = True
 settings.show_frames = True
 settings.show_node_outline = True
 settings.show_socket_indicators = True
 settings.show_wires = True
+settings.use_custom_wire_curvature = False
+settings.highlight_selected_wires = True
 settings.show_type_list = False
 settings.type_list_sort = "NAME"
 settings.show_frame_all_btn = True

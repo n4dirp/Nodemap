@@ -10,6 +10,7 @@ settings.show_frames = True
 settings.show_node_outline = True
 settings.show_socket_indicators = False
 settings.show_wires = False
+settings.highlight_selected_wires = False
 settings.show_type_list = False
 settings.type_list_sort = "NAME"
 settings.show_frame_all_btn = False

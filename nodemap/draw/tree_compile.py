@@ -56,7 +56,7 @@ def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
 
 def _debounced_compile(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
     """Compile tree data after the fingerprint settles, then force a redraw."""
-    include_selection = settings.show_node_outline
+    include_selection = settings.show_node_outline or settings.highlight_selected_wires
     current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
     old_fingerprint = minimap_state.cache.fingerprint
     unchanged = old_fingerprint == current_fingerprint
@@ -601,12 +601,17 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     # ------------------------------------------------------------------
     # Wire connections (using wire endpoints)
     # ------------------------------------------------------------------
+    show_wire_highlight = show_wires and settings.highlight_selected_wires
+    highlight_names = {node.name for node in nodes if node.select} if show_wire_highlight else None
     raw_links = _extract_raw_links(node_tree) if show_wires else []
-    wire_items = _resolve_wire_items(raw_links, out_pos, in_pos)
+    wire_items, wire_highlight_items = _resolve_wire_items(raw_links, out_pos, in_pos, highlight_names)
 
     # Persisted so position-only refreshes skip the links RNA pass entirely
     tree_data["raw_links"] = raw_links
     tree_data["wire_items"] = wire_items
+    tree_data["highlight_link_names"] = highlight_names
+    tree_data["wire_highlight_items"] = wire_highlight_items
+    tree_data["wire_highlight_color"] = _alpha_mul(colors["node_active"], master_alpha) if show_wire_highlight else None
     minimap_state.cache.tree_data = tree_data
     minimap_state.cache.tree_version += 1
     minimap_state.cache.position_version += 1
@@ -637,9 +642,11 @@ def _resolve_wire_items(
     raw_links: list[tuple[str, str, str, str]],
     out_pos: dict[str, dict],
     in_pos: dict[str, dict],
-) -> dict[tuple, list[tuple[float, float, float, float]]]:
-    """Resolve persisted links to per-color wire segment lists (pure dict ops)."""
+    highlight_names: set[str] | None = None,
+) -> tuple[dict[tuple, list[tuple[float, float, float, float]]], list[tuple[float, float, float, float]]]:
+    """Resolve persisted links to per-color wire segments plus selected-node segments."""
     wire_items: dict[tuple, list[tuple[float, float, float, float]]] = {}
+    highlight_items: list[tuple[float, float, float, float]] = []
     for from_name, from_id, to_name, to_id in raw_links:
         out_pos_node = out_pos.get(from_name)
         if not out_pos_node:
@@ -655,8 +662,11 @@ def _resolve_wire_items(
             continue
         out_x, out_y, wire_color = out_tuple
         in_x, in_y, _ = in_tuple
-        wire_items.setdefault(wire_color, []).append((out_x, out_y, in_x, in_y))
-    return wire_items
+        segment = (out_x, out_y, in_x, in_y)
+        wire_items.setdefault(wire_color, []).append(segment)
+        if highlight_names is not None and (from_name in highlight_names or to_name in highlight_names):
+            highlight_items.append(segment)
+    return wire_items, highlight_items
 
 
 def _group_socket_dots(by_node: dict[int, list[tuple[tuple, float, float]]]) -> dict[tuple, list[tuple[float, float]]]:
@@ -859,6 +869,9 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
         raw_links = tree_data.get("raw_links")
         if raw_links is None:
             raw_links = _extract_raw_links(node_tree)
-        tree_data["wire_items"] = _resolve_wire_items(raw_links, out_pos, in_pos)
+        highlight_names = tree_data.get("highlight_link_names")
+        wire_items, wire_highlight_items = _resolve_wire_items(raw_links, out_pos, in_pos, highlight_names)
+        tree_data["wire_items"] = wire_items
+        tree_data["wire_highlight_items"] = wire_highlight_items
         minimap_state.cache.position_version += 1
     return True

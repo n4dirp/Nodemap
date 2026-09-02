@@ -803,6 +803,43 @@ def _ensure_minimap_batches(
     minimap_state.cache.batch_anchor = (map_anchor_x, map_anchor_y)
 
 
+def _convert_wire_endpoints(
+    items: list[tuple[float, float, float, float]],
+    origin_x: float,
+    origin_y: float,
+    bake_scale: float,
+    curvature: float,
+) -> tuple[list[tuple[float, ...]], list[tuple[float, float, float, float]]]:
+    """Convert tree-space wire endpoints to baked noodle controls or pill quads."""
+    use_curve = curvature > 1e-6
+    controls: list[tuple[float, ...]] = []
+    pills: list[tuple[float, float, float, float]] = []
+    for out_x, out_y, in_x, in_y in items:
+        x1 = (out_x - origin_x) * bake_scale
+        y1 = (out_y - origin_y) * bake_scale
+        x2 = (in_x - origin_x) * bake_scale
+        y2 = (in_y - origin_y) * bake_scale
+        dx = x2 - x1
+        dy = y2 - y1
+        if math.hypot(dx, dy) < 0.5:
+            continue
+        if use_curve:
+            # Cubic Bezier matching Blender's node link type (ease-out /
+            # ease-in): horizontal handles whose length scales with the
+            # horizontal span only, exactly like
+            # ``dist = curving * 0.10 * |x3 - x0|`` in
+            # ``calculate_inner_link_bezier_points``.
+            dist_h = curvature * 0.10 * abs(dx)
+            controls.append((x1, y1, x1 + dist_h, y1, x2 - dist_h, y2, x2, y2))
+        else:
+            length = math.hypot(dx, dy)
+            angle = math.atan2(dy, dx)
+            mid_x = (x1 + x2) * 0.5
+            mid_y = (y1 + y2) * 0.5
+            pills.append((mid_x, mid_y, length, angle))
+    return controls, pills
+
+
 def _rebuild_wire_marker_batches(
     minimap_state: MinimapState,
     tree_data: dict,
@@ -825,36 +862,7 @@ def _rebuild_wire_marker_batches(
     per_color_wires: dict[Any, list[tuple[float, float, float, float, float, float, float, float]]] = {}
 
     for color, items in tree_data["wire_items"].items():
-        group_controls: list[tuple[float, float, float, float, float, float, float, float]] = []
-        group_pills: list[tuple[float, float, float, float]] = []
-        for out_x, out_y, in_x, in_y in items:
-            x1 = (out_x - origin_x) * bake_scale
-            y1 = (out_y - origin_y) * bake_scale
-            x2 = (in_x - origin_x) * bake_scale
-            y2 = (in_y - origin_y) * bake_scale
-            dx = x2 - x1
-            dy = y2 - y1
-            if math.hypot(dx, dy) < 0.5:
-                continue
-            if use_curve:
-                # Cubic Bezier matching Blender's node link type (ease-out /
-                # ease-in): horizontal handles whose length scales with the
-                # horizontal span only, exactly like
-                # ``dist = curving * 0.10 * |x3 - x0|`` in
-                # ``calculate_inner_link_bezier_points``.
-                dist_h = curvature * 0.10 * abs(dx)
-                p0x, p0y = x1, y1
-                p1x, p1y = x1 + dist_h, y1
-                p2x, p2y = x2 - dist_h, y2
-                p3x, p3y = x2, y2
-                group_controls.append((p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y))
-            else:
-                length = math.hypot(dx, dy)
-                angle = math.atan2(dy, dx)
-                mid_x = (x1 + x2) * 0.5
-                mid_y = (y1 + y2) * 0.5
-                group_pills.append((mid_x, mid_y, length, angle))
-
+        group_controls, group_pills = _convert_wire_endpoints(items, origin_x, origin_y, bake_scale, curvature)
         if use_curve and group_controls:
             per_color_wires[color] = group_controls
         elif group_pills:
@@ -873,6 +881,23 @@ def _rebuild_wire_marker_batches(
     else:
         minimap_state.cache.wire_batches = wire_batches
         minimap_state.cache.wire_shadow_batch = None
+
+    # Wires connected to selected nodes — one thicker batch drawn over the
+    # regular wires in the theme selection color (see tree_compile).
+    highlight_items = tree_data.get("wire_highlight_items") or []
+    highlight_cache = None
+    if highlight_items:
+        highlight_thickness = thickness * 1.5
+        h_controls, h_pills = _convert_wire_endpoints(highlight_items, origin_x, origin_y, bake_scale, curvature)
+        if use_curve and h_controls:
+            _shader, batch = _build_noodle_batch(h_controls, highlight_thickness * 0.5)
+            if batch is not None:
+                highlight_cache = (batch, highlight_thickness * 0.5)
+        elif h_pills:
+            _shader, batch = _build_pill_batch(h_pills, highlight_thickness)
+            if batch is not None:
+                highlight_cache = (batch, highlight_thickness * 0.5)
+    minimap_state.cache.wire_highlight_batch = highlight_cache
 
     # Group node underline markers — baked like wires
     marker_batches = []

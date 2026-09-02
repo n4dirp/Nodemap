@@ -1001,7 +1001,8 @@ def draw_minimap() -> None:
     visible = _get_visible_rect(space, region)
 
     show_borders = settings.show_node_outline
-    current_fingerprint, raw_bounds, content_count = _get_tree_snapshot(node_tree, show_borders)
+    include_selection = show_borders or settings.highlight_selected_wires
+    current_fingerprint, raw_bounds, content_count = _get_tree_snapshot(node_tree, include_selection)
     if raw_bounds[2] - raw_bounds[0] <= 0 or raw_bounds[3] - raw_bounds[1] <= 0:
         return
 

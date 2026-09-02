@@ -17,6 +17,7 @@ class Layer:
 CONTENT_LAYERS: tuple[Layer, ...] = (
     Layer("frames", ("frames_fill_batch", "frames_border_batch")),
     Layer("wires", ("wire_shadow_batch", "wire_batches")),
+    Layer("wire_highlight", ("wire_highlight_batch",)),
     Layer("backdrops", ("backdrops_batch",)),
     Layer("borders", ("borders_batch",)),
     Layer("highlight", ("highlight_borders_batch",)),
