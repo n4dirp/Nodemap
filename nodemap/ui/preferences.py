@@ -207,7 +207,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_width: IntProperty(
         name="Size X",
         description="Minimap width in pixels",
-        default=300,
+        default=350,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -312,7 +312,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         subtype="COLOR_GAMMA",
     )
 
-    viewport_fill_rect: BoolProperty(
+    use_custom_viewport_fill: BoolProperty(
         name="Active View Fill",
         description="Fill the active view rect with a color",
         default=True,
@@ -762,9 +762,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(self.settings, "opacity", text="Opacity")
 
         row = col.row(align=True, heading="Colors")
-        row.prop(self.settings, "viewport_fill_rect", text="View Highlight")
+        row.prop(self.settings, "use_custom_viewport_fill", text="View Highlight")
         sub = row.row(align=True)
-        sub.active = self.settings.viewport_fill_rect
+        sub.active = self.settings.use_custom_viewport_fill
         sub.prop(self.settings, "viewport_fill_color", text="")
 
         row = col.row(align=True)
@@ -774,13 +774,13 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.prop(self.settings, "viewport_overlay_color", text="")
 
         row = col.row(align=True)
-        row.prop(self.settings, "use_custom_background", text="Custom Backdrop")
+        row.prop(self.settings, "use_custom_background", text="Background")
         sub = row.row(align=True)
         sub.active = self.settings.use_custom_background
         sub.prop(self.settings, "background_color", text="")
 
         row = col.row(align=True)
-        row.prop(self.settings, "use_custom_text", text="Custom Text Color")
+        row.prop(self.settings, "use_custom_text", text="Text Color")
         sub = row.row(align=True)
         sub.active = self.settings.use_custom_text
         sub.prop(self.settings, "text_color", text="")

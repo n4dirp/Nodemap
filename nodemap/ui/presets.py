@@ -54,7 +54,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_frame_labels",
         # Theme.
         "settings.opacity",
-        "settings.viewport_fill_rect",
+        "settings.use_custom_viewport_fill",
         "settings.viewport_fill_color",
         "settings.show_viewport_overlay",
         "settings.viewport_overlay_color",

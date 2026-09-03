@@ -413,7 +413,7 @@ def _draw_view_fill(
         return
 
     fill_color = colors["node_active"]
-    if settings.viewport_fill_rect:
+    if settings.use_custom_viewport_fill:
         fill_color = settings.viewport_fill_color
     fill_color = _alpha_mul(fill_color, 0.2 * master_alpha)
     node_roundness = colors.get("node_roundness", 2.0) * ui_scale
@@ -506,7 +506,7 @@ def _draw_viewport_overlay(
     # Outline the viewport extent when it overlaps the minimap
     if hole_width > 0 and hole_height > 0:
         outline_color = colors["node_active"]
-        if settings.viewport_fill_rect:
+        if settings.use_custom_viewport_fill:
             outline_color = settings.viewport_fill_color
         border_width = 0.5 * ui_scale
         _draw_rounded_rect_border(
