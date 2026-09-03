@@ -207,7 +207,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_width: IntProperty(
         name="Size X",
         description="Minimap width in pixels",
-        default=350,
+        default=400,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -638,6 +638,30 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         layout.prop(settings, "show_by_default", text="Show in New Editors")
 
+        layout.separator(type="LINE")
+        group = layout.column()
+        group.label(text="Navigation")
+        row = group.row()
+        row.prop(settings, "interactive", text="Interactive Map")
+        row.prop(settings, "follow_view", text="Follow View")
+
+        if settings.interactive:
+            group.separator()
+            col = group.column(heading="Animations")
+            reduce_motion = context.preferences.view.use_reduce_motion
+            col.active = not reduce_motion
+            row = col.row(align=True, heading="")
+            row.prop(settings, "use_animations", text="")
+            sub = row.row(align=True)
+            sub.active = settings.use_animations
+            sub.row().prop(settings, "pan_speed", expand=True)
+
+            group.separator()
+            interaction_column = group.column()
+            interaction_column.prop(settings, "left_click_action", text="Left Click")
+            interaction_column.prop(settings, "right_click_action", text="Right Click")
+            interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
+
         layout.separator()
         split = layout.split(factor=0.4)
         sub = split.column(align=True)
@@ -661,30 +685,6 @@ class NODEMAP_AddonPreferences(AddonPreferences):
                 draw_kmi([], user_keyconfig, user_keymap, user_keymap_item, row, 0)
             else:
                 col.operator("nodemap.restore_keymap", text="Restore")
-
-        layout.separator()
-        col = layout.column(heading="Animations")
-        reduce_motion = context.preferences.view.use_reduce_motion
-        col.active = not reduce_motion
-        row = col.row(align=True, heading="")
-        row.prop(settings, "use_animations", text="")
-        sub = row.row(align=True)
-        sub.active = settings.use_animations
-        sub.row().prop(settings, "pan_speed", expand=True)
-
-        layout.separator(type="LINE")
-        group = layout.column()
-        group.label(text="Navigation")
-        col = group.column()
-        col.prop(settings, "interactive", text="Interactive Map")
-        col.prop(settings, "follow_view", text="Follow View")
-
-        group.separator()
-        interaction_column = group.column()
-        interaction_column.active = settings.interactive
-        interaction_column.prop(settings, "left_click_action", text="Left Click")
-        interaction_column.prop(settings, "right_click_action", text="Right Click")
-        interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
 
         layout.separator(type="LINE")
         group = layout.column()
@@ -714,46 +714,47 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Objects")
-        col = group.column(heading="Show")
+        split = group.split(factor=0.4)
+        split.label(text="")
+        row = split.row()
+        row.use_property_split = False
+        col = row.column()
         col.prop(settings, "show_frames", text="Frames")
         col.prop(settings, "show_node_outline", text="Node Outline")
         col.prop(settings, "show_socket_indicators", text="Node Sockets")
         col.prop(settings, "show_reroutes", text="Reroutes")
         col.prop(settings, "show_node_count", text="Total Count")
-        col.prop(settings, "show_type_list", text="Type List")
+        if settings.interactive:
+            col.prop(settings, "show_type_list", text="Type List")
         col.prop(settings, "show_wires", text="Wires")
 
-        group.separator()
-        col = group.column(heading="Labels")
+        col = row.column(heading="Labels")
         col.prop(settings, "show_node_labels", text="Node Labels")
-        sub = col.row()
-        sub.active = settings.show_frames
-        sub.prop(settings, "show_frame_labels", text="Frame Labels")
-        sub = col.row()
-        sub.active = settings.show_node_labels
-        sub.prop(settings, "compact_node_labels", text="Compact")
+        if settings.show_frames:
+            col.prop(settings, "show_frame_labels", text="Frame Labels")
+        if settings.show_node_labels:
+            col.prop(settings, "compact_node_labels", text="Compact")
 
-        group.separator()
-        sub = group.column(heading="Buttons")
-        sub.active = settings.interactive
-        sub.prop(settings, "show_frame_all_button", text="Frame All")
-        sub.prop(settings, "show_frame_view_button", text="Frame View")
-        if not settings.follow_view:
-            sub.prop(settings, "show_frame_selected_button", text="Frame Selected")
-        sub.prop(settings, "show_list_toggle_button", text="List Toggle")
-        sub.prop(settings, "show_move_button", text="Move Handle")
+        if settings.interactive:
+            col = row.column(heading="Buttons")
+            col.prop(settings, "show_frame_all_button", text="Frame All")
+            col.prop(settings, "show_frame_view_button", text="Frame View")
+            if not settings.follow_view:
+                col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+            col.prop(settings, "show_list_toggle_button", text="List Toggle")
+            col.prop(settings, "show_move_button", text="Move Handle")
 
-        group.separator()
-        group = group.column()
-        group.label(text="Type List")
-        group.active = settings.interactive and settings.show_type_list
-        col = group.column()
-        row = col.row()
-        row.prop(settings, "type_list_sort", text="Sort", expand=True)
-        col.prop(settings, "type_list_font_size", text="Font Size")
-        sub = col.row()
-        sub.active = settings.show_node_colors
-        sub.prop(settings, "show_type_colors", text="Type Colors")
+            if settings.show_type_list:
+                group.separator()
+                group = group.column()
+                group.label(text="Type List")
+                col = group.column()
+                row = col.row()
+                row.prop(settings, "type_list_sort", text="Sort", expand=True)
+                col.prop(settings, "type_list_font_size", text="Font Size")
+                sub = col.row()
+                sub.active = settings.show_node_colors
+                sub.prop(settings, "show_type_colors", text="Type Colors")
 
         layout.separator(type="LINE")
         group = layout.column()
@@ -784,26 +785,27 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub = row.row(align=True)
         sub.active = self.settings.use_custom_text
         sub.prop(self.settings, "text_color", text="")
+        row = col.row(align=True)
+        row.prop(settings, "show_node_colors", text="Node Colors")
+        row.prop(settings, "show_text_shadow", text="Text Shadows")
 
-        col.prop(settings, "show_text_shadow", text="Text Shadows")
-        col.prop(settings, "show_node_colors", text="Node Colors")
+        if settings.show_wires:
+            group.separator()
+            group = group.column()
+            group.label(text="Wires")
+            row = group.row(align=True)
+            row.prop(settings, "show_wire_color", text="Wire Colors")
+            row.prop(settings, "highlight_selected_wires", text="Highlight Selection")
 
-        group.separator()
-        group = group.column()
-        group.active = settings.show_wires
-        group.label(text="Wires")
-        group.prop(settings, "show_wire_color", text="Wire Colors")
-        group.prop(settings, "highlight_selected_wires", text="Highlight Selection")
+            col = group.column(heading="Noodle Curving")
+            row = col.row(align=True, heading="")
+            row.prop(settings, "use_custom_noodle_curving", text="")
+            sub = row.row(align=True)
+            sub.active = settings.use_custom_noodle_curving
+            sub.row().prop(settings, "noodle_curving", text="", expand=True)
 
-        col = group.column(heading="Noodle Curving")
-        row = col.row(align=True, heading="")
-        row.prop(settings, "use_custom_noodle_curving", text="")
-        sub = row.row(align=True)
-        sub.active = settings.use_custom_noodle_curving
-        sub.row().prop(settings, "noodle_curving", text="", expand=True)
-
-        group.prop(settings, "wire_thickness", text="Thickness")
-        group.prop(settings, "wire_opacity", text="Opacity", slider=True)
+            group.prop(settings, "wire_thickness", text="Thickness")
+            group.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
         layout.separator(type="LINE")
         group = layout.column()

@@ -74,9 +74,8 @@ class NODEMAP_PT_popup(Panel):
             grid.prop(settings, "show_socket_indicators", text="Node Sockets")
             grid.prop(settings, "show_reroutes", text="Reroutes")
             grid.prop(settings, "show_node_count", text="Total Count")
-            sub = grid.row()
-            sub.active = settings.interactive
-            sub.prop(settings, "show_type_list", text="Type List")
+            if settings.interactive:
+                grid.prop(settings, "show_type_list", text="Type List")
             grid.prop(settings, "show_wires", text="Wires")
 
             if settings.interactive:
@@ -95,18 +94,17 @@ class NODEMAP_PT_popup(Panel):
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")
                     col.prop(settings, "show_move_button", text="Move Handle")
 
-            if settings.interactive:
-                header, body = layout.panel("NODEMAP_PT_theme", default_closed=False)
-                header.label(text="Theme")
-                if body:
-                    col = body.column()
-                    col.prop(settings, "opacity", text="Opacity")
+            header, body = layout.panel("NODEMAP_PT_theme", default_closed=False)
+            header.label(text="Theme")
+            if body:
+                col = body.column()
+                col.prop(settings, "opacity", text="Opacity")
 
-                    row = col.row()
-                    row.prop(settings, "show_node_colors", text="Node Colors")
-                    sub = row.row()
-                    sub.active = settings.show_wires
-                    sub.prop(settings, "show_wire_color", text="Wire Colors")
+                row = col.row()
+                row.prop(settings, "show_node_colors", text="Node Colors")
+                sub = row.row()
+                sub.active = settings.show_wires
+                sub.prop(settings, "show_wire_color", text="Wire Colors")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=False)
         header.label(text="Options")
