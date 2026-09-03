@@ -611,7 +611,13 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     tree_data["wire_items"] = wire_items
     tree_data["highlight_link_names"] = highlight_names
     tree_data["wire_highlight_items"] = wire_highlight_items
-    tree_data["wire_highlight_color"] = _alpha_mul(colors["node_active"], master_alpha) if show_wire_highlight else None
+    # Wire opacity influences the highlight at 50% so dimmed wires dim their
+    # highlight too (wire_opacity 0.0 → 50% of full, 1.0 → full).
+    tree_data["wire_highlight_color"] = (
+        _alpha_mul(colors["node_active"], master_alpha * (0./ + 0.5 * wire_opacity_mult))
+        if show_wire_highlight
+        else None
+    )
     minimap_state.cache.tree_data = tree_data
     minimap_state.cache.tree_version += 1
     minimap_state.cache.position_version += 1

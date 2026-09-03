@@ -446,7 +446,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Wire Color Alpha",
         description="Multiplier applied to the alpha of minimap wire colors",
         default=0.5,
-        min=0.0,
+        min=0.1,
         max=1.0,
         precision=3,
         step=0.1,
