@@ -332,8 +332,8 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 
     safe_w = ex - sx
     safe_h = ey - sy
-    max_width_pct = settings.max_width_pct / 100.0
-    max_height_pct = settings.max_height_pct / 100.0
+    max_width_pct = settings.max_width_percent / 100.0
+    max_height_pct = settings.max_height_percent / 100.0
     max_w = max(MIN_MAP_WIDTH, int((safe_w - 2 * x_margin) * max_width_pct))
     max_h = max(MIN_MAP_HEIGHT, int((safe_h - y_margin - margin) * max_height_pct))
 
@@ -455,7 +455,7 @@ def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
     from ..core.state import suppress_update_callbacks
 
     with suppress_update_callbacks():
-        settings.type_list_width_pct = new_pct
+        settings.type_list_width_percent = new_pct
     # Preserve framing so the same world rect stays centered in the
     # reduced/expanded available width (100→75 keeps same relative pos).
     old_w = state.list.list_width

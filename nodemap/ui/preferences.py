@@ -136,7 +136,7 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     position: EnumProperty(
         name="Position",
-        description="Minimap dock position. Dock to a corner, an edge, or move it freely",
+        description="Dock position for the minimap in the node editor",
         items=[
             ("TOP_LEFT", "Corner: Top-Left", "Dock in the top-left corner"),
             ("TOP_RIGHT", "Corner: Top-Right", "Dock in the top-right corner"),
@@ -154,7 +154,7 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     offset_x: IntProperty(
         name="Offset X",
-        description="Free horizontal offset from the default dock position, in pixels",
+        description="Horizontal offset from the default dock position, in pixels",
         default=0,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -162,13 +162,13 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     offset_y: IntProperty(
         name="Offset Y",
-        description="Free vertical offset from the default dock position, in pixels",
+        description="Vertical offset from the default dock position, in pixels",
         default=0,
         subtype="PIXEL",
         update=_update_invalidate_batches,
     )
 
-    snap_to_borders: BoolProperty(
+    use_snap_to_borders: BoolProperty(
         name="Snap to Borders",
         description="Snap the minimap to editor borders and corners when dragging it",
         default=True,
@@ -193,9 +193,9 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    max_width_pct: IntProperty(
-        name="Max X %",
-        description="Largest the minimap can be across, as a share of the available space",
+    max_width_percent: IntProperty(
+        name="Max Width",
+        description="Maximum share of the available width the minimap can occupy",
         default=100,
         min=10,
         max=100,
@@ -203,9 +203,9 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    max_height_pct: IntProperty(
-        name="Max Y %",
-        description="Largest the minimap can be up and down, as a share of the available space",
+    max_height_percent: IntProperty(
+        name="Max Height",
+        description="Maximum share of the available height the minimap can occupy",
         default=100,
         min=10,
         max=100,
@@ -224,17 +224,17 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
-    custom_bg_color: BoolProperty(
+    use_custom_background: BoolProperty(
         name="Custom Background",
         description="Use a custom background color instead of the Blender theme color",
         default=False,
         update=_update_invalidate_batches,
     )
 
-    bg_color: FloatVectorProperty(
+    background_color: FloatVectorProperty(
         name="Background Color",
         description="Custom background color for the minimap overlay",
-        default=(0.45, 0.45, 0.45, 0.95),
+        default=(0.2, 0.2, 0.2, 1.0),
         size=4,
         min=0.0,
         max=1.0,
@@ -242,7 +242,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    custom_text_color: BoolProperty(
+    use_custom_text: BoolProperty(
         name="Custom Text Color",
         description="Override the Blender theme text color with a custom color",
         default=False,
@@ -306,35 +306,35 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    show_frame_all_btn: BoolProperty(
+    show_frame_all_button: BoolProperty(
         name="Frame All Button",
         description="Show a Frame-all button inside the minimap",
         default=True,
         update=_update_invalidate_batches,
     )
 
-    show_frame_view_btn: BoolProperty(
+    show_frame_view_button: BoolProperty(
         name="Frame View Button",
         description="Show a Frame-view button inside the minimap",
         default=True,
         update=_update_invalidate_batches,
     )
 
-    show_frame_selected_btn: BoolProperty(
+    show_frame_selected_button: BoolProperty(
         name="Frame Selected Button",
         description="Show a Frame-selected button inside the minimap",
         default=False,
         update=_update_invalidate_batches,
     )
 
-    show_list_toggle_btn: BoolProperty(
+    show_list_toggle_button: BoolProperty(
         name="List Toggle Button",
         description="Show a button in the minimap to toggle the node-type list",
         default=True,
         update=_update_invalidate_batches,
     )
 
-    show_move_btn: BoolProperty(
+    show_move_button: BoolProperty(
         name="Show Move Handle",
         description="Show a button in the minimap to drag and reposition the minimap",
         default=True,
@@ -388,13 +388,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
         update=_update_invalidate_all,
     )
-    use_custom_wire_curvature: BoolProperty(
+    use_custom_noodle_curving: BoolProperty(
         name="Custom Noodle Curving",
-        description="Use the custom noodle curving value below instead of the Blender theme value",
+        description="Use a custom noodle curving value instead of the Blender theme value",
         default=False,
         update=_update_invalidate_batches,
     )
-    wire_curvature: IntProperty(
+    noodle_curving: IntProperty(
         name="Noodle Curving",
         description="Curving of the noodle",
         default=5,
@@ -487,8 +487,8 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
-    type_list_width_pct: IntProperty(
-        name="Type List Width %",
+    type_list_width_percent: IntProperty(
+        name="Type List Width",
         description="Width of the node-type list as a percentage of the minimap width",
         default=40,
         min=1,
@@ -497,7 +497,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    debounce_interval: FloatProperty(
+    debounce_delay: FloatProperty(
         name="Update Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",
         default=0.1,
@@ -551,7 +551,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default="SELECT_FRAME",
     )
 
-    animations: BoolProperty(
+    use_animations: BoolProperty(
         name="Animations",
         description=(
             "Enable smooth animations for panning, framing, and the type list\n"
@@ -638,9 +638,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         reduce_motion = context.preferences.view.use_reduce_motion
         col.active = not reduce_motion
         row = col.row(align=True, heading="")
-        row.prop(settings, "animations", text="")
+        row.prop(settings, "use_animations", text="")
         sub = row.row(align=True)
-        sub.active = settings.animations
+        sub.active = settings.use_animations
         sub.row().prop(settings, "pan_speed", expand=True)
 
         layout.separator(type="LINE")
@@ -667,7 +667,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         if settings.position == "FREE":
             col.prop(settings, "offset_x", text="Offset X")
             col.prop(settings, "offset_y", text="Y")
-            group.prop(settings, "snap_to_borders", text="Snap to Borders")
+            group.prop(settings, "use_snap_to_borders", text="Snap to Borders")
             group.separator()
 
         col = group.column(align=True)
@@ -675,8 +675,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "minimap_height", text="Y")
 
         col = group.column(align=True)
-        col.prop(settings, "max_width_pct", text="Max Region X")
-        col.prop(settings, "max_height_pct", text="Y")
+        col.prop(settings, "max_width_percent", text="Max Region X")
+        col.prop(settings, "max_height_percent", text="Y")
 
         layout.separator(type="LINE")
         group = layout.column()
@@ -703,12 +703,12 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group.separator()
         sub = group.column(heading="Buttons")
         sub.active = settings.interactive
-        sub.prop(settings, "show_frame_all_btn", text="Frame All")
-        sub.prop(settings, "show_frame_view_btn", text="Frame View")
+        sub.prop(settings, "show_frame_all_button", text="Frame All")
+        sub.prop(settings, "show_frame_view_button", text="Frame View")
         if not settings.follow_view:
-            sub.prop(settings, "show_frame_selected_btn", text="Frame Selected")
-        sub.prop(settings, "show_list_toggle_btn", text="List Toggle")
-        sub.prop(settings, "show_move_btn", text="Move Handle")
+            sub.prop(settings, "show_frame_selected_button", text="Frame Selected")
+        sub.prop(settings, "show_list_toggle_button", text="List Toggle")
+        sub.prop(settings, "show_move_button", text="Move Handle")
 
         group.separator()
         group = group.column()
@@ -741,15 +741,15 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.prop(self.settings, "viewport_overlay_color", text="")
 
         row = col.row(align=True)
-        row.prop(self.settings, "custom_bg_color", text="Custom Backdrop")
+        row.prop(self.settings, "use_custom_background", text="Custom Backdrop")
         sub = row.row(align=True)
-        sub.active = self.settings.custom_bg_color
-        sub.prop(self.settings, "bg_color", text="")
+        sub.active = self.settings.use_custom_background
+        sub.prop(self.settings, "background_color", text="")
 
         row = col.row(align=True)
-        row.prop(self.settings, "custom_text_color", text="Custom Text Color")
+        row.prop(self.settings, "use_custom_text", text="Custom Text Color")
         sub = row.row(align=True)
-        sub.active = self.settings.custom_text_color
+        sub.active = self.settings.use_custom_text
         sub.prop(self.settings, "text_color", text="")
 
         col.prop(settings, "show_text_shadow", text="Text Shadows")
@@ -764,10 +764,10 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         col = group.column(heading="Noodle Curving")
         row = col.row(align=True, heading="")
-        row.prop(settings, "use_custom_wire_curvature", text="")
+        row.prop(settings, "use_custom_noodle_curving", text="")
         sub = row.row(align=True)
-        sub.active = settings.use_custom_wire_curvature
-        sub.row().prop(settings, "wire_curvature", text="", expand=True)
+        sub.active = settings.use_custom_noodle_curving
+        sub.row().prop(settings, "noodle_curving", text="", expand=True)
 
         group.prop(settings, "wire_thickness", text="Thickness")
         group.prop(settings, "wire_opacity", text="Opacity", slider=True)
@@ -775,7 +775,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Performance")
-        group.prop(self.settings, "debounce_interval", text="Update Delay")
+        group.prop(self.settings, "debounce_delay", text="Update Delay")
 
         layout.separator(type="LINE")
         group = layout.column()

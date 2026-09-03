@@ -129,8 +129,8 @@ def _compute_minimap_rect(
     # Compute desired size, capped to % of safe region (accounting for margins)
     map_w = settings.minimap_width * ui_scale
     map_h = settings.minimap_height * ui_scale
-    max_width_pct = settings.max_width_pct / 100.0
-    max_height_pct = settings.max_height_pct / 100.0
+    max_width_pct = settings.max_width_percent / 100.0
+    max_height_pct = settings.max_height_percent / 100.0
     map_w = min(map_w, (safe_width - x_margin) * max_width_pct)
     map_h = min(map_h, (safe_height - y_margin - margin) * max_height_pct)
 
@@ -749,7 +749,7 @@ def _layout_minimap_buttons(
     # Move-grip drag handle: rightmost item of the top row when enabled.
     drag_size = BUTTON_SIZE * ui_scale
     drag_x = round(map_x + map_w - padding - button_margin - drag_size)
-    show_move_btn = bool(getattr(settings, "show_move_btn", True))
+    show_move_btn = bool(getattr(settings, "show_move_button", True))
 
     # Frame buttons (ALL/VIEW/SELECTED) sit left of the drag handle, or flush
     # to the right padding edge when the move button is hidden.
@@ -1109,7 +1109,7 @@ def draw_minimap() -> None:
         # since arming; identical-fingerprint redraw streams (list animation,
         # hover) must leave the live timer alone so the settle event cannot be
         # starved by continuous redraws.
-        delay = settings.debounce_interval
+        delay = settings.debounce_delay
         now = time.perf_counter()
         if state.cache.pending_timer is not None and state.cache.pending_fingerprint != current_fingerprint:
             if now < state.cache.pending_timer_deadline:

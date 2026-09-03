@@ -103,8 +103,8 @@ def _get_wire_curvature(settings) -> int:
     Use the add-on custom value when enabled, otherwise use the Blender theme
     ``node_editor.noodle_curving`` so the minimap follows the node-graph look.
     """
-    if settings.use_custom_wire_curvature:
-        return int(settings.wire_curvature)
+    if settings.use_custom_noodle_curving:
+        return int(settings.noodle_curving)
     return _theme_int("node_editor.noodle_curving", 0)
 
 
@@ -132,14 +132,14 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
     prefs = get_addon_preferences()
     theme_bg = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
-    if prefs and prefs.settings.custom_bg_color:
-        bg = tuple(prefs.settings.bg_color)
+    if prefs and prefs.settings.use_custom_background:
+        bg = tuple(prefs.settings.background_color)
     else:
         bg = theme_bg
 
     text_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     label_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
-    if prefs and prefs.settings.custom_text_color:
+    if prefs and prefs.settings.use_custom_text:
         text_color = label_color = tuple(prefs.settings.text_color)
 
     return {

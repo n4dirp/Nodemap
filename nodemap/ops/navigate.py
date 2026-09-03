@@ -642,7 +642,7 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_resize_handle
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
-                self._list_width_start_pct = settings.type_list_width_pct
+                self._list_width_start_pct = settings.type_list_width_percent
                 map_x, map_y, map_w, map_h = state.view.rect
                 self._list_width_start_map_w = map_w
                 cursor = _CURSOR_MAP[divider_resize_handle]
@@ -793,7 +793,7 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_handle_r
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
-                self._list_width_start_pct = settings.type_list_width_pct if settings else 35
+                self._list_width_start_pct = settings.type_list_width_percent if settings else 35
                 map_x, map_y, map_w, map_h = state.view.rect
                 self._list_width_start_map_w = map_w
                 cursor = _CURSOR_MAP[divider_handle_r]
@@ -1433,9 +1433,9 @@ class NODEMAP_OT_navigate(Operator):
         # to the border (where it can snap) instead of shrinking away.
         safe_width = ex - sx
         safe_height = ey - sy
-        map_w = min(settings.minimap_width * ui_scale, (safe_width - x_margin) * settings.max_width_pct / 100.0)
+        map_w = min(settings.minimap_width * ui_scale, (safe_width - x_margin) * settings.max_width_percent / 100.0)
         map_h = min(
-            settings.minimap_height * ui_scale, (safe_height - y_margin - margin) * settings.max_height_pct / 100.0
+            settings.minimap_height * ui_scale, (safe_height - y_margin - margin) * settings.max_height_percent / 100.0
         )
         map_x = sx + x_margin + offset_x * ui_scale
         map_y = sy + y_margin + offset_y * ui_scale
@@ -1443,7 +1443,7 @@ class NODEMAP_OT_navigate(Operator):
         map_x, map_y = clamp_free_rect(map_x, map_y, map_w, map_h, safe, x_margin, y_margin, margin)
         cand = (
             resize._nearest_dock(map_x, map_y, map_w, map_h, safe, x_margin, y_margin, margin, ui_scale)
-            if settings.snap_to_borders
+            if settings.use_snap_to_borders
             else None
         )
 

@@ -399,7 +399,7 @@ class AnimationController:
             return False
         if settings is None:
             return default
-        return settings.animations
+        return settings.use_animations
 
     def _editor_view_close(self, visible: tuple[float, float, float, float], target: list[float]) -> bool:
         """Return True when the editor viewport already frames *target*."""

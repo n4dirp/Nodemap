@@ -274,7 +274,7 @@ def _get_type_list_width(
 ) -> float:
     """Return the type-list zone width as a percentage of *map_w* (0 when disabled).
 
-    Width is driven by ``type_list_width_pct`` (``TYPE_LIST_MIN_WIDTH`` to
+    Width is driven by ``type_list_width_percent`` (``TYPE_LIST_MIN_WIDTH`` to
     ``TYPE_LIST_MAX_WIDTH_PCT`` clamp) and does not depend on content
     measurement; content clips or shows extra padding instead.
     Called before the map transform so node framing can reserve the zone.
@@ -286,7 +286,7 @@ def _get_type_list_width(
     if not type_stats:
         return 0.0
 
-    percent = settings.type_list_width_pct / 100.0
+    percent = settings.type_list_width_percent / 100.0
     raw_width = map_w * percent
     return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), map_w * TYPE_LIST_MAX_WIDTH_PCT)
 
@@ -303,7 +303,7 @@ def start_list_width_animation(minimap_state, settings) -> None:
             return
     except AttributeError:
         pass
-    if not settings or not settings.animations:
+    if not settings or not settings.use_animations:
         return
     minimap_state.list.anim_active = True
     minimap_state.list.anim_from = minimap_state.list.list_width

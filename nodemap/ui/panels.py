@@ -86,14 +86,14 @@ class NODEMAP_PT_popup(Panel):
                     col = body.column()
                     row = col.row()
                     col = row.column()
-                    col.prop(settings, "show_frame_all_btn", text="Frame All")
-                    col.prop(settings, "show_frame_view_btn", text="Frame View")
+                    col.prop(settings, "show_frame_all_button", text="Frame All")
+                    col.prop(settings, "show_frame_view_button", text="Frame View")
                     if not settings.follow_view:
-                        col.prop(settings, "show_frame_selected_btn", text="Frame Selected")
+                        col.prop(settings, "show_frame_selected_button", text="Frame Selected")
 
                     col = row.column()
-                    col.prop(settings, "show_list_toggle_btn", text="List Toggle")
-                    col.prop(settings, "show_move_btn", text="Move Handle")
+                    col.prop(settings, "show_list_toggle_button", text="List Toggle")
+                    col.prop(settings, "show_move_button", text="Move Handle")
 
             if settings.interactive:
                 header, body = layout.panel("NODEMAP_PT_theme", default_closed=False)

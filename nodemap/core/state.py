@@ -228,10 +228,10 @@ _registration_state: dict[str, bool] = {"done": False}
 # Order defines the top-edge horizontal capsule (right-aligned).
 # Frame order left to right: SELECTED, VIEW, ALL.
 _MINIMAP_BUTTONS: tuple[tuple[str, str], ...] = (
-    ("SELECTED", "show_frame_selected_btn"),
-    ("VIEW", "show_frame_view_btn"),
-    ("ALL", "show_frame_all_btn"),
-    ("LIST", "show_list_toggle_btn"),
+    ("SELECTED", "show_frame_selected_button"),
+    ("VIEW", "show_frame_view_button"),
+    ("ALL", "show_frame_all_button"),
+    ("LIST", "show_list_toggle_button"),
 )
 
 
