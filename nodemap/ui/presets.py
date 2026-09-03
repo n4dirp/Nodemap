@@ -52,6 +52,10 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_node_labels",
         "settings.compact_node_labels",
         "settings.show_frame_labels",
+        "settings.minimap_width",
+        "settings.minimap_height",
+        "settings.max_width_percent",
+        "settings.max_height_percent",
         # Theme.
         "settings.opacity",
         "settings.use_custom_viewport_fill",
@@ -69,9 +73,19 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.noodle_curving",
         "settings.wire_thickness",
         "settings.wire_opacity",
+        # Navigation.
+        "settings.scroll_wheel_mode",
+        "settings.left_click_action",
+        "settings.right_click_action",
+        "settings.pan_speed",
+        "settings.frame_view_fill",
         # Options.
         "settings.interactive",
         "settings.follow_view",
+        "settings.highlight_selected_wires",
+        "settings.use_animations",
+        "settings.show_by_default",
+        "settings.debounce_delay",
     ]
     preset_subdir = PRESET_SUBDIR
 

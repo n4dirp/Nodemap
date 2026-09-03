@@ -640,54 +640,6 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         layout.separator(type="LINE")
         group = layout.column()
-        group.label(text="Navigation")
-        row = group.row()
-        row.prop(settings, "interactive", text="Interactive Map")
-        row.prop(settings, "follow_view", text="Follow View")
-
-        if settings.interactive:
-            group.separator()
-            col = group.column(heading="Animations")
-            reduce_motion = context.preferences.view.use_reduce_motion
-            col.active = not reduce_motion
-            row = col.row(align=True, heading="")
-            row.prop(settings, "use_animations", text="")
-            sub = row.row(align=True)
-            sub.active = settings.use_animations
-            sub.row().prop(settings, "pan_speed", expand=True)
-
-            group.separator()
-            interaction_column = group.column()
-            interaction_column.prop(settings, "left_click_action", text="Left Click")
-            interaction_column.prop(settings, "right_click_action", text="Right Click")
-            interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
-
-        layout.separator()
-        split = layout.split(factor=0.4)
-        sub = split.column(align=True)
-        sub.alignment = "RIGHT"
-        sub.label(text="Shortcuts")
-        col = split.column(align=True)
-        window_manager = context.window_manager
-        user_keyconfig = window_manager.keyconfigs.user
-        from .. import addon_keymap_bindings
-
-        row = col.row(align=True)
-        row.use_property_split = False
-        for km_addon, kmi_addon in addon_keymap_bindings:
-            user_keymap = user_keyconfig.keymaps.get(km_addon.name)
-            if not user_keymap:
-                continue
-            user_keymap_item = user_keymap.keymap_items.get(kmi_addon.idname)
-            if user_keymap_item:
-                from rna_keymap_ui import draw_kmi
-
-                draw_kmi([], user_keyconfig, user_keymap, user_keymap_item, row, 0)
-            else:
-                col.operator("nodemap.restore_keymap", text="Restore")
-
-        layout.separator(type="LINE")
-        group = layout.column()
         group.label(text="Layout")
 
         group.row().prop(settings, "dock_mode", text="Dock Mode", expand=True)
@@ -806,6 +758,54 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
             group.prop(settings, "wire_thickness", text="Thickness")
             group.prop(settings, "wire_opacity", text="Opacity", slider=True)
+
+        layout.separator(type="LINE")
+        group = layout.column()
+        group.label(text="Navigation")
+        row = group.row()
+        row.prop(settings, "interactive", text="Interactive Map")
+        row.prop(settings, "follow_view", text="Follow View")
+
+        if settings.interactive:
+            group.separator()
+            col = group.column(heading="Animations")
+            reduce_motion = context.preferences.view.use_reduce_motion
+            col.active = not reduce_motion
+            row = col.row(align=True, heading="")
+            row.prop(settings, "use_animations", text="")
+            sub = row.row(align=True)
+            sub.active = settings.use_animations
+            sub.row().prop(settings, "pan_speed", expand=True)
+
+            group.separator()
+            interaction_column = group.column()
+            interaction_column.prop(settings, "left_click_action", text="Left Click")
+            interaction_column.prop(settings, "right_click_action", text="Right Click")
+            interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
+
+        layout.separator()
+        split = layout.split(factor=0.4)
+        sub = split.column(align=True)
+        sub.alignment = "RIGHT"
+        sub.label(text="Shortcuts")
+        col = split.column(align=True)
+        window_manager = context.window_manager
+        user_keyconfig = window_manager.keyconfigs.user
+        from .. import addon_keymap_bindings
+
+        row = col.row(align=True)
+        row.use_property_split = False
+        for km_addon, kmi_addon in addon_keymap_bindings:
+            user_keymap = user_keyconfig.keymaps.get(km_addon.name)
+            if not user_keymap:
+                continue
+            user_keymap_item = user_keymap.keymap_items.get(kmi_addon.idname)
+            if user_keymap_item:
+                from rna_keymap_ui import draw_kmi
+
+                draw_kmi([], user_keyconfig, user_keymap, user_keymap_item, row, 0)
+            else:
+                col.operator("nodemap.restore_keymap", text="Restore")
 
         layout.separator(type="LINE")
         group = layout.column()

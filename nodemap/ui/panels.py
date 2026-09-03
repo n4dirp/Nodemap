@@ -94,7 +94,7 @@ class NODEMAP_PT_popup(Panel):
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")
                     col.prop(settings, "show_move_button", text="Move Handle")
 
-            header, body = layout.panel("NODEMAP_PT_theme", default_closed=False)
+            header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
             header.label(text="Theme")
             if body:
                 col = body.column()
@@ -106,7 +106,7 @@ class NODEMAP_PT_popup(Panel):
                 sub.active = settings.show_wires
                 sub.prop(settings, "show_wire_color", text="Wire Colors")
 
-        header, body = layout.panel("NODEMAP_PT_options", default_closed=False)
+        header, body = layout.panel("NODEMAP_PT_options", default_closed=True)
         header.label(text="Options")
         if body:
             flow = body.grid_flow(columns=2)
