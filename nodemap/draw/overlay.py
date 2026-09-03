@@ -1024,7 +1024,7 @@ def draw_minimap() -> None:
     ui_scale = _get_ui_scale()
     colors = _get_node_editor_theme_colors()
     master_alpha = settings.opacity
-    corner = settings.position
+    corner = settings.current_position
 
     rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, state)
     if rect is None:

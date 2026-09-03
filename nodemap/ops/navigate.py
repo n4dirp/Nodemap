@@ -1403,7 +1403,7 @@ class NODEMAP_OT_navigate(Operator):
         from ..core.state import suppress_update_callbacks
 
         with suppress_update_callbacks():
-            settings.position = "FREE"
+            settings.dock_mode = "FREE"
             settings.offset_x = offset_x
             settings.offset_y = offset_y
         state.view.moving = True
@@ -1423,7 +1423,7 @@ class NODEMAP_OT_navigate(Operator):
         from ..core.state import suppress_update_callbacks
 
         with suppress_update_callbacks():
-            settings.position = "FREE"
+            settings.dock_mode = "FREE"
             settings.offset_x = offset_x
             settings.offset_y = offset_y
 
@@ -1457,9 +1457,16 @@ class NODEMAP_OT_navigate(Operator):
 
         snapped = cand is not None and self._snap_dwell >= DOCK_DWELL_MS
         if snapped:
-            if settings.position != cand[2]:
+            if settings.current_position != cand[2]:
                 with suppress_update_callbacks():
-                    settings.position = cand[2]
+                    if cand[2] == "FREE":
+                        settings.dock_mode = "FREE"
+                    elif cand[2] in ("TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT"):
+                        settings.dock_mode = "CORNER"
+                        settings.corner_position = cand[2]
+                    else:
+                        settings.dock_mode = "EDGE"
+                        settings.edge_position = cand[2]
                 # Re-anchor the drag at the latching dock so releasing the snap
                 # continues from the snapped position instead of leaping back to
                 # where the drag originally started.
@@ -1468,10 +1475,10 @@ class NODEMAP_OT_navigate(Operator):
                     int(round((cand[1] - (sy + y_margin)) / ui_scale)),
                 )
                 self._move_start_mouse = (self._mouse_x, self._mouse_y)
-        elif settings.position != "FREE":
+        elif settings.current_position != "FREE":
             # Not (yet) snapped: revert to the free offset position.
             with suppress_update_callbacks():
-                settings.position = "FREE"
+                settings.dock_mode = "FREE"
         state.view.snapped = snapped
         self._redraw_ui()
 
@@ -1482,7 +1489,7 @@ class NODEMAP_OT_navigate(Operator):
         addon = get_addon_preferences(context)
         if not addon:
             return None
-        corner = addon.settings.position
+        corner = addon.settings.current_position
         ui_scale = _get_ui_scale()
         return resize.get_resize_handle(
             state, corner, self._mouse_x, self._mouse_y, ui_scale, self._space, self._area, self._region

@@ -27,7 +27,9 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
     ]
     preset_values = [
         # Layout.
-        "settings.position",
+        "settings.dock_mode",
+        "settings.corner_position",
+        "settings.edge_position",
         "settings.offset_x",
         "settings.offset_y",
         "settings.use_snap_to_borders",

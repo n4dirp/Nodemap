@@ -134,23 +134,52 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=False,
     )
 
-    position: EnumProperty(
-        name="Position",
-        description="Dock position for the minimap in the node editor",
+    dock_mode: EnumProperty(
+        name="Dock Mode",
+        description="How to dock the minimap in the editor",
         items=[
-            ("TOP_LEFT", "Corner: Top-Left", "Dock in the top-left corner"),
-            ("TOP_RIGHT", "Corner: Top-Right", "Dock in the top-right corner"),
-            ("BOTTOM_LEFT", "Corner: Bottom-Left", "Dock in the bottom-left corner"),
-            ("BOTTOM_RIGHT", "Corner: Bottom-Right", "Dock in the bottom-right corner"),
-            ("TOP_BORDER", "Edge: Top", "Dock along the top edge"),
-            ("BOTTOM_BORDER", "Edge: Bottom", "Dock along the bottom edge"),
-            ("LEFT_BORDER", "Edge: Left", "Dock along the left edge"),
-            ("RIGHT_BORDER", "Edge: Right", "Dock along the right edge"),
-            ("FREE", "Floating", "Position the minimap freely by dragging its handle"),
+            ("CORNER", "Corner", "Dock to one of the four corners"),
+            ("EDGE", "Edge", "Dock along one of the four edges"),
+            ("FREE", "Free", "Place the minimap anywhere by dragging"),
+        ],
+        default="CORNER",
+        update=_update_invalidate_batches,
+    )
+
+    corner_position: EnumProperty(
+        name="Corner",
+        description="Which corner to dock the minimap in",
+        items=[
+            ("TOP_LEFT", "Top-Left", "Dock in the top-left corner"),
+            ("TOP_RIGHT", "Top-Right", "Dock in the top-right corner"),
+            ("BOTTOM_LEFT", "Bottom-Left", "Dock in the bottom-left corner"),
+            ("BOTTOM_RIGHT", "Bottom-Right", "Dock in the bottom-right corner"),
         ],
         default="TOP_LEFT",
         update=_update_invalidate_batches,
     )
+
+    edge_position: EnumProperty(
+        name="Edge",
+        description="Which edge to dock the minimap along",
+        items=[
+            ("TOP_BORDER", "Top", "Dock along the top edge"),
+            ("BOTTOM_BORDER", "Bottom", "Dock along the bottom edge"),
+            ("LEFT_BORDER", "Left", "Dock along the left edge"),
+            ("RIGHT_BORDER", "Right", "Dock along the right edge"),
+        ],
+        default="TOP_BORDER",
+        update=_update_invalidate_batches,
+    )
+
+    @property
+    def current_position(self) -> str:
+        """Resolve the effective dock position from dock_mode + sub-position."""
+        if self.dock_mode == "FREE":
+            return "FREE"
+        if self.dock_mode == "EDGE":
+            return self.edge_position
+        return self.corner_position
 
     offset_x: IntProperty(
         name="Offset X",
@@ -661,14 +690,18 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group = layout.column()
         group.label(text="Layout")
 
-        group.prop(settings, "position", text="Position")
+        group.row().prop(settings, "dock_mode", text="Dock Mode", expand=True)
 
         col = group.column(align=True)
-        if settings.position == "FREE":
+        if settings.dock_mode == "CORNER":
+            col.prop(settings, "corner_position", text="Corner")
+        elif settings.dock_mode == "EDGE":
+            col.prop(settings, "edge_position", text="Edge")
+        else:  # FREE
             col.prop(settings, "offset_x", text="Offset X")
             col.prop(settings, "offset_y", text="Y")
             group.prop(settings, "use_snap_to_borders", text="Snap to Borders")
-            group.separator()
+        group.separator()
 
         col = group.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")

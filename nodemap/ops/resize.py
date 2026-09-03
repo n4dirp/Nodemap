@@ -324,7 +324,7 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
     w0, h0 = op._resize_start_values
     dx = op._mouse_x - op._resize_start_mouse[0]
     dy = op._mouse_y - op._resize_start_mouse[1]
-    corner = settings.position
+    corner = settings.current_position
 
     ui_scale = _get_ui_scale()
     sx, sy, ex, ey = _get_safe_bounds(op._area, op._region)
