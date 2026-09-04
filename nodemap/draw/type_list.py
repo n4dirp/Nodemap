@@ -841,7 +841,7 @@ def _draw_type_list(
         pill_w = zone_w - 4 * ui_scale
         state.list.search_rect = (pill_x, search_bottom, pill_w, search_h)
 
-        search_text_x = zone_x + pad_x
+        search_text_x = zone_x + pad_x + padding
 
         # Clear (X) button at the pill's right edge; shown only while a filter
         # query is present so the query text can reclaim the full row width.

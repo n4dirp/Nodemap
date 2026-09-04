@@ -1231,6 +1231,7 @@ def draw_minimap() -> None:
         ui_scale,
         master_alpha,
         show_borders,
+        bool(settings.show_type_list),
         highlight_border,
         wire_curvature,
         wire_thickness,

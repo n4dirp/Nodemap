@@ -601,6 +601,7 @@ def _ensure_minimap_batches(
     ui_scale,
     master_alpha,
     show_borders,
+    list_visible=False,
     highlight_border=None,
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
@@ -618,6 +619,7 @@ def _ensure_minimap_batches(
         minimap_state.cache.position_version,
         round(ui_scale, 3),
         show_borders,
+        bool(list_visible),
         minimap_state.list.hovered_type_label,
         minimap_state.interaction.hovered_node_id,
         bool(highlight_border),
@@ -662,7 +664,8 @@ def _ensure_minimap_batches(
     frame_depths = _compute_frame_depths(node_infos)
     frame_label_entries: list[dict] = []
     # Active search filter: node names to keep visible, or None when the
-    # query is empty (draw everything). Mirrors the type list's own matching.
+    # query is empty or the type list is hidden (draw everything). Mirrors
+    # the type list's own matching.
     filter_names = (
         filter_matching_nodes(
             tree_data.get("type_stats") or {},
@@ -670,7 +673,7 @@ def _ensure_minimap_batches(
             query,
             tree_data.get("type_search") or None,
         )
-        if query
+        if query and list_visible
         else None
     )
     hovered_type = minimap_state.list.hovered_type_label
