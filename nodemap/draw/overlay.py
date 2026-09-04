@@ -215,7 +215,6 @@ def _draw_background(
     master_alpha: float,
     snapped: bool = False,
     moving: bool = False,
-    snap_sides: frozenset[str] = frozenset(),
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
 
@@ -238,9 +237,6 @@ def _draw_background(
         0.5,
     )
     _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
-
-    if snapped and snap_sides:
-        _draw_snap_sides(map_x, map_y, map_w, map_h, colors, master_alpha, snap_sides)
 
     return bg_color, panel_roundness
 
@@ -1117,6 +1113,13 @@ def draw_minimap() -> None:
                 state.view.pan = (spx, spy)
             state.last_tree_ptr = tree_ptr
         elif state.last_tree_ptr != tree_ptr:
+            # Type-list expansion/search are not meaningful across trees: clear them
+            # so a group expanded in the previous material cannot leak its guide line
+            # into this tree.
+            state.list.expanded.clear()
+            state.list.scroll = 0.0
+            state.list.search_query = ""
+            state.list.search_cursor = 0
             # Save view for tree being left.
             state.tree_views[state.last_tree_ptr] = (
                 state.view.user_zoom,
@@ -1252,7 +1255,6 @@ def draw_minimap() -> None:
         master_alpha,
         state.view.snapped,
         state.view.moving,
-        _snap_sides_for(settings.current_position),
     )
 
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
@@ -1332,6 +1334,9 @@ def draw_minimap() -> None:
     _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count)
 
     _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state)
+
+    if state.view.snapped and (snap_sides := _snap_sides_for(settings.current_position)):
+        _draw_snap_sides(map_x, map_y, map_w, map_h, colors, master_alpha, snap_sides)
 
     _draw_node_count(settings, content_count, state, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
 
