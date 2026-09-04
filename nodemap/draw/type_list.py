@@ -12,6 +12,7 @@ from mathutils import Matrix
 
 from .. import __package__ as base_package
 from ..core.constants import (
+    BUTTON_SIZE,
     HANDLE_THICKNESS,
     LIST_COUNT_GAP,
     LIST_PAD_X,
@@ -30,12 +31,14 @@ from ..core.helpers import (
     _get_type_list_width,
     _schedule_list_anim_redraw,
 )
+from ..core.list_filter import filter_type_list, match_span, normalize_query
 from ..core.state import MinimapState
 from ..core.theme import _COLOR_TAG_TO_THEME_ATTR, _alpha_mul, _srgb_to_linear, _theme_rgba
 from .batch_build import _create_quad_indices
 from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_pill,
+    _draw_pill_border,
     _draw_rounded_rect_border,
     _get_batch_rect_shader,
 )
@@ -262,6 +265,7 @@ def _type_list_cache_key(state: MinimapState, settings, colors: dict, master_alp
         settings.show_node_colors,
         settings.show_type_colors,
         frozenset(state.list.expanded),
+        state.list.search_query,
         ui_scale,
         master_alpha,
         tuple(colors["node"]),
@@ -293,25 +297,41 @@ def _build_type_list_cache(
         font_size = int(settings.type_list_font_size * ui_scale)
         blf.size(font_id, font_size)
 
-        if settings.type_list_sort == "NAME":
-            items = sorted(type_stats.items(), key=lambda kv: kv[0].lower())
+        children = tree_data.get("type_nodes") or {}
+        search_texts = tree_data.get("type_search") or None
+        # Filter before sorting so the COUNT order can use the (possibly
+        # reduced) match counts; the full per-type count is restored from
+        # type_stats for display logic (chevrons, lone-group labels).
+        visible, effective_expanded, filtered_children = filter_type_list(
+            type_stats,
+            children,
+            state.list.expanded,
+            state.list.search_query,
+            search_texts=search_texts,
+        )
+        if state.list.search_query.strip():
+            pass
+        elif settings.type_list_sort == "NAME":
+            visible.sort(key=lambda label_count: label_count[0].lower())
         else:
-            items = sorted(type_stats.items(), key=lambda kv: (-kv[1], kv[0]))
+            visible.sort(key=lambda label_count: (-label_count[1], label_count[0]))
 
         entries: list[tuple[str, str, float, int]] = []
         widest_count = 0.0
-        for label, count in items:
-            count_text = str(count)
+        for label, display_count in visible:
+            count_text = str(display_count)
             count_width = blf.dimensions(font_id, count_text)[0]
             widest_count = max(widest_count, count_width)
-            entries.append((label, count_text, count_width, count))
+            entries.append((label, count_text, count_width, type_stats.get(label, display_count)))
 
         _, line_h = blf.dimensions(font_id, "Ay")
         row_h = line_h + 4 * ui_scale
 
         state.cache.list_key = key
         state.cache.list_entries = entries
+        state.cache.list_effective_expanded = effective_expanded
         state.cache.list_children = tree_data.get("type_nodes") or {}
+        state.cache.list_filtered_children = filtered_children
         state.cache.list_layout = {
             "font_size": font_size,
             "line_h": line_h,
@@ -342,10 +362,10 @@ def _bake_list_glyph_batch(
     """
     type_colors = (state.cache.tree_data or {}).get("type_colors") or {}
     type_node_colors = (state.cache.tree_data or {}).get("type_node_colors") or {}
-    children = state.cache.list_children or {}
+    children = state.cache.list_filtered_children or state.cache.list_children or {}
 
     show_type_colors = settings.show_type_colors and settings.show_node_colors
-    expanded = state.list.expanded
+    expanded = state.cache.list_effective_expanded or state.list.expanded
     count_by_label = {label: count for label, _ct, _cw, count in entries}
 
     pad_x = LIST_PAD_X * ui_scale
@@ -564,6 +584,92 @@ def _iter_type_list_layout(
                 y -= row_h
 
 
+def _draw_text_with_match(font_id, x: float, y: float, text: str, base_color, match_color, norm_query: str) -> None:
+    """Draw *text* at ``(x, y)``, tinting the first *norm_query* match.
+
+    The matched substring is drawn in *match_color* to highlight it inside a
+    search result row; the rest uses *base_color*. With no match the whole
+    string is drawn in *base_color*. Each segment is positioned explicitly by
+    its cumulative width so the highlight never overlaps the surrounding text
+    (BLF does not advance the cursor across repeated ``blf.draw`` calls while
+    clipping is enabled).
+    """
+    start = match_span(norm_query, text) if norm_query else -1
+    if start < 0:
+        blf.position(font_id, x, y, 0)
+        blf.color(font_id, *base_color)
+        blf.draw(font_id, text)
+        return
+    end = start + len(norm_query)
+    if start > 0:
+        blf.position(font_id, x, y, 0)
+        blf.color(font_id, *base_color)
+        blf.draw(font_id, text[:start])
+    match_x = x + blf.dimensions(font_id, text[:start])[0]
+    blf.position(font_id, match_x, y, 0)
+    blf.color(font_id, *match_color)
+    blf.draw(font_id, text[start:end])
+    if end < len(text):
+        after_x = x + blf.dimensions(font_id, text[:end])[0]
+        blf.position(font_id, after_x, y, 0)
+        blf.color(font_id, *base_color)
+        blf.draw(font_id, text[end:])
+
+
+def _draw_search_clear_button(rect, hovered: bool, colors: dict, master_alpha: float, ui_scale: float) -> None:
+    """Draw the clear-query (X) button inside the search pill.
+
+    Two thin bars rotated ±45deg form the cross; the GPU matrix transform keeps
+    it crisp and independent of the active BLF font/clip state.
+    """
+    clear_x, clear_y, clear_size, _ = rect
+    icon_color = _alpha_mul(colors["text"], 0.35 * master_alpha if not hovered else master_alpha)
+    cx = round(clear_x + clear_size / 2)
+    cy = round(clear_y + clear_size / 2)
+    stroke = max(1.0, 0.8 * ui_scale)
+    length = clear_size * 1.0
+    gpu.matrix.push()
+    try:
+        gpu.matrix.translate((cx, cy, 0.0))
+        for angle in (45.0, -45.0):
+            gpu.matrix.push()
+            try:
+                gpu.matrix.multiply_matrix(Matrix.Rotation(math.radians(angle), 4, "Z"))
+                _draw_filled_rounded_rect(-length / 2, -stroke / 2, length, stroke, 0.0, icon_color)
+            finally:
+                gpu.matrix.pop()
+    finally:
+        gpu.matrix.pop()
+
+
+def _draw_search_icon(cx: float, cy: float, size: float, color, ui_scale: float) -> None:
+    """Draw a magnifying-glass search icon centered at ``(cx, cy)``.
+
+    A thin circular ring forms the lens and a single diagonal bar the handle,
+    matching the crisp SDF cross drawn for the clear button.
+    """
+    ring_r = size * 0.28
+    stroke = max(1.0, 1.2 * ui_scale)
+    # Lens ring (a circular pill border).
+    _draw_pill_border(
+        cx - ring_r,
+        cy - ring_r + stroke,
+        ring_r * 2,
+        ring_r * 2,
+        color,
+        stroke,
+    )
+    # Handle: one diagonal bar emerging from the lens ring toward the lower-right.
+    handle_length = size * 0.32
+    gpu.matrix.push()
+    try:
+        gpu.matrix.translate((cx, cy, 0.0))
+        gpu.matrix.multiply_matrix(Matrix.Rotation(math.radians(-45.0), 4, "Z"))
+        _draw_pill(ring_r, -stroke / 2, handle_length, stroke, color)
+    finally:
+        gpu.matrix.pop()
+
+
 def _draw_type_list(
     settings,
     state: MinimapState,
@@ -591,6 +697,9 @@ def _draw_type_list(
         state.list.scrollbar_thumb = None
         state.list.scrollbar_track = None
         state.list.list_zone_rect = None
+        state.list.search_rect = None
+        state.list.search_clear_rect = None
+        state.list.search_clear_hovered = False
         return
     tree_data = state.cache.tree_data
     type_stats = tree_data.get("type_stats") if tree_data else None
@@ -602,6 +711,9 @@ def _draw_type_list(
         state.list.scrollbar_thumb = None
         state.list.scrollbar_track = None
         state.list.list_zone_rect = None
+        state.list.search_rect = None
+        state.list.search_clear_rect = None
+        state.list.search_clear_hovered = False
         return
 
     node_tree = bpy.context.space_data.edit_tree if bpy.context.space_data else None
@@ -611,6 +723,7 @@ def _draw_type_list(
         if key != state.cache.list_key or not state.cache.list_layout:
             _build_type_list_cache(state, settings, node_tree, key, colors, master_alpha, ui_scale)
     entries = state.cache.list_entries or []
+    expanded = state.cache.list_effective_expanded or state.list.expanded
     nodes_by_name = state.cache.list_nodes_by_name or {}
     layout = state.cache.list_layout or {}
     font_size = layout.get("font_size", int(settings.type_list_font_size * ui_scale))
@@ -622,7 +735,7 @@ def _draw_type_list(
     # 1px visual separation between rows: row fills/borders are shrunk by the
     # gap and centered in the slot, leaving hit-testing and layout pitch intact.
     row_gap = 1.0
-    row_gap_half = row_gap / 2.0
+    row_gap_half = round(row_gap / 2.0)
     row_draw_h = row_h - row_gap
 
     def _row_y(slot_bottom: float) -> float:
@@ -638,10 +751,10 @@ def _draw_type_list(
     icon_col_x = swatch + swatch_gap
 
     with _Timer("type_list.layout"):
-        row_pad_v = 3 * ui_scale
-        children = state.cache.list_children or {}
+        row_pad_v = 1 * ui_scale
+        children = state.cache.list_filtered_children or state.cache.list_children or {}
         total_h = 0.0
-        for _ in _iter_type_list_layout(entries, children, state.list.expanded, row_h):
+        for _ in _iter_type_list_layout(entries, children, expanded, row_h):
             total_h += row_h
 
         # Zone geometry: inset by the resize-handle thickness so edge resize
@@ -649,9 +762,26 @@ def _draw_type_list(
         handle_pad = HANDLE_THICKNESS * ui_scale
         zone_x = map_x + handle_pad
         zone_w = map_x + padding + state.list.list_width - 2 * ui_scale - zone_x
-        zone_h = min(map_h - 2 * handle_pad, total_h + 2 * row_pad_v)
-        zone_y = map_y + map_h - zone_h - handle_pad
+        # The fixed search row sits above the scrolled content, with one row
+        # padding above and below it. Its height matches the minimap chrome
+        # buttons so the search bar reads as the same control size.
+        if settings.show_search_bar:
+            search_h = (BUTTON_SIZE - 1) * ui_scale
+        else:
+            search_h = 0.0
+            state.list.search_focused = False
+            state.list.search_rect = None
+            state.list.search_clear_rect = None
+            state.list.search_clear_hovered = False
+        # Reserve at least one content row so an empty result still has room
+        # to show the "No matches" message instead of collapsing the view.
+        zone_h = min(map_h - 2 * handle_pad, max(total_h, row_h) + search_h + 3 * row_pad_v)
+        zone_y = round(map_y + map_h - zone_h - handle_pad)
         state.list.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
+        search_top = zone_y + zone_h - 1
+        search_bottom = search_top - search_h
+        search_draw_h = search_h - row_gap
+        search_pad_v = round((search_draw_h - line_h) / 2.0) + 1
 
         zone_radius = colors.get("panel_roundness", 4.0) * 0.6
         _draw_filled_rounded_rect(zone_x, zone_y, zone_w, zone_h, zone_radius, _alpha_mul(colors["bg"], master_alpha))
@@ -659,7 +789,7 @@ def _draw_type_list(
             zone_x, zone_y, zone_w, zone_h, zone_radius, _alpha_mul(colors["bg_border"], master_alpha), 0.5
         )
 
-        view_top = zone_y + zone_h - row_pad_v
+        view_top = search_bottom - row_pad_v
         view_bottom = zone_y + row_pad_v
         view_h = max(view_top - view_bottom, row_h)
         scroll_max = max(0.0, total_h - view_h)
@@ -670,7 +800,7 @@ def _draw_type_list(
         # regardless of culling so expand guide lines keep drawing even when the
         # header itself is scrolled out of view (only its children remain).
         header_slot_bottom: dict[str, float] = {}
-        for kind, label, _node_name, local_y in _iter_type_list_layout(entries, children, state.list.expanded, row_h):
+        for kind, label, _node_name, local_y in _iter_type_list_layout(entries, children, expanded, row_h):
             if kind == "header":
                 header_slot_bottom[label] = view_top + state.list.scroll + local_y - row_h
 
@@ -686,12 +816,15 @@ def _draw_type_list(
         # minimum; names then reclaim the full row width.
         show_counts = count_right - widest_count - count_gap - label_x >= TYPE_LIST_MIN_LABEL_W * ui_scale
         label_max_width = max(0.0, (count_right - widest_count - count_gap if show_counts else count_right) - label_x)
-        text_y_off = (row_h - line_h) / 2
+        text_y_off = round((row_h - line_h) / 2)
 
         text_color = _alpha_mul(colors["text"], 0.9 * master_alpha)
         count_color = _alpha_mul(colors["text"], 0.3 * master_alpha)
         selection_color = _alpha_mul(colors["node_selected"], 0.95 * master_alpha)
         active_color = _alpha_mul(colors["indicator"], master_alpha)
+        # Matched substring in search results; distinct from selection/active so
+        # it still reads against those row states.
+        match_color = _alpha_mul(colors["indicator"], 0.85 * master_alpha)
         # Light fill under selected/active rows; selection color at low alpha (drawn
         # before text so BLF's alpha-disable cannot clobber the SDF fill blend).
         selection_fill_color = _alpha_mul(colors["node_selected"], 0.05 * master_alpha)
@@ -706,22 +839,48 @@ def _draw_type_list(
 
         pill_x = zone_x + 2 * ui_scale
         pill_w = zone_w - 4 * ui_scale
+        state.list.search_rect = (pill_x, search_bottom, pill_w, search_h)
 
-    # Clip rows to the zone interior so partial rows never bleed onto the map
+        search_text_x = zone_x + pad_x
+
+        # Clear (X) button at the pill's right edge; shown only while a filter
+        # query is present so the query text can reclaim the full row width.
+        if state.list.search_query:
+            clear_size = max(int(12 * ui_scale), int(search_h * 0.6))
+            clear_x = pill_x + pill_w - clear_size - 4 * ui_scale
+            clear_y = round(search_bottom - 0.5 + (search_h - clear_size) / 2)
+            state.list.search_clear_rect = (clear_x, clear_y, clear_size, clear_size)
+        else:
+            state.list.search_clear_rect = None
+            state.list.search_clear_hovered = False
+
+    # Clip rows to the view interior (below the fixed search row) so scrolled
+    # content can never draw over/behind the search box.
     saved_scissor = None
     try:
         was_active = gpu.state.scissor_test_get()
         saved_scissor = (was_active, gpu.state.scissor_get() if was_active else None)
     except Exception:
         saved_scissor = None
+    zone_scissor = (
+        int(zone_x + 1),
+        int(zone_y + 1),
+        max(0, int(zone_w - 2)),
+        max(0, int(zone_h - 2)),
+    )
+    view_scissor = (
+        int(zone_x + 1),
+        int(view_bottom),
+        max(0, int(zone_w - 2)),
+        max(0, int(view_top - view_bottom)),
+    )
     try:
-        gpu.state.scissor_set(int(zone_x + 1), int(zone_y + 1), max(0, int(zone_w - 2)), max(0, int(zone_h - 2)))
+        gpu.state.scissor_set(*view_scissor)
         gpu.state.scissor_test_set(True)
         gpu.state.blend_set("ALPHA")
 
         with _Timer("type_list.rows"):
             entry_map = {lbl: (ct, cw, cnt) for (lbl, ct, cw, cnt) in entries}
-            expanded = state.list.expanded
             hovered = state.list.hovered_type_label
             hovered_child = state.list.hovered_list_row
 
@@ -748,7 +907,50 @@ def _draw_type_list(
         with _Timer("type_list.pills"):
             # Zebra bands keyed on the absolute layout index so they stay attached
             # to rows while scrolling; drawn beneath pills, text, and icons.
-            band_color = (0.0, 0.0, 0.0, 0.15 * master_alpha)
+            band_color = (1.0, 1.0, 1.0, 0.002 * master_alpha)
+
+            # Fixed search row above the scrolled content; focused state reuses
+            # the active-row styling (light fill + selection border).
+            if settings.show_search_bar:
+                search_pill_y = search_bottom + row_gap_half
+                gpu.state.scissor_set(*zone_scissor)
+                if state.list.search_focused:
+                    _draw_filled_rounded_rect(
+                        pill_x,
+                        search_pill_y,
+                        pill_w,
+                        search_draw_h,
+                        4.0 * ui_scale,
+                        (0, 0, 0, 0.6 * master_alpha),
+                    )
+                    # _draw_rounded_rect_border(
+                    #     pill_x,
+                    #     search_pill_y,
+                    #     pill_w,
+                    #     search_draw_h,
+                    #     4.0 * ui_scale,
+                    #     _alpha_mul(colors["node_active"], master_alpha),
+                    #     0.5 * ui_scale,
+                    # )
+                else:
+                    _draw_filled_rounded_rect(
+                        pill_x,
+                        search_pill_y,
+                        pill_w,
+                        search_draw_h,
+                        4.0 * ui_scale,
+                        (0.0, 0.0, 0.0, 0.3 * master_alpha),
+                    )
+                _draw_rounded_rect_border(
+                    pill_x,
+                    search_pill_y,
+                    pill_w,
+                    search_draw_h,
+                    4.0 * ui_scale,
+                    _alpha_mul(colors["bg_border"], master_alpha),
+                    0.5,
+                )
+                gpu.state.scissor_set(*view_scissor)
             for _kind, _label, _node_name, slot_top, slot_bottom, row_idx in visible_rows:
                 if row_idx % 2 == 1:
                     _draw_filled_rounded_rect(pill_x, _row_y(slot_bottom), pill_w, row_draw_h, 0.0, band_color)
@@ -803,7 +1005,7 @@ def _draw_type_list(
                     else _alpha_mul(colors["text"], 0.1 * master_alpha)
                 )
                 _draw_expand_guide_line(
-                    content_x + swatch / 2,
+                    round(content_x + swatch / 2),
                     header_slot_bottom[label] - 1,
                     child_count * row_h - 2,
                     ui_scale,
@@ -879,6 +1081,58 @@ def _draw_type_list(
             # changes (labels, counts, and child names use distinct boxes).
             blf.enable(font_id, blf.CLIPPING)
 
+            # Fixed search row: placeholder or query text plus a static caret
+            # while focused (no blink timer, to avoid a permanent redraw loop).
+            search_query = state.list.search_query
+            norm_query = normalize_query(search_query)
+            if settings.show_search_bar:
+                search_cursor = min(max(state.list.search_cursor, 0), len(search_query))
+                search_text_y = search_pill_y + search_pad_v
+                # The query text/caret stop short of the clear button so they never
+                # run underneath it.
+                clear_rect = state.list.search_clear_rect
+                search_text_right = clear_rect[0] - 2 * ui_scale if clear_rect else count_right
+
+                # Search-box glyphs (caret, placeholder/query text, clear button) use
+                # the full zone scissor since they sit above the scrolled content.
+                gpu.state.scissor_set(*zone_scissor)
+
+                if state.list.search_focused:
+                    caret_x = round(
+                        search_text_x
+                        + (blf.dimensions(font_id, search_query[:search_cursor])[0] if search_query else 0.0)
+                    )
+                    _draw_filled_rounded_rect(
+                        caret_x,
+                        round(search_pill_y),
+                        max(2.0, 2.2 * ui_scale),
+                        search_draw_h,
+                        0.0,
+                        _alpha_mul(colors["indicator"], master_alpha),
+                    )
+                search_text = search_query if search_query else "Filter"
+                blf.clipping(font_id, int(search_text_x), clip_top, int(search_text_right), clip_bottom)
+                blf.position(font_id, search_text_x, search_text_y, 0)
+                blf.color(font_id, *(text_color if search_query else count_color))
+                blf.draw(font_id, search_text)
+                if clear_rect:
+                    _draw_search_clear_button(
+                        clear_rect, state.list.search_clear_hovered, colors, master_alpha, ui_scale
+                    )
+                gpu.state.scissor_set(*view_scissor)
+                if not entries and search_query:
+                    no_match_y = (view_bottom + view_top - line_h) / 2 + 1
+                    blf.clipping(
+                        font_id,
+                        int(search_text_x),
+                        int(view_bottom - row_h),
+                        int(count_right),
+                        int(view_top + row_h),
+                    )
+                    blf.position(font_id, search_text_x, no_match_y, 0)
+                    blf.color(font_id, *count_color)
+                    blf.draw(font_id, "No matches")
+
             for kind, label, node_name, _slot_top, slot_bottom, _row_idx in visible_rows:
                 text_y = _row_y(slot_bottom) + text_y_off
                 if kind == "header":
@@ -897,9 +1151,7 @@ def _draw_type_list(
                         label, entry_map.get(label, ("", 0.0, 1))[2], children, nodes_by_name
                     )
                     blf.clipping(font_id, header_clip_left, clip_top, header_clip_right, clip_bottom)
-                    blf.position(font_id, label_x, text_y, 0)
-                    blf.color(font_id, *label_color)
-                    blf.draw(font_id, header_text)
+                    _draw_text_with_match(font_id, label_x, text_y, header_text, label_color, match_color, norm_query)
                     # Counts sit right of the label clip box; BLF discards glyphs
                     # past the box instead of clipping them.
                     if show_counts:
@@ -928,9 +1180,9 @@ def _draw_type_list(
 
                     blf.clipping(font_id, child_clip_left, clip_top, child_clip_right, clip_bottom)
                     label_text = _child_label_text(node_name, node)
-                    blf.position(font_id, child_label_x, text_y, 0)
-                    blf.color(font_id, *label_color)
-                    blf.draw(font_id, label_text)
+                    _draw_text_with_match(
+                        font_id, child_label_x, text_y, label_text, label_color, match_color, norm_query
+                    )
             blf.disable(font_id, blf.CLIPPING)
             if with_shadow:
                 blf.disable(font_id, blf.SHADOW)
@@ -960,7 +1212,7 @@ def _draw_type_list(
             thumb_rect, track_rect = _draw_scrollbar_thumb(
                 round(zone_x + zone_w - thick - bar_offset),
                 zone_y + bar_offset,
-                zone_h - 2 * bar_offset,
+                max(view_top - zone_y - 2 * bar_offset, 0.0),
                 view_h / total_h,
                 1.0 - frac,
                 colors,

@@ -451,7 +451,7 @@ def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
     start_w = min(max(start_w, min_w), max_w)
     new_w = min(max(start_w + dx, min_w), max_w)
     new_pct = int(round(new_w / max(map_w, 1.0) * 100.0))
-    new_pct = min(max(new_pct, 15), 50)
+    new_pct = min(max(new_pct, 0), 50)
     from ..core.state import suppress_update_callbacks
 
     with suppress_update_callbacks():

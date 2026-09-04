@@ -16,6 +16,7 @@ from ..core.constants import (
     SCALE_REBUILD_REL,
 )
 from ..core.helpers import _get_node_label_lines
+from ..core.list_filter import filter_matching_nodes
 from ..core.state import MinimapState
 from ..core.theme import _alpha_mul, _srgb_to_linear
 from .gpu_draw import (
@@ -24,6 +25,7 @@ from .gpu_draw import (
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
+from .tree_compile import _resolve_wire_items
 
 logger = logging.getLogger(base_package)
 
@@ -176,6 +178,7 @@ class _BakeContext:
     highlight_outline: tuple | None
     highlight_margin: float
     highlight_line_width: float
+    filter_names: frozenset[str] | None
     frame_label_entries: list
     node_labels: list
     fill_attr: dict
@@ -197,6 +200,11 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
 
     # Cull nodes whose quads cannot intersect the minimap interior
     if bx >= ctx.cull_right or bx + node_w <= ctx.cull_left or by >= ctx.cull_top or by + node_h <= ctx.cull_bottom:
+        return
+
+    # Under an active search filter, skip non-matching nodes entirely (body,
+    # border, and label together) so the map mirrors the filtered list.
+    if ctx.filter_names is not None and info.get("name") not in ctx.filter_names:
         return
 
     if is_frame:
@@ -427,6 +435,8 @@ def _bake_sockets(ctx: "_BakeContext") -> None:
             tree_y = entry.get("tree_y")
             if tree_x is None or tree_y is None:
                 continue
+            if ctx.filter_names is not None and entry.get("node_name") not in ctx.filter_names:
+                continue
             baked_x = (tree_x - ctx.origin_x) * ctx.bake_scale
             baked_y = (tree_y - ctx.origin_y) * ctx.bake_scale
             if (
@@ -447,7 +457,8 @@ def _bake_sockets(ctx: "_BakeContext") -> None:
             label_y = baked_y + pill_h * 0.5 + 3.0 * ctx.ui_scale
             ctx.state.cache.node_labels.append((ctx.font_id, text, label_x, label_y, text_color, font_size))
 
-    if ctx.tree_data["socket_items"] and ctx.scale >= MIN_SOCKET_SCALE:
+    socket_items_by_node = ctx.tree_data.get("socket_items_by_node") or {}
+    if socket_items_by_node and ctx.scale >= MIN_SOCKET_SCALE:
         half_w = pill_w / 2
         half_h = pill_h / 2
         pill_radius = pill_h / 2
@@ -464,9 +475,13 @@ def _bake_sockets(ctx: "_BakeContext") -> None:
             "color": socket_color,
         }
         socket_pad = 1.5
-        for color, positions in ctx.tree_data["socket_items"].items():
-            linear_color = _srgb_to_linear(color)
-            for sx_tree, sy_tree in positions:
+        if ctx.filter_names is not None:
+            name_by_ptr = {info.get("ptr"): info.get("name") for info in ctx.node_infos}
+        for node_ptr, dots in socket_items_by_node.items():
+            if ctx.filter_names is not None and name_by_ptr.get(node_ptr) not in ctx.filter_names:
+                continue
+            for color, sx_tree, sy_tree in dots:
+                linear_color = _srgb_to_linear(color)
                 socket_baked_x = (sx_tree - ctx.origin_x) * ctx.bake_scale
                 socket_baked_y = (sy_tree - ctx.origin_y) * ctx.bake_scale
                 _emit_quad(
@@ -524,31 +539,33 @@ def _bake_reroutes(ctx: "_BakeContext") -> None:
             "color": reroute_color_list,
         }
         pad = 1.5
-        for color, positions in reroute_items.items():
-            linear_color = _srgb_to_linear(color)
-            for rx_tree, ry_tree in positions:
-                baked_x = (rx_tree - ctx.origin_x) * ctx.bake_scale
-                baked_y = (ry_tree - ctx.origin_y) * ctx.bake_scale
-                # Cull far off-screen reroutes before emitting vertices.
-                if (
-                    baked_x < ctx.cull_left - half_w - 2
-                    or baked_x > ctx.cull_right + half_w + 2
-                    or baked_y < ctx.cull_bottom - half_h - 2
-                    or baked_y > ctx.cull_top + half_h + 2
-                ):
-                    continue
-                _emit_quad(
-                    reroute_attr,
-                    baked_x - half_w - pad,
-                    baked_y - half_h - pad,
-                    baked_x + half_w + pad,
-                    baked_y + half_h + pad,
-                    half_w + pad,
-                    half_h + pad,
-                    pill_radius,
-                    linear_color,
-                    half_size=(half_w, half_h),
-                )
+        reroute_by_name = ctx.tree_data.get("reroute_by_name") or {}
+        for name, (pill_color, rx_tree, ry_tree) in reroute_by_name.items():
+            if ctx.filter_names is not None and name not in ctx.filter_names:
+                continue
+            baked_x = (rx_tree - ctx.origin_x) * ctx.bake_scale
+            baked_y = (ry_tree - ctx.origin_y) * ctx.bake_scale
+            # Cull far off-screen reroutes before emitting vertices.
+            if (
+                baked_x < ctx.cull_left - half_w - 2
+                or baked_x > ctx.cull_right + half_w + 2
+                or baked_y < ctx.cull_bottom - half_h - 2
+                or baked_y > ctx.cull_top + half_h + 2
+            ):
+                continue
+            linear_color = _srgb_to_linear(pill_color)
+            _emit_quad(
+                reroute_attr,
+                baked_x - half_w - pad,
+                baked_y - half_h - pad,
+                baked_x + half_w + pad,
+                baked_y + half_h + pad,
+                half_w + pad,
+                half_h + pad,
+                pill_radius,
+                linear_color,
+                half_size=(half_w, half_h),
+            )
         num_reroutes = len(reroute_pos) // 4
         if num_reroutes > 0:
             shader = _get_batch_rect_shader()
@@ -596,6 +613,7 @@ def _ensure_minimap_batches(
     if not origin:
         return
 
+    query = minimap_state.list.search_query.strip()
     key = (
         minimap_state.cache.position_version,
         round(ui_scale, 3),
@@ -603,13 +621,20 @@ def _ensure_minimap_batches(
         minimap_state.list.hovered_type_label,
         minimap_state.interaction.hovered_node_id,
         bool(highlight_border),
+        query,
     )
     bake_scale = minimap_state.cache.batch_scale
     anchor_x, anchor_y = minimap_state.cache.batch_anchor
     # A settle bump changes only tree_data_version, so wire/marker freshness
     # must gate the early return too — otherwise wires stay frozen at their
     # pre-drag positions until an unrelated rebuild trigger fires.
-    wire_key = (minimap_state.cache.tree_version, round(ui_scale, 3), int(wire_curvature), round(wire_thickness, 3))
+    wire_key = (
+        minimap_state.cache.tree_version,
+        round(ui_scale, 3),
+        int(wire_curvature),
+        round(wire_thickness, 3),
+        query,
+    )
     wires_fresh = wire_key == minimap_state.cache.wire_key and minimap_state.cache.wire_scale == bake_scale
     if (
         key == minimap_state.cache.batch_key
@@ -636,6 +661,18 @@ def _ensure_minimap_batches(
     node_infos = tree_data["node_infos"]
     frame_depths = _compute_frame_depths(node_infos)
     frame_label_entries: list[dict] = []
+    # Active search filter: node names to keep visible, or None when the
+    # query is empty (draw everything). Mirrors the type list's own matching.
+    filter_names = (
+        filter_matching_nodes(
+            tree_data.get("type_stats") or {},
+            tree_data.get("type_nodes") or {},
+            query,
+            tree_data.get("type_search") or None,
+        )
+        if query
+        else None
+    )
     hovered_type = minimap_state.list.hovered_type_label
     hovered_node_name = minimap_state.interaction.hovered_node_id
     highlight_outline = None
@@ -751,6 +788,7 @@ def _ensure_minimap_batches(
         highlight_outline=highlight_outline,
         highlight_margin=highlight_margin,
         highlight_line_width=highlight_line_width,
+        filter_names=filter_names,
         frame_label_entries=frame_label_entries,
         node_labels=node_labels,
         fill_attr=fill_attr,
@@ -794,6 +832,7 @@ def _ensure_minimap_batches(
             min_dim,
             int(wire_curvature),
             wire_thickness,
+            filter_names,
         )
         minimap_state.cache.wire_key = wire_key
         minimap_state.cache.wire_scale = bake_scale
@@ -850,6 +889,7 @@ def _rebuild_wire_marker_batches(
     min_dim: float,
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
+    filter_names: frozenset[str] | None = None,
 ) -> None:
     """Bake wire batches and group markers."""
 
@@ -861,7 +901,21 @@ def _rebuild_wire_marker_batches(
     wire_batches: list[tuple[Any, Any, float]] = []
     per_color_wires: dict[Any, list[tuple[float, float, float, float, float, float, float, float]]] = {}
 
-    for color, items in tree_data["wire_items"].items():
+    # Under an active search filter, resolve wires from raw links so a link
+    # stays visible while either endpoint node matches; with no filter the
+    # pre-grouped per-color wire_items are used verbatim.
+    if filter_names is not None:
+        raw_links = tree_data.get("raw_links") or []
+        out_pos = tree_data.get("out_pos") or {}
+        in_pos = tree_data.get("in_pos") or {}
+        highlight_names = tree_data.get("highlight_link_names")
+        filtered_links = [link for link in raw_links if link[0] in filter_names or link[2] in filter_names]
+        wire_items, wire_highlight_items = _resolve_wire_items(filtered_links, out_pos, in_pos, highlight_names)
+    else:
+        wire_items = tree_data["wire_items"]
+        wire_highlight_items = tree_data.get("wire_highlight_items") or []
+
+    for color, items in wire_items.items():
         group_controls, group_pills = _convert_wire_endpoints(items, origin_x, origin_y, bake_scale, curvature)
         if use_curve and group_controls:
             per_color_wires[color] = group_controls
@@ -884,7 +938,7 @@ def _rebuild_wire_marker_batches(
 
     # Wires connected to selected nodes — one thicker batch drawn over the
     # regular wires in the theme selection color (see tree_compile).
-    highlight_items = tree_data.get("wire_highlight_items") or []
+    highlight_items = wire_highlight_items
     highlight_cache = None
     if highlight_items:
         highlight_thickness = thickness * 1.5
@@ -901,7 +955,21 @@ def _rebuild_wire_marker_batches(
 
     # Group node underline markers — baked like wires
     marker_batches = []
-    group_markers = tree_data.get("group_markers")
+    if filter_names is not None:
+        # Rebuild markers from node infos so group nodes hidden by the
+        # search filter drop their underline too (markers carry no names).
+        grouped_markers: dict = {}
+        for info in tree_data.get("node_infos") or []:
+            if info.get("name") not in filter_names:
+                continue
+            marker_col = info.get("group_marker_col")
+            if marker_col:
+                grouped_markers.setdefault(marker_col, []).append(
+                    (info["tree_x"] + info["tree_w"] / 2, info["tree_y"], info["tree_w"])
+                )
+        group_markers = grouped_markers
+    else:
+        group_markers = tree_data.get("group_markers")
     if group_markers:
         marker_offset = 10 * bake_scale
         marker_thickness = max(2.0, 2.0 * ui_scale)

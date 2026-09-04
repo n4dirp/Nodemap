@@ -193,10 +193,38 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
     compact_labels = settings.compact_node_labels
     show_type_list = settings.show_type_list and settings.interactive
 
+    def _search_text(node) -> str:
+        """Build the searchable text for a node: name, custom label, and tree name.
+
+        A group node without a label falls back to its linked node-tree's name
+        in the list display, so that name is included as a search term too.
+        """
+        name = node.name
+        parts = [name]
+        try:
+            label = node.label or ""
+        except (AttributeError, ReferenceError):
+            label = ""
+        if label and label != name:
+            parts.append(label)
+        try:
+            tree = getattr(node, "node_tree", None)
+        except (AttributeError, ReferenceError):
+            tree = None
+        if tree is not None:
+            try:
+                tree_name = getattr(tree, "name", "") or ""
+            except (AttributeError, ReferenceError):
+                tree_name = ""
+            if tree_name and tree_name != name and tree_name not in parts:
+                parts.append(tree_name)
+        return " ".join(parts)
+
     group_markers: dict[tuple, list[tuple[float, float, float]]] = {}
     type_counts: dict[str, int] = {}
     type_colors: dict[str, tuple[float, float, float, float]] = {}
     type_nodes: dict[str, list[str]] = {}
+    type_search: dict[str, str] = {}
     type_node_colors: dict[str, dict[str, tuple[float, float, float, float]]] = {}
     type_selected_counts: dict[str, int] = {}
     type_active_label: str | None = None
@@ -267,6 +295,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                 info["type_label"] = "Frame"
                 type_counts["Frame"] = type_counts.get("Frame", 0) + 1
                 type_nodes.setdefault("Frame", []).append(node.name)
+                type_search[node.name] = _search_text(node)
                 type_node_colors.setdefault("Frame", {})[node.name] = frame_color
                 if node.select:
                     type_selected_counts["Frame"] = type_selected_counts.get("Frame", 0) + 1
@@ -294,6 +323,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                 info["type_label"] = label
                 type_counts[label] = type_counts.get(label, 0) + 1
                 type_nodes.setdefault(label, []).append(node.name)
+                type_search[node.name] = _search_text(node)
                 type_node_colors.setdefault(label, {})[node.name] = node_color
                 if node.select:
                     type_selected_counts[label] = type_selected_counts.get(label, 0) + 1
@@ -455,6 +485,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
         "type_counts": type_counts,
         "type_colors": type_colors,
         "type_nodes": type_nodes,
+        "type_search": type_search,
         "type_node_colors": type_node_colors,
         "type_selected_counts": type_selected_counts,
         "type_active_label": type_active_label,
@@ -509,6 +540,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     tree_data["type_colors"] = built["type_colors"]
     tree_data["type_node_colors"] = built["type_node_colors"]
     tree_data["type_nodes"] = type_nodes
+    tree_data["type_search"] = built["type_search"]
     tree_data["type_selected_counts"] = built["type_selected_counts"]
     tree_data["type_active_label"] = built["type_active_label"]
     # Position-refresh support (see _apply_move_updates)
@@ -614,7 +646,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     # Wire opacity influences the highlight at 50% so dimmed wires dim their
     # highlight too (wire_opacity 0.0 → 50% of full, 1.0 → full).
     tree_data["wire_highlight_color"] = (
-        _alpha_mul(colors["node_active"], master_alpha * (0./ + 0.5 * wire_opacity_mult))
+        _alpha_mul(colors["node_active"], master_alpha * (0.0 / +0.5 * wire_opacity_mult))
         if show_wire_highlight
         else None
     )

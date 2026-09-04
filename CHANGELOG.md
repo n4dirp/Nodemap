@@ -3,6 +3,9 @@
 ## [2.0.0] [Unreleased]
 
 ### Added
+- Type-list filter: open the field at the top of the node-type list to filter by type or node name
+- `Ctrl+F` over the minimap reveals the type list and focuses its filter field
+- `T` over the minimap toggles the node-type list visibility
 - Highlight wires connected to selected nodes
 - Interactive node-type list with per-type counts
 - New Presets menu in the Nodemap popup
@@ -27,6 +30,15 @@
 - Selecting a node from the type list no longer forces a full EEVEE material rebuild (now uses the native node.select operator like the minimap)
 - Minimap redraws now target only the interacted Node Editor instead of refreshing all open Node Editors
 - Scrollbars now appear only when nodes actually go out of view
+- Type-list search could not find group nodes by their linked node-tree name
+- Backslash and backtick could not be typed into the search query
+- Type-list search-match highlighting no longer overlaps the surrounding label text
+- Type-list rows no longer scroll up and draw over/behind the search box
+- Type-list search bar now matches the minimap chrome button height (BUTTON_SIZE)
+- Type-list shows a centered "No matches" message when a search finds nothing
+- Type-list search now hides non-matching child nodes, showing only the matches inside auto-expanded groups
+- Fixed a crash when Shift-clicking a type-list row to range-select (missing anchor argument)
+- Type-list search caret now uses the accent color and fills the search box height; the clear (X) icon is dimmed and its coordinates rounded
 
 
 ## [1.5.0] - 2026-08-14

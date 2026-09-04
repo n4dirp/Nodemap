@@ -91,6 +91,12 @@ class ListState:
     """Store geometry and animation state for the node-type list zone."""
 
     list_width: float = 0.0
+    search_query: str = ""
+    search_cursor: int = 0
+    search_focused: bool = False
+    search_rect: Rect | None = None
+    search_clear_rect: Rect | None = None
+    search_clear_hovered: bool = False
     dragging_width: float | None = None
     width_clamped: bool = False
     scroll: float = 0.0
@@ -144,6 +150,8 @@ class RenderCache:
     list_entries: list | None = None
     list_layout: dict | None = None
     list_children: dict = field(default_factory=dict)
+    list_filtered_children: dict = field(default_factory=dict)
+    list_effective_expanded: set = field(default_factory=set)
     list_nodes_by_name: dict = field(default_factory=dict)
     list_swatches_batch: Any = None
     tree_version: int = 0
@@ -178,6 +186,7 @@ class RenderCache:
         "list_entries",
         "list_layout",
         "list_children",
+        "list_filtered_children",
         "list_nodes_by_name",
         "list_swatches_batch",
     )

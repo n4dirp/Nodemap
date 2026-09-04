@@ -526,6 +526,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
+    show_search_bar: BoolProperty(
+        name="Filter Bar",
+        description="Show the filter field at the top of the node-type list",
+        default=True,
+        update=_update_invalidate_all,
+    )
+
     debounce_delay: FloatProperty(
         name="Update Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",
@@ -704,6 +711,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
                 row = col.row()
                 row.prop(settings, "type_list_sort", text="Sort", expand=True)
                 col.prop(settings, "type_list_font_size", text="Font Size")
+                col.prop(settings, "show_search_bar", text="Filter Bar")
                 sub = col.row()
                 sub.active = settings.show_node_colors
                 sub.prop(settings, "show_type_colors", text="Type Colors")
