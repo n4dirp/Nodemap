@@ -646,7 +646,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     # Wire opacity influences the highlight at 50% so dimmed wires dim their
     # highlight too (wire_opacity 0.0 → 50% of full, 1.0 → full).
     tree_data["wire_highlight_color"] = (
-        _alpha_mul(colors["node_active"], master_alpha * (0.0 / +0.5 * wire_opacity_mult))
+        _alpha_mul(colors["node_active"], master_alpha * (0.5 / +0.5 * wire_opacity_mult))
         if show_wire_highlight
         else None
     )
