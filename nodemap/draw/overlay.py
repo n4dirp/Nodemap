@@ -185,6 +185,27 @@ def _compute_minimap_rect(
     return map_x, map_y, map_w, map_h, padding, y_margin
 
 
+def _snap_sides_for(position: str) -> frozenset[str]:
+    """Return the map border sides facing the given dock *position*.
+
+    Edges map to a single side, corners to the two adjacent sides, and free
+    positioning to no sides.
+    """
+    corners = {
+        "TOP_LEFT": frozenset({"top", "left"}),
+        "TOP_RIGHT": frozenset({"top", "right"}),
+        "BOTTOM_LEFT": frozenset({"bottom", "left"}),
+        "BOTTOM_RIGHT": frozenset({"bottom", "right"}),
+    }
+    edges = {
+        "TOP_BORDER": frozenset({"top"}),
+        "BOTTOM_BORDER": frozenset({"bottom"}),
+        "LEFT_BORDER": frozenset({"left"}),
+        "RIGHT_BORDER": frozenset({"right"}),
+    }
+    return corners.get(position, edges.get(position, frozenset()))
+
+
 def _draw_background(
     map_x: float,
     map_y: float,
@@ -194,13 +215,14 @@ def _draw_background(
     master_alpha: float,
     snapped: bool = False,
     moving: bool = False,
+    snap_sides: frozenset[str] = frozenset(),
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
 
     bg_color = _alpha_mul(colors["bg"], master_alpha)
     panel_roundness = colors.get("panel_roundness", 4.0)
     shadow_offset = 1
-    border_color = _alpha_mul(colors["indicator"] if snapped else colors["bg_border"], master_alpha)
+    border_color = _alpha_mul(colors["bg_border"], master_alpha)
     if moving and not snapped:
         border_color = (1.0, 1.0, 1.0, 0.05)
     border_width = 1.0 if moving else 0.5
@@ -217,7 +239,48 @@ def _draw_background(
     )
     _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
 
+    if snapped and snap_sides:
+        _draw_snap_sides(map_x, map_y, map_w, map_h, colors, master_alpha, snap_sides)
+
     return bg_color, panel_roundness
+
+
+def _draw_snap_sides(
+    map_x: float,
+    map_y: float,
+    map_w: float,
+    map_h: float,
+    colors: dict,
+    master_alpha: float,
+    snap_sides: frozenset[str],
+) -> None:
+    """Draw a thin highlight pill on each snapped map side."""
+    ui_scale = _get_ui_scale()
+    thickness = 3.0 * ui_scale
+    handle_margin = 6 * ui_scale
+    inset = 2.0 * ui_scale
+    color = _alpha_mul(colors["indicator"], master_alpha)
+
+    if "top" in snap_sides:
+        _draw_pill(
+            map_x + handle_margin,
+            map_y + map_h - inset - thickness,
+            map_w - 2 * handle_margin,
+            thickness,
+            color,
+        )
+    if "bottom" in snap_sides:
+        _draw_pill(map_x + handle_margin, map_y + inset, map_w - 2 * handle_margin, thickness, color)
+    if "left" in snap_sides:
+        _draw_pill(map_x + inset, map_y + handle_margin, thickness, map_h - 2 * handle_margin, color)
+    if "right" in snap_sides:
+        _draw_pill(
+            map_x + map_w - inset - thickness,
+            map_y + handle_margin,
+            thickness,
+            map_h - 2 * handle_margin,
+            color,
+        )
 
 
 def _setup_scissor(
@@ -1180,7 +1243,15 @@ def draw_minimap() -> None:
     gpu.state.blend_set("ALPHA")
 
     bg_color, panel_roundness = _draw_background(
-        map_x, map_y, map_w, map_h, colors, master_alpha, state.view.snapped, state.view.moving
+        map_x,
+        map_y,
+        map_w,
+        map_h,
+        colors,
+        master_alpha,
+        state.view.snapped,
+        state.view.moving,
+        _snap_sides_for(settings.current_position),
     )
 
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)

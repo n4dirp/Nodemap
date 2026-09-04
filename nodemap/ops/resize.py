@@ -139,9 +139,10 @@ def get_resize_handle(
 ) -> ResizeHandle | None:
     """Return the resize handle under the cursor, or None.
 
-    Every edge and corner can start a resize except sides that are pinned to a
-    docked border or, in FREE mode, pressed against the region border. A corner
-    is only offered when at least one of its two sides is live.
+    Every edge and corner can start a resize except sides pinned to a docked
+    border or, in FREE mode, pressed against the region border. A corner is
+    only offered when both of its sides are live, so a docked map never offers
+    a grip that would resize a flush, pinned edge.
     """
     map_x, map_y, map_w, map_h = state.view.rect
     if map_w <= 0 or map_h <= 0:
@@ -164,16 +165,16 @@ def get_resize_handle(
     near_bottom = map_y <= region_y <= map_y + half_w
 
     if near_left and near_top:
-        if open_left or open_top:
+        if open_left and open_top:
             return ResizeHandle.TOP_LEFT
     if near_right and near_top:
-        if open_right or open_top:
+        if open_right and open_top:
             return ResizeHandle.TOP_RIGHT
     if near_left and near_bottom:
-        if open_left or open_bottom:
+        if open_left and open_bottom:
             return ResizeHandle.BOTTOM_LEFT
     if near_right and near_bottom:
-        if open_right or open_bottom:
+        if open_right and open_bottom:
             return ResizeHandle.BOTTOM_RIGHT
     if near_left and open_left:
         return ResizeHandle.LEFT
