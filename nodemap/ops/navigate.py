@@ -1298,6 +1298,8 @@ class NODEMAP_OT_navigate(Operator):
 
     def _handle_wheel(self, context: Context, event: Event) -> set[str]:
         state, addon, settings, in_minimap = self._minimap_event_context(context)
+        if in_minimap and (event.ctrl or event.shift):
+            return {"PASS_THROUGH"}
         if in_minimap and _in_list_zone(self._mouse_x, self._mouse_y, state):
             direction = -1 if event.type == "WHEELUPMOUSE" else 1
             state.list.scroll = min(
@@ -1308,24 +1310,6 @@ class NODEMAP_OT_navigate(Operator):
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         if in_minimap:
-            if event.ctrl or event.shift:
-                visible = _get_visible_rect(self._space, self._region)
-                if visible:
-                    ui_scale = _get_ui_scale()
-                    vw = (visible[2] - visible[0]) * ui_scale
-                    vh = (visible[3] - visible[1]) * ui_scale
-                    scroll_factor = 0.05
-                    direction = 1 if event.type == "WHEELUPMOUSE" else -1
-                    pan_x = int(vw * scroll_factor * -direction) if event.ctrl else 0
-                    pan_y = int(vh * scroll_factor * direction) if event.shift else 0
-                    try:
-                        with self._override_ctx(context):
-                            bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-                    except RuntimeError:
-                        pass
-                self._redraw_ui()
-                return {"RUNNING_MODAL"}
-
             prefs = addon.settings if addon else None
             scroll_mode = prefs.scroll_wheel_mode if prefs else "MINIMAP"
             if event.alt:
