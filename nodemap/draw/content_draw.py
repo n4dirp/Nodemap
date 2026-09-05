@@ -58,23 +58,13 @@ def _draw_layer_frames(state: MinimapState, settings: NODEMAP_PG_settings, mvp: 
 def _draw_layer_wires(state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]) -> None:
     """Draw link wires (baked batches; shadow underlay first, then colors)."""
     wire_batches = state.cache.wire_batches or []
-    wire_shadow_batch = state.cache.wire_shadow_batch
-    if not (settings.show_wires and (wire_shadow_batch or wire_batches)):
+    if not (settings.show_wires and wire_batches):
         return
     wire_curved = int(params["wire_curvature"]) > 0
-    shadow_alpha = 0.35 * params["master_alpha"]
     if wire_curved:
         noodle_shader = _get_batch_noodle_shader()
         noodle_shader.bind()
         noodle_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-        if wire_shadow_batch is not None and shadow_alpha > 0:
-            if isinstance(wire_shadow_batch, tuple):
-                shadow_batch, shadow_half = wire_shadow_batch
-            else:
-                shadow_batch, shadow_half = wire_shadow_batch, 1.0
-            noodle_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
-            noodle_shader.uniform_float("halfThick", float(shadow_half))
-            shadow_batch.draw(noodle_shader)
         for entry in wire_batches:
             wire_color = entry[0]
             batch = entry[1]
@@ -88,12 +78,6 @@ def _draw_layer_wires(state: MinimapState, settings: NODEMAP_PG_settings, mvp: A
         pill_shader = _get_batch_pill_shader()
         pill_shader.bind()
         pill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-        if wire_shadow_batch is not None and shadow_alpha > 0:
-            # Straight-wire shadow is a plain batch.
-            shadow_batch = wire_shadow_batch[0] if isinstance(wire_shadow_batch, tuple) else wire_shadow_batch
-            pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
-            pill_shader.uniform_float("dashData", (0.0, 0.0))
-            shadow_batch.draw(pill_shader)
         for entry in wire_batches:
             if len(entry) >= 5:
                 wire_color, batch, _half, dash_len, dash_gap = entry[:5]

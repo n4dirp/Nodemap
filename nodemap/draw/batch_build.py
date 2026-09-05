@@ -1010,10 +1010,8 @@ def _rebuild_wire_marker_batches(
             if batch is not None:
                 wire_batches.append((color, batch, half_thickness))
         minimap_state.cache.wire_batches = wire_batches
-        minimap_state.cache.wire_shadow_batch = None
     else:
         minimap_state.cache.wire_batches = wire_batches
-        minimap_state.cache.wire_shadow_batch = None
 
     # Wires connected to selected nodes — one thicker batch drawn over the
     # regular wires in the theme selection color (see tree_compile).
