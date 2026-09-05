@@ -95,6 +95,7 @@ class ListState:
     search_cursor: int = 0
     search_focused: bool = False
     search_rect: Rect | None = None
+    search_text_start_x: float = 0.0
     search_clear_rect: Rect | None = None
     search_clear_hovered: bool = False
     dragging_width: float | None = None
@@ -163,6 +164,8 @@ class RenderCache:
     wire_scale: float = 1.0
     pending_settle_flush: bool = False
     last_move_refresh: float = 0.0
+    last_seen_scale: float = 0.0
+    scale_last_change_ts: float = 0.0
     _batches_dirty: bool = False
 
     # Field categories for declarative invalidation.

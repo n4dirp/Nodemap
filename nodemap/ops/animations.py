@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
 import bpy
@@ -40,6 +41,7 @@ class AnimationController:
         "anim_acc",
         "drag_target",
         "drag_active",
+        "_last_drag_tick",
         "frame_anim_active",
         "frame_anim_start_zoom",
         "frame_anim_start_pan",
@@ -65,6 +67,7 @@ class AnimationController:
         self.anim_acc: list[float] = [0.0, 0.0]
         self.drag_target: list[float] = [0.0, 0.0]
         self.drag_active: bool = False
+        self._last_drag_tick: float = 0.0
         self.frame_anim_active: bool = False
         self.frame_anim_start_zoom: float = 1.0
         self.frame_anim_start_pan: list[float] = [0.0, 0.0]
@@ -89,6 +92,7 @@ class AnimationController:
         self.anim_acc = [0.0, 0.0]
         self.drag_target = [0.0, 0.0]
         self.drag_active = False
+        self._last_drag_tick = 0.0
         self.frame_anim_active = False
         self.frame_anim_start_zoom = 1.0
         self.frame_anim_start_pan = [0.0, 0.0]
@@ -201,18 +205,30 @@ class AnimationController:
         op._redraw_ui()
 
     def apply_smooth_drag(self, context: Context) -> None:
-        """Chase the drag target with a spring-like follow."""
+        """Chase the drag target with a spring-like follow.
+
+        The follow fraction and per-tick move cap grow with the remaining
+        target magnitude, so a fast sweep on a large tree accelerates to catch
+        the cursor. Both are also normalized by the real frame delta, so heavy
+        redraws (big trees at low fps) do not stretch the lag.
+        """
         from ..geo.transforms import _clamp_pan_to_viewport
 
         op = self._op
         if not self.drag_active:
             return
+        now = time.monotonic()
+        dt = now - self._last_drag_tick if self._last_drag_tick > 0.0 else (1.0 / 60.0)
+        if dt <= 0.0 or dt > 0.25:
+            dt = 1.0 / 60.0
+        self._last_drag_tick = now
+        ticks = max(dt * 60.0, 1.0)
+
         magnitude = (self.drag_target[0] ** 2 + self.drag_target[1] ** 2) ** 0.5
         raw = magnitude / 200.0
-        follow = 0.25 + raw * 0.55
-        follow = min(follow, 0.8)
-        max_move = 120.0 + magnitude * 0.15
-        max_move = min(max_move, 800.0)
+        follow = min(0.4 + raw * 0.4, 0.95)
+        follow = 1.0 - (1.0 - follow) ** ticks
+        max_move = min(240.0 + magnitude * 0.35, 3000.0) * ticks
         dx = self.drag_target[0] * follow
         dy = self.drag_target[1] * follow
         dx = max(min(dx, max_move), -max_move)

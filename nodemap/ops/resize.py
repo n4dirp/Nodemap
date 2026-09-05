@@ -340,6 +340,16 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 
     d_w, d_h, d_anchor_x, d_anchor_y = _grab_deltas(op._resize_handle, dx, dy, ui_scale)
 
+    # Border docks keep the map centered on their free axis, so a grab there
+    # grows both opposite edges while each only moves half the cursor delta.
+    # Double the delta on that axis so the grabbed edge still tracks the cursor.
+    if corner in ("TOP_BORDER", "BOTTOM_BORDER"):
+        if _width_growing_side(op._resize_handle):
+            d_w *= 2.0
+    elif corner in ("LEFT_BORDER", "RIGHT_BORDER"):
+        if _height_growing_side(op._resize_handle):
+            d_h *= 2.0
+
     new_w = max(MIN_MAP_WIDTH, min(max_w, int(w0 + d_w / ui_scale))) if d_w else None
     new_h = max(MIN_MAP_HEIGHT, min(max_h, int(h0 + d_h / ui_scale))) if d_h else None
 

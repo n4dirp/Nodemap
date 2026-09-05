@@ -711,8 +711,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
                 row = col.row()
                 row.prop(settings, "type_list_sort", text="Sort", expand=True)
                 col.prop(settings, "type_list_font_size", text="Font Size")
-                col.prop(settings, "show_search_bar", text="Filter Bar")
-                sub = col.row()
+                row = col.row()
+                row.prop(settings, "show_search_bar", text="Filter Bar")
+                sub = row.row()
                 sub.active = settings.show_node_colors
                 sub.prop(settings, "show_type_colors", text="Type Colors")
 

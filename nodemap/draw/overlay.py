@@ -255,7 +255,7 @@ def _draw_snap_sides(
     thickness = 3.0 * ui_scale
     handle_margin = 6 * ui_scale
     inset = 2.0 * ui_scale
-    color = _alpha_mul(colors["indicator"], master_alpha)
+    color = _alpha_mul(colors["text"], 0.25 * master_alpha)
 
     if "top" in snap_sides:
         _draw_pill(
@@ -349,8 +349,8 @@ def _draw_resize_handles(
     width_clamped = state.view.width_clamped
     height_clamped = state.view.height_clamped
 
-    color_base = _alpha_mul(colors["text"], 0.5 * master_alpha)
-    color_warn = _alpha_mul(colors["indicator"], master_alpha)
+    color_base = _alpha_mul(colors["text"], 0.25 * master_alpha)
+    color_warn = _alpha_mul(colors["text"], master_alpha)
     handle_thickness = 3.0 * ui_scale
     handle_margin = 6 * ui_scale
 

@@ -48,7 +48,7 @@ TYPE_LIST_FONT_SIZE: int = 10
 TYPE_LIST_MIN_WIDTH: float = 70.0
 TYPE_LIST_MAX_WIDTH_PCT: float = 0.5
 LIST_PAD_X: float = 6.0
-LIST_SWATCH: float = 8.0
+LIST_SWATCH: float = 10.0
 LIST_SWATCH_GAP: float = 5.0
 LIST_COUNT_GAP: float = 8.0
 SCROLLBAR_HIT_PAD: float = 6.0
@@ -79,6 +79,13 @@ MIN_SOCKET_SCALE: float = 0.15
 SCALE_REBUILD_REL: float = 0.015
 BATCH_DRIFT_PX: float = 256.0
 CULL_MARGIN_PX: float = BATCH_DRIFT_PX + 32.0
+# While the user is actively zooming, defer scale-bucket rebuilds and keep
+# scaling the existing batches via the content matrix; rebuild once the scale
+# holds still for ZOOM_SETTLE_MS. The ratio window bounds how far a deferred
+# bake may drift before an immediate rebuild keeps culling/typography fresh.
+ZOOM_SETTLE_MS: float = 180.0
+ZOOM_DEFER_RATIO_MIN: float = 0.1
+ZOOM_DEFER_RATIO_MAX: float = 0.5
 
 # ---------------------------------------------------------------------------
 # Socket indicator

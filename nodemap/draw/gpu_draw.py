@@ -201,7 +201,17 @@ void main() {
     float r = min(vHalfSize.x, vHalfSize.y);
     float dist = sdRoundRect(vUv, vHalfSize, r);
     float alpha = 1.0 - smoothstep(-0.5, 0.5, dist);
-    fragColor = vec4(color.rgb, color.a * alpha);
+    // Optional dash pattern: vUv.x is the corner offset from the pill center
+    // and vHalfSize.x the half length, so the along-axis coordinate runs the
+    // full wire length. With dashData.x <= 0 the mask stays 1 (solid).
+    float dashAlpha = 1.0;
+    if (dashData.x > 0.0) {
+        float period = dashData.x + dashData.y;
+        float along = clamp(vUv.x + vHalfSize.x, 0.0, vHalfSize.x * 2.0);
+        float phase = mod(along, period);
+        dashAlpha = 1.0 - smoothstep(dashData.x - 0.75, dashData.x + 0.75, phase);
+    }
+    fragColor = vec4(color.rgb, color.a * alpha * dashAlpha);
 }
 """
 
@@ -260,6 +270,7 @@ void main() {
     vPos = pos.xy;
     vSegA = segA;
     vSegB = segB;
+    vArc = arc;
     gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
 }
 """
@@ -276,7 +287,17 @@ void main() {
     float d = length(vPos - q);
     float sd = d - halfThick;
     float alpha = 1.0 - smoothstep(-0.5, 0.5, sd);
-    fragColor = vec4(color.rgb, color.a * alpha);
+    // Optional dash pattern: vArc is the cumulative arc length along the
+    // curve, so the phase follows exact arc-length windows and stays
+    // continuous across chord boundaries. With dashData.x <= 0 the mask
+    // stays 1 (solid) and no per-dash geometry is needed.
+    float dashAlpha = 1.0;
+    if (dashData.x > 0.0) {
+        float period = dashData.x + dashData.y;
+        float phase = mod(vArc, period);
+        dashAlpha = 1.0 - smoothstep(dashData.x - 0.75, dashData.x + 0.75, phase);
+    }
+    fragColor = vec4(color.rgb, color.a * alpha * dashAlpha);
 }
 """
 
@@ -462,6 +483,7 @@ def _get_batch_pill_shader() -> gpu.types.GPUShader:
         info = GPUShaderCreateInfo()
         info.push_constant("MAT4", "ModelViewProjectionMatrix")
         info.push_constant("VEC4", "color")
+        info.push_constant("VEC2", "dashData")
         info.vertex_in(0, "VEC3", "pos")
         info.vertex_in(1, "VEC2", "uv")
         info.vertex_in(2, "VEC2", "halfSize")
@@ -536,14 +558,17 @@ def _get_batch_noodle_shader() -> gpu.types.GPUShader:
         vert_out.smooth("VEC2", "vPos")
         vert_out.smooth("VEC2", "vSegA")
         vert_out.smooth("VEC2", "vSegB")
+        vert_out.smooth("FLOAT", "vArc")
         info = GPUShaderCreateInfo()
         info.push_constant("MAT4", "ModelViewProjectionMatrix")
         info.push_constant("VEC4", "color")
         info.push_constant("FLOAT", "halfThick")
+        info.push_constant("VEC2", "dashData")
         info.vertex_in(0, "VEC3", "pos")
         info.vertex_in(1, "VEC2", "uv")
         info.vertex_in(2, "VEC2", "segA")
         info.vertex_in(3, "VEC2", "segB")
+        info.vertex_in(4, "FLOAT", "arc")
         info.vertex_out(vert_out)
         info.fragment_out(0, "VEC4", "fragColor")
         info.vertex_source(_BATCH_NOODLE_VERT_SRC)
@@ -646,6 +671,10 @@ def _build_noodle_batch(
     subdivided into ``n`` chords (no adaptive refinement) and each chord emits
     a capsule rectangle whose fragment measures distance to that chord. Round
     end caps are emitted as endpoint squares.
+
+    Every quad carries the cumulative arc length at its chord start in the
+    ``arc`` attribute, so the fragment shader can mask a dash pattern along
+    exact arc-length windows without baking per-dash geometry.
     """
 
     if not wires:
@@ -659,6 +688,7 @@ def _build_noodle_batch(
     all_uv: list[tuple[float, float]] = []
     all_segA: list[tuple[float, float]] = []
     all_segB: list[tuple[float, float]] = []
+    all_arc: list[float] = []
 
     indices: list[tuple[int, int, int]] = []
     base_vert = 0
@@ -669,11 +699,6 @@ def _build_noodle_batch(
         seg_len_12 = hypot(p2x - p1x, p2y - p1y)
         seg_len_23 = hypot(p3x - p2x, p3y - p2y)
         est_length = seg_len_01 + seg_len_12 + seg_len_23
-        # Uniform subdivision only — the per-quad capsule shader is exact for
-        # its chord, so a modest fixed count keeps the tube visually continuous.
-        # Using 14 px per segment and capping at 8 keeps the vertex count ~2x
-        # lower than the previous adaptive 16+32 path while preserving shape at
-        # minimap scale (sub-pixel sagitta error < 1 px for typical bakes).
         n = int(est_length / 14.0) + 2
         if n < 2:
             n = 2
@@ -681,8 +706,7 @@ def _build_noodle_batch(
             n = 10
         inv_n = 1.0 / n
 
-        # Sample the Bezier uniformly — inline the cubic to avoid closure
-        # overhead and repeated function calls.
+        # Sample the Bezier uniformly
         centers: list[tuple[float, float]] = [None] * (n + 1)  # type: ignore[list-item]
         for s in range(n + 1):
             t = s * inv_n
@@ -691,10 +715,17 @@ def _build_noodle_batch(
             t2 = t * t
             omt3 = omt2 * omt
             t3 = t2 * t
-            # Horner-like cubic Bezier
             x = omt3 * p0x + 3.0 * omt2 * t * p1x + 3.0 * omt * t2 * p2x + t3 * p3x
             y = omt3 * p0y + 3.0 * omt2 * t * p1y + 3.0 * omt * t2 * p2y + t3 * p3y
             centers[s] = (x, y)
+
+        # Cumulative arc length along the chord polyline; vArc interpolates it
+        # per quad so the dash phase follows exact arc length across segments.
+        cum: list[float] = [0.0] * (n + 1)
+        for ci in range(n):
+            ax_c, ay_c = centers[ci]
+            bx_c, by_c = centers[ci + 1]
+            cum[ci + 1] = cum[ci] + hypot(bx_c - ax_c, by_c - ay_c)
 
         # First chord direction for end-cap orientation.
         dx0 = centers[1][0] - centers[0][0]
@@ -706,8 +737,7 @@ def _build_noodle_batch(
             chord_dir_x, chord_dir_y = 1.0, 0.0
         chord_dir_nx, chord_dir_ny = -chord_dir_y, chord_dir_x
 
-        # End-cap squares — collapsed chord (segA == segB == cap).
-        def _emit_cap(cap_x: float, cap_y: float) -> None:
+        def _emit_cap(cap_x: float, cap_y: float, cap_arc: float) -> None:
             nonlocal base_vert
             base = base_vert
             all_pos.append((cap_x + chord_dir_x * lateral, cap_y + chord_dir_y * lateral, 0.0))
@@ -717,13 +747,14 @@ def _build_noodle_batch(
             all_uv.extend([(0.0, 0.0)] * 4)
             all_segA.extend([(cap_x, cap_y)] * 4)
             all_segB.extend([(cap_x, cap_y)] * 4)
+            all_arc.extend([cap_arc] * 4)
             indices.append((base, base + 1, base + 2))
             indices.append((base + 2, base + 3, base))
             base_vert += 4
 
-        _emit_cap(centers[0][0], centers[0][1])
+        _emit_cap(centers[0][0], centers[0][1], cum[0])
 
-        # Interior quads — one per chord, inlined to avoid per-chord closures.
+        # Interior quads
         chord_extend = 0.01
         prev_nx, prev_ny = 0.0, 1.0
         for chord_index in range(n):
@@ -754,23 +785,31 @@ def _build_noodle_batch(
             left_y1 = by_ + ny * lateral
             right_x1 = bx_ - nx * lateral
             right_y1 = by_ - ny * lateral
+            arc_a = cum[chord_index]
+            arc_b = cum[chord_index + 1]
             base = base_vert
             all_pos.extend(
-                [(left_x0, left_y0, 0.0), (right_x0, right_y0, 0.0), (left_x1, left_y1, 0.0), (right_x1, right_y1, 0.0)]
+                [
+                    (left_x0, left_y0, 0.0),
+                    (right_x0, right_y0, 0.0),
+                    (left_x1, left_y1, 0.0),
+                    (right_x1, right_y1, 0.0),
+                ]
             )
             all_uv.extend([(0.0, 0.0), (0.0, 0.0), (1.0, 0.0), (1.0, 0.0)])
             all_segA.extend([(ax_, ay_)] * 4)
             all_segB.extend([(bx_, by_)] * 4)
+            all_arc.extend([arc_a, arc_a, arc_b, arc_b])
             indices.append((base, base + 1, base + 2))
             indices.append((base + 2, base + 1, base + 3))
             base_vert += 4
 
-        _emit_cap(centers[n][0], centers[n][1])
+        _emit_cap(centers[n][0], centers[n][1], cum[n])
 
     batch = batch_for_shader(
         shader,
         "TRIS",
-        {"pos": all_pos, "uv": all_uv, "segA": all_segA, "segB": all_segB},
+        {"pos": all_pos, "uv": all_uv, "segA": all_segA, "segB": all_segB, "arc": all_arc},
         indices=indices,
     )
     return shader, batch
@@ -823,6 +862,36 @@ def _draw_filled_rounded_rect(x, y, width, height, radius, color):
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radius", radius)
+    batch.draw(shader)
+
+
+def _draw_filled_quad(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    p3: tuple[float, float],
+    p4: tuple[float, float],
+    color,
+) -> None:
+    """Draw a solid filled quadrilateral with straight edges."""
+    shader = _get_sdf_fill_shader()
+    vertices = (
+        (p1[0], p1[1], 0.0),
+        (p2[0], p2[1], 0.0),
+        (p3[0], p3[1], 0.0),
+        (p4[0], p4[1], 0.0),
+    )
+    # A constant local UV keeps the SDF coverage at full alpha across the quad.
+    uvs = ((0.0, 0.0),) * 4
+    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+
+    shader.bind()
+    shader.uniform_float(
+        "ModelViewProjectionMatrix",
+        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
+    )
+    shader.uniform_float("color", _srgb_to_linear(color))
+    shader.uniform_float("halfSize", (1.0, 1.0))
+    shader.uniform_float("radius", 0.0)
     batch.draw(shader)
 
 

@@ -635,14 +635,23 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     # ------------------------------------------------------------------
     show_wire_highlight = show_wires and settings.highlight_selected_wires
     highlight_names = {node.name for node in nodes if node.select} if show_wire_highlight else None
-    raw_links = _extract_raw_links(node_tree) if show_wires else []
-    wire_items, wire_highlight_items = _resolve_wire_items(raw_links, out_pos, in_pos, highlight_names)
+    if show_wires:
+        raw_links, dashed_keys = _extract_raw_links(node_tree)
+    else:
+        raw_links = []
+        dashed_keys = frozenset()
+    wire_items, wire_dashed_items, wire_highlight_items, wire_highlight_dashed_items = _resolve_wire_items(
+        raw_links, out_pos, in_pos, highlight_names, dashed_keys
+    )
 
     # Persisted so position-only refreshes skip the links RNA pass entirely
     tree_data["raw_links"] = raw_links
     tree_data["wire_items"] = wire_items
+    tree_data["wire_dashed_items"] = wire_dashed_items
     tree_data["highlight_link_names"] = highlight_names
     tree_data["wire_highlight_items"] = wire_highlight_items
+    tree_data["wire_highlight_dashed_items"] = wire_highlight_dashed_items
+    tree_data["dashed_keys"] = dashed_keys
     # Wire opacity influences the highlight at 50% so dimmed wires dim their
     # highlight too (wire_opacity 0.0 → 50% of full, 1.0 → full).
     tree_data["wire_highlight_color"] = (
@@ -655,25 +664,62 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     minimap_state.cache.position_version += 1
 
 
-def _extract_raw_links(node_tree) -> list[tuple[str, str, str, str]]:
+def _link_is_dashed(link) -> bool:
+    """Return True when a link should be drawn dashed (field sockets in Geometry Nodes).
+
+    Matches Blender's ``node_link_is_field_link`` logic: only in geometry node trees,
+    when the from-socket type supports fields, and its inferred structure type is
+    ``Field`` or ``Dynamic``.
+    """
+    try:
+        ntree = link.from_node.id_data
+        if not ntree:
+            logger.debug("LINK DASHED: no id_data on from_node %s", getattr(link.from_node, "name", "?"))
+            return False
+        if ntree.type != "GEOMETRY":
+            logger.debug("LINK DASHED: tree type=%s (not GEOMETRY)", ntree.type)
+            return False
+    except (AttributeError, ReferenceError):
+        logger.debug("LINK DASHED: exception getting id_data")
+        return False
+    from_sock = link.from_socket
+    if not from_sock:
+        logger.debug("LINK DASHED: no from_socket")
+        return False
+    sock_type = getattr(from_sock, "type", None)
+    _SUPPORTS_FIELDS = {"VALUE", "VECTOR", "RGBA", "BOOLEAN", "INT", "ROTATION", "MENU", "MATRIX", "STRING"}
+    if sock_type not in _SUPPORTS_FIELDS:
+        logger.debug("LINK DASHED: from_sock.type=%s not in supports_fields set", sock_type)
+        return False
+    inferred = getattr(from_sock, "inferred_structure_type", None)
+    is_dashed = inferred in ("FIELD", "DYNAMIC")
+    logger.debug("LINK DASHED: link %s->%s sock_type=%s inferred=%s dashed=%s",
+                 link.from_node.name, link.to_node.name, sock_type, inferred, is_dashed)
+    return is_dashed
+
+
+def _extract_raw_links(node_tree) -> tuple[list[tuple[str, str, str, str]], frozenset]:
     """Extract ``(from_name, from_id, to_name, to_id)`` tuples for all links.
 
-    Pure RNA pass; only needed when topology changes since results are
-    persisted on ``tree_data["raw_links"]``.
+    Also returns a frozenset of link keys that should be drawn dashed
+    (field / modifier sockets).  Pure RNA pass; only needed when topology
+    changes since results are persisted on ``tree_data["raw_links"]``.
     """
     raw_links: list[tuple[str, str, str, str]] = []
+    dashed_keys: list[tuple[str, str, str, str]] = []
     for link in node_tree.links:
         from_node = link.from_node
         if from_node and from_node.type != "FRAME":
-            raw_links.append(
-                (
-                    from_node.name,
-                    link.from_socket.identifier,
-                    link.to_node.name,
-                    link.to_socket.identifier,
-                )
+            key = (
+                from_node.name,
+                link.from_socket.identifier,
+                link.to_node.name,
+                link.to_socket.identifier,
             )
-    return raw_links
+            raw_links.append(key)
+            if _link_is_dashed(link):
+                dashed_keys.append(key)
+    return raw_links, frozenset(dashed_keys)
 
 
 def _resolve_wire_items(
@@ -681,10 +727,18 @@ def _resolve_wire_items(
     out_pos: dict[str, dict],
     in_pos: dict[str, dict],
     highlight_names: set[str] | None = None,
-) -> tuple[dict[tuple, list[tuple[float, float, float, float]]], list[tuple[float, float, float, float]]]:
+    dashed_keys: frozenset | None = None,
+) -> tuple[
+    dict[tuple, list[tuple[float, float, float, float]]],
+    dict[tuple, list[tuple[float, float, float, float]]],
+    list[tuple[float, float, float, float]],
+    list[tuple[float, float, float, float]],
+]:
     """Resolve persisted links to per-color wire segments plus selected-node segments."""
     wire_items: dict[tuple, list[tuple[float, float, float, float]]] = {}
+    wire_dashed_items: dict[tuple, list[tuple[float, float, float, float]]] = {}
     highlight_items: list[tuple[float, float, float, float]] = []
+    highlight_dashed_items: list[tuple[float, float, float, float]] = []
     for from_name, from_id, to_name, to_id in raw_links:
         out_pos_node = out_pos.get(from_name)
         if not out_pos_node:
@@ -701,10 +755,15 @@ def _resolve_wire_items(
         out_x, out_y, wire_color = out_tuple
         in_x, in_y, _ = in_tuple
         segment = (out_x, out_y, in_x, in_y)
-        wire_items.setdefault(wire_color, []).append(segment)
+        is_dashed = (from_name, from_id, to_name, to_id) in (dashed_keys or frozenset())
+        target_dashed = wire_dashed_items if is_dashed else wire_items
+        target_dashed.setdefault(wire_color, []).append(segment)
         if highlight_names is not None and (from_name in highlight_names or to_name in highlight_names):
-            highlight_items.append(segment)
-    return wire_items, highlight_items
+            if is_dashed:
+                highlight_dashed_items.append(segment)
+            else:
+                highlight_items.append(segment)
+    return wire_items, wire_dashed_items, highlight_items, highlight_dashed_items
 
 
 def _group_socket_dots(by_node: dict[int, list[tuple[tuple, float, float]]]) -> dict[tuple, list[tuple[float, float]]]:
@@ -906,10 +965,15 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
             tree_data["reroute_items"] = grouped
         raw_links = tree_data.get("raw_links")
         if raw_links is None:
-            raw_links = _extract_raw_links(node_tree)
+            raw_links, _dashed_keys = _extract_raw_links(node_tree)
         highlight_names = tree_data.get("highlight_link_names")
-        wire_items, wire_highlight_items = _resolve_wire_items(raw_links, out_pos, in_pos, highlight_names)
+        dashed_keys = tree_data.get("dashed_keys")
+        wire_items, wire_dashed_items, wire_highlight_items, wire_highlight_dashed_items = _resolve_wire_items(
+            raw_links, out_pos, in_pos, highlight_names, dashed_keys
+        )
         tree_data["wire_items"] = wire_items
+        tree_data["wire_dashed_items"] = wire_dashed_items
         tree_data["wire_highlight_items"] = wire_highlight_items
+        tree_data["wire_highlight_dashed_items"] = wire_highlight_dashed_items
         minimap_state.cache.position_version += 1
     return True

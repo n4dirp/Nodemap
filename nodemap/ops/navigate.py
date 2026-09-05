@@ -11,7 +11,6 @@ from .. import __package__ as base_package
 from ..core.constants import (
     DOCK_DWELL_MS,
     HANDLE_THICKNESS,
-    LIST_PAD_X,
     SCROLLBAR_HIT_PAD,
     TYPE_LIST_FONT_ID,
 )
@@ -99,17 +98,16 @@ _SEARCH_NUMPAD_KEYS: dict[str, str] = {
 _SEARCH_ACCEPTED: set[str] = set(" .,_;/:'-[]=`\\")
 
 
-def _search_caret_at_x(query: str, click_x: int, search_rect, font_size: int, ui_scale: float) -> int:
+def _search_caret_at_x(query: str, click_x: int, text_start_x: float, font_size: int) -> int:
     """Return the search caret index nearest the click x within *query*.
 
-    Uses the same font and text-left geometry as the search-row drawing so the
+    Uses the same font and text-left origin as the search-row drawing so the
     caret lands where the user clicked. Empty queries keep the caret at 0.
     """
     if not query:
         return 0
-    text_x = search_rect[0] - 2 * ui_scale + LIST_PAD_X * ui_scale
     blf.size(TYPE_LIST_FONT_ID, font_size)
-    target = click_x - text_x
+    target = click_x - text_start_x
     return min(
         range(len(query) + 1),
         key=lambda i: abs(blf.dimensions(TYPE_LIST_FONT_ID, query[:i])[0] - target),
@@ -765,9 +763,8 @@ class NODEMAP_OT_navigate(Operator):
                         state.list.search_cursor = _search_caret_at_x(
                             state.list.search_query,
                             self._mouse_x,
-                            search_rect,
+                            state.list.search_text_start_x,
                             settings.type_list_font_size if settings else 10,
-                            _get_ui_scale(),
                         )
                     else:
                         state.list.search_cursor = len(state.list.search_query)

@@ -76,13 +76,13 @@ def _draw_layer_wires(state: MinimapState, settings: NODEMAP_PG_settings, mvp: A
             noodle_shader.uniform_float("halfThick", float(shadow_half))
             shadow_batch.draw(noodle_shader)
         for entry in wire_batches:
-            if len(entry) == 3:
-                wire_color, batch, half = entry
-            else:
-                wire_color, batch = entry
-                half = 1.0
+            wire_color = entry[0]
+            batch = entry[1]
+            half = entry[2] if len(entry) > 2 else 1.0
+            dash_len, dash_gap = (entry[3], entry[4]) if len(entry) >= 5 else (0.0, 0.0)
             noodle_shader.uniform_float("color", _srgb_to_linear(wire_color))
             noodle_shader.uniform_float("halfThick", float(half))
+            noodle_shader.uniform_float("dashData", (dash_len, dash_gap))
             batch.draw(noodle_shader)
     else:
         pill_shader = _get_batch_pill_shader()
@@ -92,13 +92,16 @@ def _draw_layer_wires(state: MinimapState, settings: NODEMAP_PG_settings, mvp: A
             # Straight-wire shadow is a plain batch.
             shadow_batch = wire_shadow_batch[0] if isinstance(wire_shadow_batch, tuple) else wire_shadow_batch
             pill_shader.uniform_float("color", (0.0, 0.0, 0.0, shadow_alpha))
+            pill_shader.uniform_float("dashData", (0.0, 0.0))
             shadow_batch.draw(pill_shader)
         for entry in wire_batches:
-            if len(entry) == 3:
-                wire_color, batch = entry[0], entry[1]
+            if len(entry) >= 5:
+                wire_color, batch, _half, dash_len, dash_gap = entry[:5]
             else:
-                wire_color, batch = entry
+                wire_color, batch = entry[0], entry[1]
+                dash_len, dash_gap = 0.0, 0.0
             pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
+            pill_shader.uniform_float("dashData", (dash_len, dash_gap))
             batch.draw(pill_shader)
 
 
@@ -106,27 +109,38 @@ def _draw_layer_wire_highlight(
     state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]
 ) -> None:
     """Draw wires connected to selected nodes (thicker stroke over regular wires)."""
-    highlight_batch = state.cache.wire_highlight_batch
-    if not (settings.show_wires and highlight_batch):
+    highlight_batches = state.cache.wire_highlight_batch
+    if not (settings.show_wires and highlight_batches):
         return
     tree_data = state.cache.tree_data
     wire_color = tree_data.get("wire_highlight_color") if tree_data else None
     if wire_color is None:
         return
-    batch, half = highlight_batch
     if int(params["wire_curvature"]) > 0:
         noodle_shader = _get_batch_noodle_shader()
         noodle_shader.bind()
         noodle_shader.uniform_float("ModelViewProjectionMatrix", mvp)
         noodle_shader.uniform_float("color", _srgb_to_linear(wire_color))
-        noodle_shader.uniform_float("halfThick", float(half))
-        batch.draw(noodle_shader)
+        for entry in highlight_batches:
+            batch = entry[0]
+            half = entry[1] if len(entry) > 1 else 1.0
+            dash_len, dash_gap = (entry[2], entry[3]) if len(entry) >= 4 else (0.0, 0.0)
+            noodle_shader.uniform_float("halfThick", float(half))
+            noodle_shader.uniform_float("dashData", (dash_len, dash_gap))
+            batch.draw(noodle_shader)
     else:
         pill_shader = _get_batch_pill_shader()
         pill_shader.bind()
         pill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
         pill_shader.uniform_float("color", _srgb_to_linear(wire_color))
-        batch.draw(pill_shader)
+        for entry in highlight_batches:
+            if len(entry) >= 4:
+                batch, _half, dash_len, dash_gap = entry[:4]
+            else:
+                batch, _half = entry
+                dash_len, dash_gap = 0.0, 0.0
+            pill_shader.uniform_float("dashData", (dash_len, dash_gap))
+            batch.draw(pill_shader)
 
 
 def _draw_layer_backdrops(state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]) -> None:
@@ -170,6 +184,7 @@ def _draw_layer_markers(state: MinimapState, settings: NODEMAP_PG_settings, mvp:
     pill_shader = _get_batch_pill_shader()
     pill_shader.bind()
     pill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+    pill_shader.uniform_float("dashData", (0.0, 0.0))
     for marker_color, batch in marker_batches:
         pill_shader.uniform_float("color", _srgb_to_linear(marker_color))
         batch.draw(pill_shader)

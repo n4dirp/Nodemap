@@ -76,6 +76,7 @@ class NODEMAP_PT_popup(Panel):
             grid.prop(settings, "show_node_count", text="Total Count")
             if settings.interactive:
                 grid.prop(settings, "show_type_list", text="Type List")
+                grid.prop(settings, "show_search_bar", text="Filter Bar")
             grid.prop(settings, "show_wires", text="Wires")
 
             if settings.interactive:

@@ -2,6 +2,7 @@
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +15,9 @@ from ..core.constants import (
     CULL_MARGIN_PX,
     MIN_SOCKET_SCALE,
     SCALE_REBUILD_REL,
+    ZOOM_DEFER_RATIO_MAX,
+    ZOOM_DEFER_RATIO_MIN,
+    ZOOM_SETTLE_MS,
 )
 from ..core.helpers import _get_node_label_lines
 from ..core.list_filter import filter_matching_nodes
@@ -619,7 +623,7 @@ def _ensure_minimap_batches(
         minimap_state.cache.position_version,
         round(ui_scale, 3),
         show_borders,
-        bool(list_visible),
+        bool(query and list_visible),
         minimap_state.list.hovered_type_label,
         minimap_state.interaction.hovered_node_id,
         bool(highlight_border),
@@ -638,6 +642,12 @@ def _ensure_minimap_batches(
         query,
     )
     wires_fresh = wire_key == minimap_state.cache.wire_key and minimap_state.cache.wire_scale == bake_scale
+    now = time.monotonic()
+    # Track active zoom so scale-bucket rebuilds can be deferred until the
+    # zoom gesture settles (see the defer branch below).
+    if abs(scale - minimap_state.cache.last_seen_scale) > 1e-4 * max(abs(scale), 1e-6):
+        minimap_state.cache.scale_last_change_ts = now
+    minimap_state.cache.last_seen_scale = scale
     if (
         key == minimap_state.cache.batch_key
         and wires_fresh
@@ -645,6 +655,20 @@ def _ensure_minimap_batches(
         and abs(scale - bake_scale) <= SCALE_REBUILD_REL * max(bake_scale, 1e-6)
         and abs(map_anchor_x - anchor_x) <= BATCH_DRIFT_PX
         and abs(map_anchor_y - anchor_y) <= BATCH_DRIFT_PX
+    ):
+        return
+    # While the scale is still changing, keep the current bake and let the
+    # content matrix scale it exactly. Rebuild once the zoom settles or the
+    # drift escapes the ratio window (culling/typography would go stale).
+    if (
+        key == minimap_state.cache.batch_key
+        and wires_fresh
+        and bake_scale > 0.0
+        and abs(map_anchor_x - anchor_x) <= BATCH_DRIFT_PX
+        and abs(map_anchor_y - anchor_y) <= BATCH_DRIFT_PX
+        and abs(scale - bake_scale) > SCALE_REBUILD_REL * max(bake_scale, 1e-6)
+        and (now - minimap_state.cache.scale_last_change_ts) < ZOOM_SETTLE_MS
+        and ZOOM_DEFER_RATIO_MIN * bake_scale <= scale <= ZOOM_DEFER_RATIO_MAX * bake_scale
     ):
         return
 
@@ -882,6 +906,42 @@ def _convert_wire_endpoints(
     return controls, pills
 
 
+def _bake_dashed_group(
+    items: list[tuple[float, float, float, float]] | list[tuple[float, ...]],
+    origin_x: float,
+    origin_y: float,
+    bake_scale: float,
+    curvature: float,
+    thickness: float,
+    dash_len: float,
+    dash_gap: float,
+    color,
+) -> list[tuple]:
+    """Bake one color group of dashed wire segments into wire batch entries.
+
+    Curved wires bake the full arc-length curve as static geometry and carry
+    the dash lengths so the shader can mask the pattern; straight wires keep a
+    single pill quad per segment and carry the dash lengths the same way.
+    """
+    use_curve = curvature > 1e-6
+    half_thickness = thickness * 0.5
+    if use_curve:
+        controls, _pills = _convert_wire_endpoints(items, origin_x, origin_y, bake_scale, curvature)
+        if not controls:
+            return []
+        _shader, batch = _build_noodle_batch(controls, half_thickness)
+        if batch is None:
+            return []
+        return [(color, batch, half_thickness, dash_len, dash_gap)]
+    pills = _convert_wire_endpoints(items, origin_x, origin_y, bake_scale, curvature)[1]
+    if not pills:
+        return []
+    _shader, batch = _build_pill_batch(pills, thickness)
+    if batch is None:
+        return []
+    return [(color, batch, half_thickness, dash_len, dash_gap)]
+
+
 def _rebuild_wire_marker_batches(
     minimap_state: MinimapState,
     tree_data: dict,
@@ -901,7 +961,7 @@ def _rebuild_wire_marker_batches(
     thickness = max(1.6, 2.0 * bake_scale) * wire_thickness
     curvature = float(wire_curvature)
     use_curve = curvature > 1e-6
-    wire_batches: list[tuple[Any, Any, float]] = []
+    wire_batches: list[tuple] = []
     per_color_wires: dict[Any, list[tuple[float, float, float, float, float, float, float, float]]] = {}
 
     # Under an active search filter, resolve wires from raw links so a link
@@ -912,11 +972,16 @@ def _rebuild_wire_marker_batches(
         out_pos = tree_data.get("out_pos") or {}
         in_pos = tree_data.get("in_pos") or {}
         highlight_names = tree_data.get("highlight_link_names")
+        dashed_keys = tree_data.get("dashed_keys")
         filtered_links = [link for link in raw_links if link[0] in filter_names or link[2] in filter_names]
-        wire_items, wire_highlight_items = _resolve_wire_items(filtered_links, out_pos, in_pos, highlight_names)
+        wire_items, wire_dashed_items, wire_highlight_items, wire_highlight_dashed_items = _resolve_wire_items(
+            filtered_links, out_pos, in_pos, highlight_names, dashed_keys
+        )
     else:
         wire_items = tree_data["wire_items"]
+        wire_dashed_items = tree_data.get("wire_dashed_items") or {}
         wire_highlight_items = tree_data.get("wire_highlight_items") or []
+        wire_highlight_dashed_items = tree_data.get("wire_highlight_dashed_items") or []
 
     for color, items in wire_items.items():
         group_controls, group_pills = _convert_wire_endpoints(items, origin_x, origin_y, bake_scale, curvature)
@@ -926,6 +991,17 @@ def _rebuild_wire_marker_batches(
             _shader, batch = _build_pill_batch(group_pills, thickness)
             if batch is not None:
                 wire_batches.append((color, batch, thickness * 0.5))
+
+    dash_len = max(3.0, 4.0 * bake_scale)
+    dash_gap = max(2.0, 3.0 * bake_scale)
+    # Dashed wires for field / modifier sockets — reuse the same batch list
+    # so content_draw draws them without any changes. The dash pattern is a
+    # shader uniform for straight (one pill per segment) and curved batches
+    # alike, keeping dashed wires as cheap to bake as solid ones.
+    for color, items in wire_dashed_items.items():
+        wire_batches.extend(
+            _bake_dashed_group(items, origin_x, origin_y, bake_scale, curvature, thickness, dash_len, dash_gap, color)
+        )
 
     if use_curve:
         for color, controls in per_color_wires.items():
@@ -941,20 +1017,35 @@ def _rebuild_wire_marker_batches(
 
     # Wires connected to selected nodes — one thicker batch drawn over the
     # regular wires in the theme selection color (see tree_compile).
-    highlight_items = wire_highlight_items
-    highlight_cache = None
-    if highlight_items:
+    highlight_batches: list[tuple] = []
+    if wire_highlight_items:
         highlight_thickness = thickness * 1.5
-        h_controls, h_pills = _convert_wire_endpoints(highlight_items, origin_x, origin_y, bake_scale, curvature)
+        h_controls, h_pills = _convert_wire_endpoints(wire_highlight_items, origin_x, origin_y, bake_scale, curvature)
         if use_curve and h_controls:
             _shader, batch = _build_noodle_batch(h_controls, highlight_thickness * 0.5)
             if batch is not None:
-                highlight_cache = (batch, highlight_thickness * 0.5)
+                highlight_batches.append((batch, highlight_thickness * 0.5))
         elif h_pills:
             _shader, batch = _build_pill_batch(h_pills, highlight_thickness)
             if batch is not None:
-                highlight_cache = (batch, highlight_thickness * 0.5)
-    minimap_state.cache.wire_highlight_batch = highlight_cache
+                highlight_batches.append((batch, highlight_thickness * 0.5))
+
+    # Dashed highlight wires
+    if wire_highlight_dashed_items:
+        highlight_thickness = thickness * 1.5
+        for entry in _bake_dashed_group(
+            wire_highlight_dashed_items,
+            origin_x,
+            origin_y,
+            bake_scale,
+            curvature,
+            highlight_thickness,
+            dash_len,
+            dash_gap,
+            None,
+        ):
+            highlight_batches.append((entry[1], entry[2], entry[3], entry[4]))
+    minimap_state.cache.wire_highlight_batch = highlight_batches if highlight_batches else None
 
     # Group node underline markers — baked like wires
     marker_batches = []

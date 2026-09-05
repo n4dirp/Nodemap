@@ -43,6 +43,7 @@ from ..core.theme import (
 )
 from .batch_build import _create_quad_indices
 from .gpu_draw import (
+    _draw_filled_quad,
     _draw_filled_rounded_rect,
     _draw_pill,
     _draw_rounded_rect_border,
@@ -272,6 +273,10 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
 
     if progress >= 1.0:
         state.list.anim_active = False
+        # The list animation is over; drop the batch key so the next draw
+        # rebuilds at the final scale immediately instead of waiting the
+        # zoom settle window.
+        # state.cache.batch_key = None
     else:
         _schedule_list_anim_redraw(state)
 
@@ -531,7 +536,7 @@ def _bake_list_glyph_batch(
 
                 _push_quad(
                     x + icon_col_x,
-                    local_y - (row_h + swatch) / 2.0,
+                    round(local_y - (row_h + swatch) / 2.0),
                     swatch,
                     swatch,
                     swatch / 2.0,
@@ -774,6 +779,47 @@ def _draw_search_clear_button(
         gpu.matrix.pop()
 
 
+def _draw_search_filter_icon(
+    x: float,
+    y: float,
+    size: float,
+    color,
+    ui_scale: float,
+) -> None:
+    """Draw a filled filter (funnel) icon for the search pill."""
+    cx = round(x + size / 2)
+    cy = round(y + size / 2)
+
+    # Overall icon box
+    w = size * 0.8  # width of the rim / funnel mouth
+    h = size * 0.85  # overall height
+
+    half_w = w / 2
+    top_y = -h / 2
+    bottom_y = h / 2
+
+    # Vertical proportions (fractions of total height), mirrored vertically
+    rim_h = h * 0.13  # thickness of the bottom rim
+    rim_top_y = bottom_y - rim_h
+    point_y = bottom_y - h * 0.62  # where the body meets the stem
+    stem_w = max(2.0 * ui_scale, w * 0.15)  # width of the stem
+    stem_radius = min(stem_w / 2, h * 0.03)
+
+    gpu.matrix.push()
+    try:
+        gpu.matrix.translate((cx, cy, 0.0))
+
+        _draw_filled_rounded_rect(-half_w, rim_top_y, w, rim_h, rim_h / 2, color)
+
+        _draw_filled_quad(
+            (-stem_w / 2, point_y), (stem_w / 2, point_y), (half_w, rim_top_y), (-half_w, rim_top_y), color
+        )
+
+        _draw_filled_rounded_rect(-stem_w / 2, top_y, stem_w, point_y - top_y, stem_radius, color)
+    finally:
+        gpu.matrix.pop()
+
+
 # ---------------------------------------------------------------------------
 # Type-list draw pipeline: geometry, fills, text, scrollbar
 # ---------------------------------------------------------------------------
@@ -889,8 +935,8 @@ def _compute_zone_geometry(
             0.5,
         )
 
-        view_top = search_bottom - row_pad_v
-        view_bottom = zone_y + row_pad_v
+        view_top = search_bottom - row_pad_v + 1
+        view_bottom = zone_y + row_pad_v + 1
         view_h = max(view_top - view_bottom, row_h)
 
         scroll_max = max(0.0, total_h - view_h)
@@ -923,8 +969,9 @@ def _compute_zone_geometry(
         active_color = _alpha_mul(colors["indicator"], master_alpha)
         match_color = _alpha_mul(colors["indicator"], 0.85 * master_alpha)
 
-        selection_fill_color = _alpha_mul(colors["node_selected"], 0.05 * master_alpha)
-        active_fill_color = _alpha_mul(colors["indicator"], 0.05 * master_alpha)
+        selection_fill_color = _alpha_mul(settings.viewport_fill_color, 0.2 * master_alpha)
+        active_fill_color = _alpha_mul(settings.viewport_fill_color, 0.4 * master_alpha)
+        active_border_color = settings.viewport_fill_color
 
         tree_data = state.cache.tree_data or {}
         type_colors = tree_data.get("type_colors") or {}
@@ -942,7 +989,7 @@ def _compute_zone_geometry(
         else:
             state.list.search_rect = None
 
-        search_text_x = zone_x + pad_x + padding
+        search_text_x = zone_x + pad_x
 
         if settings.show_search_bar and state.list.search_query:
             clear_size = max(int(12 * ui_scale), int(search_h * 0.6))
@@ -1005,6 +1052,7 @@ def _compute_zone_geometry(
             "match_color": match_color,
             "selection_fill_color": selection_fill_color,
             "active_fill_color": active_fill_color,
+            "active_border_color": active_border_color,
             "type_colors": type_colors,
             "type_node_colors": type_node_colors,
             "type_selected_counts": type_selected_counts,
@@ -1037,9 +1085,10 @@ def _draw_list_fills(
         row_h = geo["row_h"]
 
         active_fill_color = geo["active_fill_color"]
+        active_border_color = geo["active_border_color"]
+
         selection_fill_color = geo["selection_fill_color"]
         hover_color = geo["hover_color"]
-        selection_color = geo["selection_color"]
 
         type_active = geo["type_active"]
         type_selected_counts = geo["type_selected_counts"]
@@ -1153,7 +1202,7 @@ def _draw_list_fills(
                 fill(pill_x, draw_y, pill_w, row_draw_h, radius, hover_color)
 
             if is_active:
-                border(pill_x, draw_y, pill_w, row_draw_h, radius, selection_color, active_border_w)
+                border(pill_x, draw_y, pill_w, row_draw_h, radius, active_border_color, active_border_w)
 
             header_rects.append((pill_x, slot_bottom, pill_w, row_h, label))
 
@@ -1163,7 +1212,39 @@ def _draw_list_fills(
         state.list.row_rects = header_rects
         state.list.toggle_rects = toggle_rects
 
-        # Expand guide lines.
+        # Child fills.
+        child_rects = []
+
+        for (
+            kind,
+            label,
+            node_name,
+            slot_bottom,
+            _row_idx,
+            draw_y,
+            _node,
+            child_active,
+            child_selected,
+        ) in visible_rows:
+            if kind != _ROW_CHILD:
+                continue
+
+            if child_active:
+                fill(pill_x, draw_y, pill_w, row_draw_h, radius, active_fill_color)
+            elif child_selected:
+                fill(pill_x, draw_y, pill_w, row_draw_h, radius, selection_fill_color)
+
+            if child_active:
+                border(pill_x, draw_y, pill_w, row_draw_h, radius, active_border_color, active_border_w)
+
+            if hovered_child == (label, node_name):
+                fill(pill_x, draw_y, pill_w, row_draw_h, radius, hover_color)
+
+            child_rects.append((pill_x, slot_bottom, pill_w, row_h, label, node_name))
+
+        state.list.node_rects = child_rects
+
+        # Expand guide lines (on top of the row fills).
         children_get = children.get
 
         for label in header_has_visible:
@@ -1192,38 +1273,6 @@ def _draw_list_fills(
                 line_color,
             )
 
-        # Child fills.
-        child_rects = []
-
-        for (
-            kind,
-            label,
-            node_name,
-            slot_bottom,
-            _row_idx,
-            draw_y,
-            _node,
-            child_active,
-            child_selected,
-        ) in visible_rows:
-            if kind != _ROW_CHILD:
-                continue
-
-            if child_active:
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, active_fill_color)
-            elif child_selected:
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, selection_fill_color)
-
-            if child_active:
-                border(pill_x, draw_y, pill_w, row_draw_h, radius, selection_color, active_border_w)
-
-            if hovered_child == (label, node_name):
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, hover_color)
-
-            child_rects.append((pill_x, slot_bottom, pill_w, row_h, label, node_name))
-
-        state.list.node_rects = child_rects
-
 
 def _draw_list_text(
     state: MinimapState,
@@ -1242,7 +1291,7 @@ def _draw_list_text(
         _draw_list_glyph_batch(
             state,
             geo["zone_x"],
-            geo["view_top"] + state.list.scroll,
+            round(geo["view_top"] + state.list.scroll),
         )
 
         font_id = TYPE_LIST_FONT_ID
@@ -1313,9 +1362,23 @@ def _draw_list_text(
 
             gpu.state.scissor_set(*zone_scissor)
 
+            icon_color = text_color if search_query else count_color
+            icon_size = search_draw_h * 0.55
+            _draw_search_filter_icon(
+                search_text_x,
+                search_pill_y + (search_draw_h - icon_size) / 2,
+                icon_size,
+                icon_color,
+                ui_scale,
+            )
+
+            search_text_start_x = search_text_x + icon_size + 3 * ui_scale
+            state.list.search_text_start_x = search_text_start_x
+
             if state.list.search_focused:
                 caret_x = round(
-                    search_text_x + (blf.dimensions(font_id, search_query[:search_cursor])[0] if search_query else 0.0)
+                    search_text_start_x
+                    + (blf.dimensions(font_id, search_query[:search_cursor])[0] if search_query else 0.0)
                 )
 
                 _draw_filled_rounded_rect(
@@ -1324,13 +1387,13 @@ def _draw_list_text(
                     max(2.0, 2.2 * ui_scale),
                     search_draw_h,
                     0.0,
-                    _alpha_mul(colors["indicator"], master_alpha),
+                    _alpha_mul(geo["active_border_color"], master_alpha),
                 )
 
             search_text = search_query if search_query else "Filter"
 
-            blf.clipping(font_id, int(search_text_x), clip_top, int(search_text_right), clip_bottom)
-            blf.position(font_id, search_text_x, search_text_y, 0)
+            blf.clipping(font_id, int(search_text_start_x), clip_top, int(search_text_right), clip_bottom)
+            blf.position(font_id, search_text_start_x, search_text_y, 0)
             blf.color(font_id, *(text_color if search_query else count_color))
             blf.draw(font_id, search_text)
 
@@ -1350,13 +1413,13 @@ def _draw_list_text(
 
                 blf.clipping(
                     font_id,
-                    int(search_text_x),
+                    int(search_text_start_x),
                     int(view_bottom - row_h),
                     int(count_right),
                     int(view_top + row_h),
                 )
 
-                blf.position(font_id, search_text_x, no_match_y, 0)
+                blf.position(font_id, search_text_start_x, no_match_y, 0)
                 blf.color(font_id, *count_color)
                 blf.draw(font_id, "No matches")
 
