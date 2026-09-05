@@ -3,43 +3,26 @@
 ## [2.0.0] [Unreleased]
 
 ### Added
-- Type-list filter: open the field at the top of the node-type list to filter by type or node name
-- `Ctrl+F` over the minimap reveals the type list and focuses its filter field
-- `T` over the minimap toggles the node-type list visibility
-- Highlight wires connected to selected nodes
-- Interactive node-type list with per-type counts
-- New Presets menu in the Nodemap popup
-- Added group markers beneath group nodes
-- Added Smooth animation for frame actions
-- Added Frame Selected button in the minimap
-- Smooth editor animation when framing selected nodes
-- Curved wires in the minimap that match Blender's link curves
+- Interactive node-type list (Shortcut: `T`)
+- Search bar to filter nodes by name (Shortcut: `Ctrl+F`)
+- Support for presets
+- **Frame Selected Nodes** button in the minimap
+- Improved minimap wire visualization, including selection highlighting, curved links, and dashed lines for field/modifier sockets
 - More theme customization options for colors and appearance
-- All extension options now available in the addon preferences panel
-- Per-tree minimap view: pan/zoom restored on returning to a node-tree
-- Minimap dock positions: corners, edges, and a new Floating mode
-- Drag handle to reposition the minimap, with snap to editor borders and corners
+- More flexible minimap positioning, with additional dock positions, a new Floating mode, and drag-and-snap support for editor borders and corners.
+- Group markers displayed beneath group nodes
+- Smooth animations for frame actions
 
 ### Changed
-- Frame Selected now adjusts the zoom to fit multiple nodes or a frame
-- Renamed the "Smooth Pan" preference to "Animations"; it now also gates the type-list show/hide animation
-- Moved advanced options from the popup panel to the addon preferences for a cleaner interface
-- Performance improvements when working with large node graphs
+- Frame Selected now automatically adjusts the zoom to fit multiple nodes or a frame
+- Improved performance when working with large node graphs
+- Added per-tree minimap views, restoring the previous pan and zoom when returning to a node tree
+- All extension options are now available in the addon preferences
 
 ### Fixed
-- Selecting a node from the type list no longer forces a full EEVEE material rebuild (now uses the native node.select operator like the minimap)
-- Minimap redraws now target only the interacted Node Editor instead of refreshing all open Node Editors
-- Scrollbars now appear only when nodes actually go out of view
-- Type-list search could not find group nodes by their linked node-tree name
-- Backslash and backtick could not be typed into the search query
-- Type-list search-match highlighting no longer overlaps the surrounding label text
-- Type-list rows no longer scroll up and draw over/behind the search box
-- Type-list search bar now matches the minimap chrome button height (BUTTON_SIZE)
-- Type-list shows a centered "No matches" message when a search finds nothing
-- Type-list search now hides non-matching child nodes, showing only the matches inside auto-expanded groups
-- Fixed a crash when Shift-clicking a type-list row to range-select (missing anchor argument)
-- Type-list search caret now uses the accent color and fills the search box height; the clear (X) icon is dimmed and its coordinates rounded
-
+- Selecting a node from the type list no longer triggers a full EEVEE material rebuild
+- Minimap redraws now affect only the Node Editor being interacted with instead of refreshing all open Node Editors
+- Scrollbars now appear only when nodes extend beyond the visible area
 
 ## [1.5.0] - 2026-08-14
 
