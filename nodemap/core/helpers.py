@@ -332,15 +332,16 @@ def _schedule_list_anim_redraw(minimap_state) -> None:
 
 def _get_tree_snapshot(
     node_tree, include_selection: bool = True
-) -> tuple[tuple, tuple[float, float, float, float], int]:
-    """Return ``(fingerprint, raw bounds, drawable node count)`` in a single RNA pass.
+) -> tuple[tuple, tuple[float, float, float, float], int, tuple[float, float, float, float] | None]:
+    """Return ``(fingerprint, raw bounds, drawable node count, selected_bounds)`` in a single RNA pass.
 
     The fingerprint matches :func:`get_tree_fingerprint`; bounds use the same
     clamped dims as :func:`_get_node_tree_bounds`; the count excludes FRAME
-    and REROUTE nodes.
+    and REROUTE nodes. ``selected_bounds`` is the bounding box of selected
+    nodes or ``None`` when nothing is selected.
     """
     if not node_tree or not hasattr(node_tree, "nodes") or len(node_tree.nodes) == 0:
-        return EMPTY_FINGERPRINT, (0.0, 0.0, 200.0, 200.0), 0
+        return EMPTY_FINGERPRINT, (0.0, 0.0, 200.0, 200.0), 0, None
     nodes = node_tree.nodes
     ui_scale = _get_ui_scale()
 
@@ -354,6 +355,9 @@ def _get_tree_snapshot(
 
     min_x = min_y = float("inf")
     max_x = max_y = float("-inf")
+
+    sel_min_x = sel_min_y = float("inf")
+    sel_max_x = sel_max_y = float("-inf")
 
     for node in nodes:
         node_loc_abs = node.location_absolute
@@ -386,6 +390,14 @@ def _get_tree_snapshot(
 
         if include_selection and node.select:
             select_sum += 1
+            if node_x < sel_min_x:
+                sel_min_x = node_x
+            if node_x + bounds_w > sel_max_x:
+                sel_max_x = node_x + bounds_w
+            if node_y - bounds_h < sel_min_y:
+                sel_min_y = node_y - bounds_h
+            if node_y > sel_max_y:
+                sel_max_y = node_y
         if node.type not in ("FRAME", "REROUTE"):
             content_count += 1
 
@@ -419,7 +431,8 @@ def _get_tree_snapshot(
         links_count,
     )
     bounds = (min_x, min_y, max_x, max_y) if min_x != float("inf") else (0.0, 0.0, 200.0, 200.0)
-    return fingerprint, bounds, content_count
+    selected_bounds = (sel_min_x, sel_min_y, sel_max_x, sel_max_y) if sel_min_x != float("inf") else None
+    return fingerprint, bounds, content_count, selected_bounds
 
 
 def get_tree_fingerprint(node_tree, include_selection: bool = True) -> tuple:

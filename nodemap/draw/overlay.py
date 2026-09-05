@@ -1054,9 +1054,14 @@ def draw_minimap() -> None:
 
     show_borders = settings.show_node_outline
     include_selection = show_borders or settings.highlight_selected_wires
-    current_fingerprint, raw_bounds, content_count = _get_tree_snapshot(node_tree, include_selection)
+    current_fingerprint, raw_bounds, content_count, selected_bounds = _get_tree_snapshot(node_tree, include_selection)
     if raw_bounds[2] - raw_bounds[0] <= 0 or raw_bounds[3] - raw_bounds[1] <= 0:
         return
+
+    # Cache snapshot results on state so framing functions can reuse them
+    # instead of re-scanning the node tree.
+    state.view.raw_tree_bounds = raw_bounds
+    state.view.snapshot_selected_bounds = selected_bounds
 
     logger.trace(
         "SETTINGS %d nodes | show_wires=%d show_node_labels=%d compact_labels=%d"

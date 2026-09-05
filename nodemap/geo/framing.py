@@ -39,7 +39,9 @@ def _compute_frame_all_targets(
     if not node_tree:
         return None
 
-    bounds = _get_node_tree_bounds(node_tree.nodes)
+    bounds = minimap_state.view.raw_tree_bounds
+    if bounds is None:
+        bounds = _get_node_tree_bounds(node_tree.nodes)
 
     _, _, _, map_h = minimap_state.view.rect
     bounds = _expand_bounds_margin(bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding)
@@ -191,15 +193,21 @@ def _compute_frame_selected_targets(
     if not selected:
         return None
 
-    bounds = _get_selected_bounds(selected)
+    # Use cached bounds from the snapshot when available, otherwise compute.
+    bounds = minimap_state.view.snapshot_selected_bounds
+    if bounds is None:
+        bounds = _get_selected_bounds(selected)
     if bounds is None:
         return None
     min_x, min_y, max_x, max_y = bounds
 
     rect = minimap_state.view.rect
     _, _, map_w, map_h = rect
+    raw_bounds = minimap_state.view.raw_tree_bounds
+    if raw_bounds is None:
+        raw_bounds = _get_node_tree_bounds(node_tree.nodes)
     minimap_state.view.tree_bounds = _expand_bounds_margin(
-        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), map_h, minimap_state.view.inner_padding
+        raw_bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding
     )
 
     if len(selected) > 1 or selected[0].type == "FRAME":
@@ -313,8 +321,11 @@ def frame_view(
 
     rect = minimap_state.view.rect
     _, _, map_w, map_h = rect
+    raw_bounds = minimap_state.view.raw_tree_bounds
+    if raw_bounds is None:
+        raw_bounds = _get_node_tree_bounds(node_tree.nodes)
     minimap_state.view.tree_bounds = _expand_bounds_margin(
-        _get_node_tree_bounds(node_tree.nodes), _get_ui_scale(), map_h, minimap_state.view.inner_padding
+        raw_bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding
     )
     _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
 

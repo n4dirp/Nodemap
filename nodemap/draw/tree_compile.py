@@ -28,6 +28,18 @@ logger = logging.getLogger(base_package)
 # final position once movement settles.
 _MOVE_REFRESH_MIN_INTERVAL = 0.016
 
+
+def _socket_y(body_top: float, body_bot: float, visible_count: int, socket_index: int) -> float:
+    """Return the tree-space Y coordinate for a socket at the given index.
+
+    Sockets are evenly spaced along the node body height. When there is only
+    one socket (or the body has zero height) the socket is centered.
+    """
+    body_range = body_top - body_bot
+    if body_range <= 0 or visible_count <= 1:
+        return (body_top + body_bot) * 0.5
+    return body_top - body_range * (socket_index + 1) / (visible_count + 1)
+
 # Socket types that can carry fields in Geometry Nodes (dashed-wire detection).
 _SUPPORTS_FIELDS = frozenset({"VALUE", "VECTOR", "RGBA", "BOOLEAN", "INT", "ROTATION", "MENU", "MATRIX", "STRING"})
 
@@ -399,7 +411,6 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
 
         body_top = top_y
         body_bot = body_top - node_h
-        body_range = body_top - body_bot
 
         if show_socket_indicators:
             dots: list[tuple[tuple, float, float]] = []
@@ -409,10 +420,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                 x_base = top_x + (node_w if is_output else 0)
                 visible_count = len(visible)
                 for socket_index, socket in enumerate(visible):
-                    if body_range <= 0 or visible_count <= 1:
-                        socket_tree_y = (body_top + body_bot) * 0.5
-                    else:
-                        socket_tree_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                    socket_tree_y = _socket_y(body_top, body_bot, visible_count, socket_index)
 
                     socket_ptr = socket.as_pointer()
                     if socket_ptr not in socket_color_cache:
@@ -439,10 +447,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                 visible_count = len(visible_outs)
                 out_dict = {}
                 for socket_index, socket in enumerate(visible_outs):
-                    if body_range <= 0 or visible_count <= 1:
-                        socket_y = (body_top + body_bot) * 0.5
-                    else:
-                        socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                    socket_y = _socket_y(body_top, body_bot, visible_count, socket_index)
                     socket_ptr = socket.as_pointer()
                     if socket_ptr in socket_color_cache:
                         socket_color = socket_color_cache[socket_ptr]
@@ -469,10 +474,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                 visible_count = len(visible_ins)
                 in_dict = {}
                 for socket_index, socket in enumerate(visible_ins):
-                    if body_range <= 0 or visible_count <= 1:
-                        socket_y = (body_top + body_bot) * 0.5
-                    else:
-                        socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                    socket_y = _socket_y(body_top, body_bot, visible_count, socket_index)
                     in_dict[socket.identifier] = (x_base, socket_y, default_wire_color)
                 in_pos[node.name] = in_dict
 
@@ -662,6 +664,22 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
         if show_wire_highlight
         else None
     )
+    # Pre-compute frame nesting depths so the batch baker does not need to.
+    frames = [
+        (info["ptr"], info["tree_x"], info["tree_y"], info["tree_w"], info["tree_h"])
+        for info in tree_data["node_infos"]
+        if info["is_frame"]
+    ]
+    frame_depths: dict[int, int] = {}
+    for ptr, x0, y0, w0, h0 in frames:
+        depth = 0
+        for cptr, cx0, cy0, cw0, ch0 in frames:
+            if cptr == ptr or (cw0, ch0) == (w0, h0):
+                continue
+            if cx0 <= x0 and cy0 <= y0 and cx0 + cw0 >= x0 + w0 and cy0 + ch0 >= y0 + h0:
+                depth += 1
+        frame_depths[ptr] = depth
+    tree_data["frame_depths"] = frame_depths
     minimap_state.cache.tree_data = tree_data
     minimap_state.cache.tree_version += 1
     minimap_state.cache.position_version += 1
@@ -899,16 +917,14 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
             continue
 
         name = node.name
+        body_bot = body_top - body_range
         out_entry = out_pos.get(name)
         if out_entry:
             visible_outs = [s for s in node.outputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
             x_base = node_left_x + w
             visible_count = len(visible_outs)
             for socket_index, socket in enumerate(visible_outs):
-                if body_range <= 0 or visible_count <= 1:
-                    socket_y = body_top - body_range * 0.5
-                else:
-                    socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                socket_y = _socket_y(body_top, body_bot, visible_count, socket_index)
                 socket_identifier = socket.identifier
                 existing = out_entry.get(socket_identifier)
                 color = existing[2] if existing else default_wire_color
@@ -919,10 +935,7 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
             visible_ins = [s for s in node.inputs if not getattr(s, "hide", False) and getattr(s, "enabled", True)]
             visible_count = len(visible_ins)
             for socket_index, socket in enumerate(visible_ins):
-                if body_range <= 0 or visible_count <= 1:
-                    socket_y = body_top - body_range * 0.5
-                else:
-                    socket_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                socket_y = _socket_y(body_top, body_bot, visible_count, socket_index)
                 socket_identifier = socket.identifier
                 existing = in_entry.get(socket_identifier)
                 color = existing[2] if existing else default_wire_color
@@ -934,10 +947,7 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
                 x_base = node_left_x + (w if is_output else 0.0)
                 visible_count = len(visible)
                 for socket_index, socket in enumerate(visible):
-                    if body_range <= 0 or visible_count <= 1:
-                        socket_tree_y = (body_top + new_y) * 0.5
-                    else:
-                        socket_tree_y = body_top - body_range * (socket_index + 1) / (visible_count + 1)
+                    socket_tree_y = _socket_y(body_top, body_bot, visible_count, socket_index)
                     color = sock_colors.get(socket.as_pointer(), default_socket_color)
                     dots.append((color, x_base, socket_tree_y))
                 by_node[node_ptr] = dots

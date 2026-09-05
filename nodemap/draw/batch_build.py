@@ -685,7 +685,7 @@ def _ensure_minimap_batches(
     font_id = 0
     min_dim = 3.0 * ui_scale
     node_infos = tree_data["node_infos"]
-    frame_depths = _compute_frame_depths(node_infos)
+    frame_depths = tree_data.get("frame_depths") or _compute_frame_depths(node_infos)
     frame_label_entries: list[dict] = []
     # Active search filter: node names to keep visible, or None when the
     # query is empty or the type list is hidden (draw everything). Mirrors

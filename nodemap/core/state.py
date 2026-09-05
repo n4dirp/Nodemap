@@ -55,6 +55,8 @@ class ViewState:
 
     rect: Rect = (0.0, 0.0, 0.0, 0.0)
     tree_bounds: Rect = (0.0, 0.0, 0.0, 0.0)
+    raw_tree_bounds: Rect | None = None
+    snapshot_selected_bounds: Rect | None = None
     outer_margin: float = 10.0
     inner_padding: float = 6.0
     map_scale: float = 1.0
