@@ -206,10 +206,13 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
     if bx >= ctx.cull_right or bx + node_w <= ctx.cull_left or by >= ctx.cull_top or by + node_h <= ctx.cull_bottom:
         return
 
-    # Under an active search filter, skip non-matching nodes entirely (body,
-    # border, and label together) so the map mirrors the filtered list.
-    if ctx.filter_names is not None and info.get("name") not in ctx.filter_names:
-        return
+    # Under an active search filter, non-matching nodes keep only their
+    # solid fill — borders, labels, highlights, sockets, and wires are
+    # hidden so the map mirrors the filtered list.
+    is_filtered_out = ctx.filter_names is not None and info.get("name") not in ctx.filter_names
+    fill_color = info["fill_color"]
+    if is_filtered_out:
+        fill_color = (fill_color[0], fill_color[1], fill_color[2], fill_color[3] * 0.25)
 
     if is_frame:
         node_r = info["node_r_base"] * ctx.ui_scale * 1.6
@@ -244,12 +247,12 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
         half_h = node_h_final / 2
         right = bx + node_w_final
         bottom = by + node_h_final
-        _emit_quad(ctx.fill_attr, bx, by, right, bottom, half_w, half_h, node_r, info["fill_color"])
-        if draw_border:
+        _emit_quad(ctx.fill_attr, bx, by, right, bottom, half_w, half_h, node_r, fill_color)
+        if draw_border and not is_filtered_out:
             _emit_quad(
                 ctx.border_attr, bx, by, right, bottom, half_w, half_h, node_r, border_color, line_width=border_w
             )
-        if is_hovered:
+        if is_hovered and not is_filtered_out:
             outline_x = bx - ctx.highlight_margin
             outline_y = by - ctx.highlight_margin
             outline_w = node_w_final + ctx.highlight_margin * 2
@@ -280,9 +283,9 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
             half_w,
             half_h,
             node_r,
-            info["fill_color"],
+            fill_color,
         )
-        if draw_border:
+        if draw_border and not is_filtered_out:
             _emit_quad(
                 ctx.frame_border_attr if is_frame else ctx.border_attr,
                 bx,
@@ -295,7 +298,7 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
                 border_color,
                 line_width=border_w,
             )
-        if is_hovered:
+        if is_hovered and not is_filtered_out:
             outline_x = bx - ctx.highlight_margin
             outline_y = by - ctx.highlight_margin
             outline_w = node_w + ctx.highlight_margin * 2
@@ -313,7 +316,7 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
                 line_width=ctx.highlight_line_width,
             )
 
-        if is_frame:
+        if not is_filtered_out and is_frame:
             # Zoom gate evaluated live per bake (user_zoom drives scale),
             # so labels appear/disappear at the threshold without waiting
             # for a tree recompile.
@@ -348,7 +351,7 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
                         ),
                     }
                 )
-        else:
+        elif not is_filtered_out and not is_frame:
             label_type = info.get("node_label_type")
             label_text = info.get("node_label_text")
             if label_type and label_text and node_w > 6 * ctx.ui_scale and node_h > 6 * ctx.ui_scale:
