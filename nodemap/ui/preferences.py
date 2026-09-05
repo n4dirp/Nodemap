@@ -34,7 +34,7 @@ def _update_logger_from_prefs():
     level = "INFO"
     try:
         prefs = get_addon_preferences()
-        enabled = prefs.logging_enabled
+        enabled = prefs.use_logging
         level = prefs.logging_level
     except (KeyError, AttributeError, ReferenceError):
         pass
@@ -256,7 +256,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     use_custom_background: BoolProperty(
         name="Custom Background",
         description="Use a custom background color instead of the Blender theme color",
-        default=False,
+        default=True,
         update=_update_invalidate_batches,
     )
 
@@ -534,7 +534,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     )
 
     debounce_delay: FloatProperty(
-        name="Update Delay",
+        name="Debounce Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",
         default=0.1,
         min=0.0,
@@ -614,8 +614,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
     settings: PointerProperty(type=NODEMAP_PG_settings)
 
-    logging_enabled: BoolProperty(
-        name="Enable Console Logging",
+    use_logging: BoolProperty(
+        name="Console Logging",
         description="Output add-on log messages to the console",
         default=False,
         update=lambda self, context: _update_logger_from_prefs(),
@@ -819,15 +819,15 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Performance")
-        group.prop(self.settings, "debounce_delay", text="Update Delay")
+        group.prop(self.settings, "debounce_delay", text="Debounce Delay")
 
         layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Development")
         row = group.row(align=True, heading="Console Logging")
-        row.prop(self, "logging_enabled", text="")
+        row.prop(self, "use_logging", text="")
         sub = row.row(align=True)
-        sub.active = self.logging_enabled
+        sub.active = self.use_logging
         sub.prop(self, "logging_level", text="")
 
 

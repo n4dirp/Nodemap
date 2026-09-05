@@ -142,6 +142,12 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     if prefs and prefs.settings.use_custom_text:
         text_color = label_color = tuple(prefs.settings.text_color)
 
+    selected = _theme_rgba("user_interface.wcol_regular.ThemeWidgetColors.inner_sel", (0.28, 0.45, 0.7, 1.0))
+    if prefs and prefs.settings.use_custom_viewport_fill:
+        viewport_fill = tuple(prefs.settings.viewport_fill_color)
+    else:
+        viewport_fill = selected
+
     return {
         "bg": bg,
         "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
@@ -152,6 +158,8 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "wire": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
         "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
+        "viewport_fill": viewport_fill,
+        "selected": selected,
         "text": text_color,
         "label": label_color,
         "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),

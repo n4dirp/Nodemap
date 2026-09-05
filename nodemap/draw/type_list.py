@@ -969,9 +969,9 @@ def _compute_zone_geometry(
         active_color = _alpha_mul(colors["indicator"], master_alpha)
         match_color = _alpha_mul(colors["indicator"], 0.85 * master_alpha)
 
-        selection_fill_color = _alpha_mul(settings.viewport_fill_color, 0.2 * master_alpha)
-        active_fill_color = _alpha_mul(settings.viewport_fill_color, 0.4 * master_alpha)
-        active_border_color = settings.viewport_fill_color
+        selection_fill_color = _alpha_mul(colors["viewport_fill"], 0.2 * master_alpha)
+        active_fill_color = _alpha_mul(colors["viewport_fill"], 0.4 * master_alpha)
+        active_border_color = colors["viewport_fill"]
 
         tree_data = state.cache.tree_data or {}
         type_colors = tree_data.get("type_colors") or {}
