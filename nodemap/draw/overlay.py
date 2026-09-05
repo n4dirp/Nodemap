@@ -1329,7 +1329,7 @@ def draw_minimap() -> None:
         scale,
         tree_center_x,
         tree_center_y,
-        state.view.tree_bounds if move_pending else raw_bounds,
+        raw_bounds,
         colors,
         ui_scale,
         master_alpha,
