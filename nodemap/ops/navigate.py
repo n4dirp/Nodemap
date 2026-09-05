@@ -414,8 +414,7 @@ class NODEMAP_OT_navigate(Operator):
     _snap_dwell: float = 0.0
     _snap_last_time: float = 0.0
     _list_width_start_x: int = 0
-    _list_width_start_pct: int = 0
-    _list_width_start_map_w: float = 0.0
+    _list_width_start_px: int = 160
     _last_cursor: str = ""
     _pan_acc: list[float]
     _redirect_acc: list[float]
@@ -565,6 +564,8 @@ class NODEMAP_OT_navigate(Operator):
                     self._mmb_drag_start = None
                     _clamp_pan_to_viewport(self._space, self._region, state)
                     if settings and self._anim._animations_enabled(settings, context):
+                        self._anim.smooth_velocity[0] *= 0.5
+                        self._anim.smooth_velocity[1] *= 0.5
                         speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
                         if speed > 2.0:
                             self._anim.inertia_active = True
@@ -910,9 +911,7 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_resize_handle
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
-                self._list_width_start_pct = settings.type_list_width_percent
-                map_x, map_y, map_w, map_h = state.view.rect
-                self._list_width_start_map_w = map_w
+                self._list_width_start_px = settings.type_list_width
                 cursor = _CURSOR_MAP[divider_resize_handle]
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
@@ -1083,9 +1082,7 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_handle_r
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
-                self._list_width_start_pct = settings.type_list_width_percent if settings else 35
-                map_x, map_y, map_w, map_h = state.view.rect
-                self._list_width_start_map_w = map_w
+                self._list_width_start_px = settings.type_list_width if settings else 160
                 cursor = _CURSOR_MAP[divider_handle_r]
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
@@ -1811,8 +1808,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_last_row_index = -1
         self._list_width_dragging = False
         self._list_width_start_x = 0
-        self._list_width_start_pct = 35
-        self._list_width_start_map_w = 0.0
+        self._list_width_start_px = 160
         self._moving = False
         self._move_start_mouse = None
         self._move_start_offset = None

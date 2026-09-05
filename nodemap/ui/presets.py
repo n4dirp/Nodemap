@@ -43,7 +43,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_type_colors",
         "settings.type_list_sort",
         "settings.type_list_font_size",
-        "settings.type_list_width_percent",
+        "settings.type_list_width",
         "settings.show_search_bar",
         "settings.show_frame_all_button",
         "settings.show_frame_view_button",

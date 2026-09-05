@@ -445,28 +445,25 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 
 
 def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
-    """Update the type-list percent width from the current mouse delta."""
+    """Update the type-list pixel width from the current mouse delta."""
     state = op._state
     addon = get_addon_preferences(context)
     if not state or not addon:
         return
     settings = addon.settings
-    if op._list_width_start_map_w <= 0:
-        return
+
     dx = op._mouse_x - op._list_width_start_x
-    map_w = op._list_width_start_map_w
     ui_scale = _get_ui_scale()
     min_w = TYPE_LIST_MIN_WIDTH * ui_scale
-    max_w = map_w * TYPE_LIST_MAX_WIDTH_PCT
-    start_w = map_w * (op._list_width_start_pct / 100.0)
+    max_w = (op._state.view.rect[2] if op._state.view.rect else 0.0) * TYPE_LIST_MAX_WIDTH_PCT
+    start_w = op._list_width_start_px * ui_scale
     start_w = min(max(start_w, min_w), max_w)
     new_w = min(max(start_w + dx, min_w), max_w)
-    new_pct = int(round(new_w / max(map_w, 1.0) * 100.0))
-    new_pct = min(max(new_pct, 0), 50)
+    new_px = int(round(new_w / max(ui_scale, 1e-6)))
     from ..core.state import suppress_update_callbacks
 
     with suppress_update_callbacks():
-        settings.type_list_width_percent = new_pct
+        settings.type_list_width = new_px
     # Preserve framing so the same world rect stays centered in the
     # reduced/expanded available width (100→75 keeps same relative pos).
     old_w = state.list.list_width

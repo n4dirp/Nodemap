@@ -272,12 +272,13 @@ def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: f
 def _get_type_list_width(
     settings, minimap_state, map_w: float, ui_scale: float, font_size: int = TYPE_LIST_FONT_SIZE
 ) -> float:
-    """Return the type-list zone width as a percentage of *map_w* (0 when disabled).
+    """Return the type-list zone width in pixels (0 when disabled).
 
-    Width is driven by ``type_list_width_percent`` (``TYPE_LIST_MIN_WIDTH`` to
-    ``TYPE_LIST_MAX_WIDTH_PCT`` clamp) and does not depend on content
-    measurement; content clips or shows extra padding instead.
-    Called before the map transform so node framing can reserve the zone.
+    Width is driven by ``type_list_width`` in pixels, clamped to
+    ``TYPE_LIST_MIN_WIDTH`` and ``TYPE_LIST_MAX_WIDTH_PCT`` of the map width,
+    and does not depend on content measurement; content clips or shows extra
+    padding instead. Called before the map transform so node framing can
+    reserve the zone.
     """
     if not settings or not settings.show_type_list or not settings.interactive:
         return 0.0
@@ -286,8 +287,7 @@ def _get_type_list_width(
     if not type_stats:
         return 0.0
 
-    percent = settings.type_list_width_percent / 100.0
-    raw_width = map_w * percent
+    raw_width = settings.type_list_width * ui_scale
     return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), map_w * TYPE_LIST_MAX_WIDTH_PCT)
 
 

@@ -7,7 +7,7 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProp
 from bpy.types import AddonPreferences, PropertyGroup
 
 from .. import __package__ as base_package
-from ..core.constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH
+from ..core.constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH, TYPE_LIST_MIN_WIDTH
 from ..core.helpers import get_addon_preferences
 from ..core.state import _suppress_update
 from .panels import NODEMAP_PT_presets
@@ -516,13 +516,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
-    type_list_width_percent: IntProperty(
+    type_list_width: IntProperty(
         name="Type List Width",
-        description="Width of the node-type list as a percentage of the minimap width",
-        default=40,
-        min=1,
-        max=80,
-        subtype="PERCENTAGE",
+        description="Width of the node-type list in pixels",
+        default=160,
+        min=int(TYPE_LIST_MIN_WIDTH),
+        max=10000,
+        subtype="PIXEL",
         update=_update_invalidate_batches,
     )
 
