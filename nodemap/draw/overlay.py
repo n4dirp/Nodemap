@@ -61,8 +61,6 @@ from .gpu_draw import (
     _draw_text_with_shadow,
 )
 from .tree_compile import (
-    _MOVE_REFRESH_MIN_INTERVAL,
-    _apply_move_updates,
     _debounced_compile,
     _is_move_only_diff,
     _Timer,
@@ -1090,10 +1088,18 @@ def draw_minimap() -> None:
         return
     map_x, map_y, map_w, map_h, padding, y_margin = rect
 
-    bounds = _expand_bounds_margin(raw_bounds, ui_scale, map_h, padding)
+    move_pending = (
+        state.cache.fingerprint is not None
+        and _is_move_only_diff(state.cache.fingerprint, current_fingerprint)
+    )
+    # Freeze framing while a move is pending settle: hold the tree bounds so
+    # the map scale/pivot does not creep live during a drag, keeping auto-
+    # bounds, nodes, and wires uniform on the settle frame instead.
+    if not move_pending:
+        bounds = _expand_bounds_margin(raw_bounds, ui_scale, map_h, padding)
+        state.view.tree_bounds = bounds
 
     state.view.rect = (map_x, map_y, map_w, map_h)
-    state.view.tree_bounds = bounds
     state.view.outer_margin = y_margin
     state.view.inner_padding = padding
 
@@ -1156,19 +1162,18 @@ def draw_minimap() -> None:
 
     _clamp_pan_to_viewport(space, region, state, visible)
 
-    # Refresh tree data: pure position changes (node drags) patch the cached
-    # tables immediately; anything else schedules a debounced full compile.
+    # Refresh tree data: pure position changes (node drags) are deferred to
+    # the debounced settle flush so bounds, nodes, and wires update together;
+    # anything else schedules a debounced full compile.
     old_fingerprint = state.cache.fingerprint
     if old_fingerprint != current_fingerprint:
         move_only = _is_move_only_diff(old_fingerprint, current_fingerprint)
-        applied = False
-        if move_only and (time.perf_counter() - state.cache.last_move_refresh) >= _MOVE_REFRESH_MIN_INTERVAL:
-            applied = _apply_move_updates(state, node_tree)
-            if applied:
-                state.cache.last_move_refresh = time.perf_counter()
-                state.cache.pending_settle_flush = True
-        if applied:
-            state.cache.fingerprint = current_fingerprint
+        if move_only:
+            # Freeze everything until settle: defer node position patches
+            # and the wire unfreeze to the debounced settle flush so that
+            # auto-bounds, nodes, and wires all update together instead of
+            # staggering (bounds -> nodes -> wires) during a drag.
+            state.cache.pending_settle_flush = True
         # Always keep a settle timer armed: it flushes frozen wire/marker
         # batches (forced via pending_settle_flush) or runs the pending full
         # compile. Re-arm (push back) only when the fingerprint changed again
@@ -1325,7 +1330,7 @@ def draw_minimap() -> None:
         scale,
         tree_center_x,
         tree_center_y,
-        raw_bounds,
+        state.view.tree_bounds if move_pending else raw_bounds,
         colors,
         ui_scale,
         master_alpha,

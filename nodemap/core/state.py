@@ -163,7 +163,6 @@ class RenderCache:
     wire_key: Any = None
     wire_scale: float = 1.0
     pending_settle_flush: bool = False
-    last_move_refresh: float = 0.0
     last_seen_scale: float = 0.0
     scale_last_change_ts: float = 0.0
     _batches_dirty: bool = False
