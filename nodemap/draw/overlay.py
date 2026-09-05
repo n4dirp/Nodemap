@@ -63,7 +63,6 @@ from .gpu_draw import (
 from .tree_compile import (
     _debounced_compile,
     _is_move_only_diff,
-    _Timer,
 )
 from .type_list import _draw_minimap_scrollbars, _draw_type_list, _step_list_width
 
@@ -1153,8 +1152,7 @@ def draw_minimap() -> None:
 
     # Reserve the type-list zone before computing the map transform so
     # node framing and panning never place tree content behind the list.
-    with _Timer("type_list_width"):
-        _step_list_width(state, settings, map_w, ui_scale)
+    _step_list_width(state, settings, map_w, ui_scale)
 
     _clamp_pan_to_viewport(space, region, state, visible)
 
@@ -1358,8 +1356,7 @@ def draw_minimap() -> None:
     # Interactive node-type list zone (drawn unclipped, on top of map content)
     try:
         gpu.state.blend_set("ALPHA")
-        with _Timer("draw_type_list"):
-            _draw_type_list(settings, state, map_x, map_y, map_h, padding, colors, master_alpha, ui_scale)
+        _draw_type_list(settings, state, map_x, map_y, map_h, padding, colors, master_alpha, ui_scale)
     finally:
         try:
             gpu.state.blend_set(original_blend if original_blend else "NONE")

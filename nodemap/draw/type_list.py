@@ -49,7 +49,6 @@ from .gpu_draw import (
     _draw_rounded_rect_border,
     _get_batch_rect_shader,
 )
-from .tree_compile import _Timer
 
 _ROW_HEADER = "header"
 _ROW_CHILD = "child"
@@ -323,96 +322,93 @@ def _build_type_list_cache(
     ui_scale: float,
 ) -> None:
     """Build cached entries, row layout, entry map, and baked glyph batch."""
-    with _Timer("type_list.cache.build"):
-        tree_data = state.cache.tree_data or {}
-        type_stats = tree_data.get("type_stats") or {}
+    tree_data = state.cache.tree_data or {}
+    type_stats = tree_data.get("type_stats") or {}
 
-        state.cache.list_nodes_by_name = {n.name: n for n in node_tree.nodes} if node_tree else {}
+    state.cache.list_nodes_by_name = {n.name: n for n in node_tree.nodes} if node_tree else {}
 
-        font_id = TYPE_LIST_FONT_ID
-        font_size = int(settings.type_list_font_size * ui_scale)
-        blf.size(font_id, font_size)
+    font_id = TYPE_LIST_FONT_ID
+    font_size = int(settings.type_list_font_size * ui_scale)
+    blf.size(font_id, font_size)
 
-        children = tree_data.get("type_nodes") or {}
-        search_texts = tree_data.get("type_search") or None
+    children = tree_data.get("type_nodes") or {}
+    search_texts = tree_data.get("type_search") or None
 
-        visible, effective_expanded, filtered_children = filter_type_list(
-            type_stats,
-            children,
-            state.list.expanded,
-            state.list.search_query,
-            search_texts=search_texts,
-        )
+    visible, effective_expanded, filtered_children = filter_type_list(
+        type_stats,
+        children,
+        state.list.expanded,
+        state.list.search_query,
+        search_texts=search_texts,
+    )
 
-        effective_expanded = effective_expanded or set()
-        filtered_children = filtered_children or {}
+    effective_expanded = effective_expanded or set()
+    filtered_children = filtered_children or {}
 
-        # While searching, preserve filter/match order.
-        if not state.list.search_query.strip():
-            if settings.type_list_sort == "NAME":
-                visible.sort(key=lambda label_count: label_count[0].lower())
-            else:
-                visible.sort(key=lambda label_count: (-label_count[1], label_count[0]))
+    # While searching, preserve filter/match order.
+    if not state.list.search_query.strip():
+        if settings.type_list_sort == "NAME":
+            visible.sort(key=lambda label_count: label_count[0].lower())
+        else:
+            visible.sort(key=lambda label_count: (-label_count[1], label_count[0]))
 
-        entries: list[tuple[str, str, float, int]] = []
-        entry_map: dict[str, tuple[str, float, int]] = {}
-        widest_count = 0.0
+    entries: list[tuple[str, str, float, int]] = []
+    entry_map: dict[str, tuple[str, float, int]] = {}
+    widest_count = 0.0
 
-        for label, display_count in visible:
-            count_text = str(display_count)
-            count_width = blf.dimensions(font_id, count_text)[0]
-            widest_count = max(widest_count, count_width)
+    for label, display_count in visible:
+        count_text = str(display_count)
+        count_width = blf.dimensions(font_id, count_text)[0]
+        widest_count = max(widest_count, count_width)
 
-            full_count = type_stats.get(label, display_count)
-            entries.append((label, count_text, count_width, full_count))
-            entry_map[label] = (count_text, count_width, full_count)
+        full_count = type_stats.get(label, display_count)
+        entries.append((label, count_text, count_width, full_count))
+        entry_map[label] = (count_text, count_width, full_count)
 
-        _, line_h = blf.dimensions(font_id, "Ay")
-        row_h = line_h + 4 * ui_scale
+    _, line_h = blf.dimensions(font_id, "Ay")
+    row_h = line_h + 4 * ui_scale
 
-        # Build the canonical row layout once.
-        rows = tuple(
-            _iter_type_list_layout(
-                entries,
-                filtered_children,
-                effective_expanded,
-                row_h,
-            )
-        )
-
-        header_local_bottom = {
-            label: local_y - row_h for kind, label, _node_name, local_y in rows if kind == _ROW_HEADER
-        }
-
-        state.cache.list_key = key
-        state.cache.list_entries = entries
-        state.cache.list_effective_expanded = effective_expanded
-        state.cache.list_children = children
-        state.cache.list_filtered_children = filtered_children
-
-        state.cache.list_layout = {
-            "font_size": font_size,
-            "line_h": line_h,
-            "row_h": row_h,
-            "widest_count": widest_count,
-            "rows": rows,
-            "total_h": len(rows) * row_h,
-            "header_local_bottom": header_local_bottom,
-            "entry_map": entry_map,
-        }
-
-        state.cache.list_swatches_batch = None
-
-        _bake_list_glyph_batch(
-            state,
-            settings,
-            colors,
-            master_alpha,
-            ui_scale,
+    # Build the canonical row layout once.
+    rows = tuple(
+        _iter_type_list_layout(
+            entries,
+            filtered_children,
+            effective_expanded,
             row_h,
-            rows,
-            entry_map,
         )
+    )
+
+    header_local_bottom = {label: local_y - row_h for kind, label, _node_name, local_y in rows if kind == _ROW_HEADER}
+
+    state.cache.list_key = key
+    state.cache.list_entries = entries
+    state.cache.list_effective_expanded = effective_expanded
+    state.cache.list_children = children
+    state.cache.list_filtered_children = filtered_children
+
+    state.cache.list_layout = {
+        "font_size": font_size,
+        "line_h": line_h,
+        "row_h": row_h,
+        "widest_count": widest_count,
+        "rows": rows,
+        "total_h": len(rows) * row_h,
+        "header_local_bottom": header_local_bottom,
+        "entry_map": entry_map,
+    }
+
+    state.cache.list_swatches_batch = None
+
+    _bake_list_glyph_batch(
+        state,
+        settings,
+        colors,
+        master_alpha,
+        ui_scale,
+        row_h,
+        rows,
+        entry_map,
+    )
 
 
 def _bake_list_glyph_batch(
@@ -872,198 +868,197 @@ def _compute_zone_geometry(
     ui_scale: float,
 ) -> dict:
     """Compute list zone metrics and draw the zone background."""
-    with _Timer("type_list.layout"):
-        font_size = layout["font_size"]
-        row_h = layout["row_h"]
-        line_h = layout["line_h"]
-        widest_count = layout["widest_count"]
-        total_h = layout["total_h"]
-        header_local_bottom = layout["header_local_bottom"]
+    font_size = layout["font_size"]
+    row_h = layout["row_h"]
+    line_h = layout["line_h"]
+    widest_count = layout["widest_count"]
+    total_h = layout["total_h"]
+    header_local_bottom = layout["header_local_bottom"]
 
-        pad_x = LIST_PAD_X * ui_scale
-        swatch = LIST_SWATCH * ui_scale
-        swatch_gap = LIST_SWATCH_GAP * ui_scale
-        count_gap = LIST_COUNT_GAP * ui_scale
-        icon_col_x = swatch + swatch_gap
-        row_pad_v = ui_scale
+    pad_x = LIST_PAD_X * ui_scale
+    swatch = LIST_SWATCH * ui_scale
+    swatch_gap = LIST_SWATCH_GAP * ui_scale
+    count_gap = LIST_COUNT_GAP * ui_scale
+    icon_col_x = swatch + swatch_gap
+    row_pad_v = ui_scale
 
-        children = state.cache.list_filtered_children or state.cache.list_children or {}
+    children = state.cache.list_filtered_children or state.cache.list_children or {}
 
-        handle_pad = HANDLE_THICKNESS * ui_scale
-        zone_x = map_x + handle_pad
-        zone_w = map_x + padding + state.list.list_width - 2 * ui_scale - zone_x
+    handle_pad = HANDLE_THICKNESS * ui_scale
+    zone_x = map_x + handle_pad
+    zone_w = map_x + padding + state.list.list_width - 2 * ui_scale - zone_x
 
-        if settings.show_search_bar:
-            search_h = (BUTTON_SIZE - 1) * ui_scale
-        else:
-            search_h = 0.0
-            state.list.search_focused = False
-            state.list.search_clear_rect = None
-            state.list.search_clear_hovered = False
+    if settings.show_search_bar:
+        search_h = (BUTTON_SIZE - 1) * ui_scale
+    else:
+        search_h = 0.0
+        state.list.search_focused = False
+        state.list.search_clear_rect = None
+        state.list.search_clear_hovered = False
 
-        zone_h = min(
-            map_h - 2 * handle_pad,
-            max(total_h, row_h) + search_h + 3 * row_pad_v,
-        )
+    zone_h = min(
+        map_h - 2 * handle_pad,
+        max(total_h, row_h) + search_h + 3 * row_pad_v,
+    )
 
-        zone_y = round(map_y + map_h - zone_h - handle_pad)
-        state.list.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
+    zone_y = round(map_y + map_h - zone_h - handle_pad)
+    state.list.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
 
-        search_top = zone_y + zone_h - 1
-        search_bottom = search_top - search_h
-        search_draw_h = max(0.0, search_h - row_gap)
-        search_pad_v = round((search_draw_h - line_h) / 2.0) + 1 if search_h > 0 else 0
+    search_top = zone_y + zone_h - 1
+    search_bottom = search_top - search_h
+    search_draw_h = max(0.0, search_h - row_gap)
+    search_pad_v = round((search_draw_h - line_h) / 2.0) + 1 if search_h > 0 else 0
 
-        zone_radius = colors.get("panel_roundness", 4.0) * 0.6
+    zone_radius = colors.get("panel_roundness", 4.0) * 0.6
 
-        _draw_filled_rounded_rect(
-            zone_x,
-            zone_y,
-            zone_w,
-            zone_h,
-            zone_radius,
-            _alpha_mul(colors["bg"], master_alpha),
-        )
+    _draw_filled_rounded_rect(
+        zone_x,
+        zone_y,
+        zone_w,
+        zone_h,
+        zone_radius,
+        _alpha_mul(colors["bg"], master_alpha),
+    )
 
-        _draw_rounded_rect_border(
-            zone_x,
-            zone_y,
-            zone_w,
-            zone_h,
-            zone_radius,
-            _alpha_mul(colors["bg_border"], master_alpha),
-            0.5,
-        )
+    _draw_rounded_rect_border(
+        zone_x,
+        zone_y,
+        zone_w,
+        zone_h,
+        zone_radius,
+        _alpha_mul(colors["bg_border"], master_alpha),
+        0.5,
+    )
 
-        view_top = search_bottom - row_pad_v + 1
-        view_bottom = zone_y + row_pad_v + 1
-        view_h = max(view_top - view_bottom, row_h)
+    view_top = search_bottom - row_pad_v + 1
+    view_bottom = zone_y + row_pad_v + 1
+    view_h = max(view_top - view_bottom, row_h)
 
-        scroll_max = max(0.0, total_h - view_h)
-        state.list.scroll = min(max(state.list.scroll, 0.0), scroll_max)
-        state.list.scroll_max = scroll_max
+    scroll_max = max(0.0, total_h - view_h)
+    state.list.scroll = min(max(state.list.scroll, 0.0), scroll_max)
+    state.list.scroll_max = scroll_max
 
-        header_slot_bottom = {
-            label: view_top + state.list.scroll + local_bottom for label, local_bottom in header_local_bottom.items()
-        }
+    header_slot_bottom = {
+        label: view_top + state.list.scroll + local_bottom for label, local_bottom in header_local_bottom.items()
+    }
 
-        show_type_colors = settings.show_type_colors and settings.show_node_colors
-        swatch_col_x = icon_col_x if show_type_colors else 0.0
-        content_x = zone_x + pad_x
+    show_type_colors = settings.show_type_colors and settings.show_node_colors
+    swatch_col_x = icon_col_x if show_type_colors else 0.0
+    content_x = zone_x + pad_x
 
-        count_right = zone_x + zone_w - pad_x - 4 * ui_scale
-        label_x = content_x + icon_col_x + swatch_col_x
+    count_right = zone_x + zone_w - pad_x - 4 * ui_scale
+    label_x = content_x + icon_col_x + swatch_col_x
 
-        show_counts = count_right - widest_count - count_gap - label_x >= TYPE_LIST_MIN_LABEL_W * ui_scale
+    show_counts = count_right - widest_count - count_gap - label_x >= TYPE_LIST_MIN_LABEL_W * ui_scale
 
-        label_max_width = max(
-            0.0,
-            (count_right - widest_count - count_gap if show_counts else count_right) - label_x,
-        )
+    label_max_width = max(
+        0.0,
+        (count_right - widest_count - count_gap if show_counts else count_right) - label_x,
+    )
 
-        text_y_off = round((row_h - line_h) / 2)
+    text_y_off = round((row_h - line_h) / 2)
 
-        text_color = _alpha_mul(colors["text"], 0.9 * master_alpha)
-        count_color = _alpha_mul(colors["text"], 0.3 * master_alpha)
-        selection_color = _alpha_mul(colors["node_selected"], 0.95 * master_alpha)
-        active_color = _alpha_mul(colors["indicator"], master_alpha)
-        match_color = _alpha_mul(colors["indicator"], 0.85 * master_alpha)
+    text_color = _alpha_mul(colors["text"], 0.9 * master_alpha)
+    count_color = _alpha_mul(colors["text"], 0.3 * master_alpha)
+    selection_color = _alpha_mul(colors["node_selected"], 0.95 * master_alpha)
+    active_color = _alpha_mul(colors["indicator"], master_alpha)
+    match_color = _alpha_mul(colors["indicator"], 0.85 * master_alpha)
 
-        selection_fill_color = _alpha_mul(colors["viewport_fill"], 0.2 * master_alpha)
-        active_fill_color = _alpha_mul(colors["viewport_fill"], 0.4 * master_alpha)
-        active_border_color = colors["viewport_fill"]
+    selection_fill_color = _alpha_mul(colors["viewport_fill"], 0.2 * master_alpha)
+    active_fill_color = _alpha_mul(colors["viewport_fill"], 0.4 * master_alpha)
+    active_border_color = colors["viewport_fill"]
 
-        tree_data = state.cache.tree_data or {}
-        type_colors = tree_data.get("type_colors") or {}
-        type_node_colors = tree_data.get("type_node_colors") or {}
-        type_selected_counts = tree_data.get("type_selected_counts") or {}
-        type_active = tree_data.get("type_active_label")
+    tree_data = state.cache.tree_data or {}
+    type_colors = tree_data.get("type_colors") or {}
+    type_node_colors = tree_data.get("type_node_colors") or {}
+    type_selected_counts = tree_data.get("type_selected_counts") or {}
+    type_active = tree_data.get("type_active_label")
 
-        hover_color = _alpha_mul(colors["text"], 0.025 * master_alpha)
+    hover_color = _alpha_mul(colors["text"], 0.025 * master_alpha)
 
-        pill_x = zone_x + 2 * ui_scale
-        pill_w = zone_w - 4 * ui_scale
+    pill_x = zone_x + 2 * ui_scale
+    pill_w = zone_w - 4 * ui_scale
 
-        if settings.show_search_bar:
-            state.list.search_rect = (pill_x, search_bottom, pill_w, search_h)
-        else:
-            state.list.search_rect = None
+    if settings.show_search_bar:
+        state.list.search_rect = (pill_x, search_bottom, pill_w, search_h)
+    else:
+        state.list.search_rect = None
 
-        search_text_x = zone_x + pad_x
+    search_text_x = zone_x + pad_x
 
-        if settings.show_search_bar and state.list.search_query:
-            clear_size = max(int(12 * ui_scale), int(search_h * 0.6))
-            clear_x = pill_x + pill_w - clear_size - 4 * ui_scale
-            clear_y = round(search_bottom - 0.5 + (search_h - clear_size) / 2)
-            state.list.search_clear_rect = (clear_x, clear_y, clear_size, clear_size)
-        else:
-            state.list.search_clear_rect = None
-            state.list.search_clear_hovered = False
+    if settings.show_search_bar and state.list.search_query:
+        clear_size = max(int(12 * ui_scale), int(search_h * 0.6))
+        clear_x = pill_x + pill_w - clear_size - 4 * ui_scale
+        clear_y = round(search_bottom - 0.5 + (search_h - clear_size) / 2)
+        state.list.search_clear_rect = (clear_x, clear_y, clear_size, clear_size)
+    else:
+        state.list.search_clear_rect = None
+        state.list.search_clear_hovered = False
 
-        zone_scissor = (
-            int(zone_x + 1),
-            int(zone_y + 1),
-            max(0, int(zone_w - 2)),
-            max(0, int(zone_h - 2)),
-        )
+    zone_scissor = (
+        int(zone_x + 1),
+        int(zone_y + 1),
+        max(0, int(zone_w - 2)),
+        max(0, int(zone_h - 2)),
+    )
 
-        view_scissor = (
-            int(zone_x + 1),
-            int(view_bottom),
-            max(0, int(zone_w - 2)),
-            max(0, int(view_top - view_bottom)),
-        )
+    view_scissor = (
+        int(zone_x + 1),
+        int(view_bottom),
+        max(0, int(zone_w - 2)),
+        max(0, int(view_top - view_bottom)),
+    )
 
-        return {
-            "font_size": font_size,
-            "row_h": row_h,
-            "line_h": line_h,
-            "widest_count": widest_count,
-            "expanded": expanded,
-            "row_draw_h": row_draw_h,
-            "swatch": swatch,
-            "swatch_gap": swatch_gap,
-            "icon_col_x": icon_col_x,
-            "children": children,
-            "total_h": total_h,
-            "zone_x": zone_x,
-            "zone_w": zone_w,
-            "zone_y": zone_y,
-            "zone_h": zone_h,
-            "search_draw_h": search_draw_h,
-            "search_pad_v": search_pad_v,
-            "search_pill_y": search_bottom + row_gap_half,
-            "view_top": view_top,
-            "view_bottom": view_bottom,
-            "view_h": view_h,
-            "scroll_max": scroll_max,
-            "header_slot_bottom": header_slot_bottom,
-            "show_type_colors": show_type_colors,
-            "content_x": content_x,
-            "count_right": count_right,
-            "label_x": label_x,
-            "label_max_width": label_max_width,
-            "show_counts": show_counts,
-            "text_y_off": text_y_off,
-            "text_color": text_color,
-            "count_color": count_color,
-            "selection_color": selection_color,
-            "active_color": active_color,
-            "match_color": match_color,
-            "selection_fill_color": selection_fill_color,
-            "active_fill_color": active_fill_color,
-            "active_border_color": active_border_color,
-            "type_colors": type_colors,
-            "type_node_colors": type_node_colors,
-            "type_selected_counts": type_selected_counts,
-            "type_active": type_active,
-            "hover_color": hover_color,
-            "pill_x": pill_x,
-            "pill_w": pill_w,
-            "search_text_x": search_text_x,
-            "zone_scissor": zone_scissor,
-            "view_scissor": view_scissor,
-        }
+    return {
+        "font_size": font_size,
+        "row_h": row_h,
+        "line_h": line_h,
+        "widest_count": widest_count,
+        "expanded": expanded,
+        "row_draw_h": row_draw_h,
+        "swatch": swatch,
+        "swatch_gap": swatch_gap,
+        "icon_col_x": icon_col_x,
+        "children": children,
+        "total_h": total_h,
+        "zone_x": zone_x,
+        "zone_w": zone_w,
+        "zone_y": zone_y,
+        "zone_h": zone_h,
+        "search_draw_h": search_draw_h,
+        "search_pad_v": search_pad_v,
+        "search_pill_y": search_bottom + row_gap_half,
+        "view_top": view_top,
+        "view_bottom": view_bottom,
+        "view_h": view_h,
+        "scroll_max": scroll_max,
+        "header_slot_bottom": header_slot_bottom,
+        "show_type_colors": show_type_colors,
+        "content_x": content_x,
+        "count_right": count_right,
+        "label_x": label_x,
+        "label_max_width": label_max_width,
+        "show_counts": show_counts,
+        "text_y_off": text_y_off,
+        "text_color": text_color,
+        "count_color": count_color,
+        "selection_color": selection_color,
+        "active_color": active_color,
+        "match_color": match_color,
+        "selection_fill_color": selection_fill_color,
+        "active_fill_color": active_fill_color,
+        "active_border_color": active_border_color,
+        "type_colors": type_colors,
+        "type_node_colors": type_node_colors,
+        "type_selected_counts": type_selected_counts,
+        "type_active": type_active,
+        "hover_color": hover_color,
+        "pill_x": pill_x,
+        "pill_w": pill_w,
+        "search_text_x": search_text_x,
+        "zone_scissor": zone_scissor,
+        "view_scissor": view_scissor,
+    }
 
 
 def _draw_list_fills(
@@ -1078,200 +1073,199 @@ def _draw_list_fills(
     header_has_visible: set,
 ) -> None:
     """Draw search pill, zebra bands, row fills, guides, and hit rects."""
-    with _Timer("type_list.pills"):
-        pill_x = geo["pill_x"]
-        pill_w = geo["pill_w"]
-        row_draw_h = geo["row_draw_h"]
-        row_h = geo["row_h"]
+    pill_x = geo["pill_x"]
+    pill_w = geo["pill_w"]
+    row_draw_h = geo["row_draw_h"]
+    row_h = geo["row_h"]
 
-        active_fill_color = geo["active_fill_color"]
-        active_border_color = geo["active_border_color"]
+    active_fill_color = geo["active_fill_color"]
+    active_border_color = geo["active_border_color"]
 
-        selection_fill_color = geo["selection_fill_color"]
-        hover_color = geo["hover_color"]
+    selection_fill_color = geo["selection_fill_color"]
+    hover_color = geo["hover_color"]
 
-        type_active = geo["type_active"]
-        type_selected_counts = geo["type_selected_counts"]
+    type_active = geo["type_active"]
+    type_selected_counts = geo["type_selected_counts"]
 
-        content_x = geo["content_x"]
-        swatch = geo["swatch"]
-        swatch_gap = geo["swatch_gap"]
+    content_x = geo["content_x"]
+    swatch = geo["swatch"]
+    swatch_gap = geo["swatch_gap"]
 
-        children = geo["children"]
-        expanded = geo["expanded"]
+    children = geo["children"]
+    expanded = geo["expanded"]
 
-        type_colors = geo["type_colors"]
-        type_node_colors = geo["type_node_colors"]
-        show_type_colors = geo["show_type_colors"]
+    type_colors = geo["type_colors"]
+    type_node_colors = geo["type_node_colors"]
+    show_type_colors = geo["show_type_colors"]
 
-        zone_scissor = geo["zone_scissor"]
-        view_scissor = geo["view_scissor"]
+    zone_scissor = geo["zone_scissor"]
+    view_scissor = geo["view_scissor"]
 
-        search_pill_y = geo["search_pill_y"]
-        search_draw_h = geo["search_draw_h"]
-        header_slot_bottom = geo["header_slot_bottom"]
+    search_pill_y = geo["search_pill_y"]
+    search_draw_h = geo["search_draw_h"]
+    header_slot_bottom = geo["header_slot_bottom"]
 
-        fill = _draw_filled_rounded_rect
-        border = _draw_rounded_rect_border
-        guide = _draw_expand_guide_line
-        header_color = _header_type_color
+    fill = _draw_filled_rounded_rect
+    border = _draw_rounded_rect_border
+    guide = _draw_expand_guide_line
+    header_color = _header_type_color
 
-        radius = 4.0 * ui_scale
-        active_border_w = 0.5 * ui_scale
+    radius = 4.0 * ui_scale
+    active_border_w = 0.5 * ui_scale
 
-        band_color = (1.0, 1.0, 1.0, 0.002 * master_alpha)
+    band_color = (1.0, 1.0, 1.0, 0.002 * master_alpha)
 
-        hovered = state.list.hovered_type_label
-        hovered_child = state.list.hovered_list_row
+    hovered = state.list.hovered_type_label
+    hovered_child = state.list.hovered_list_row
 
-        if settings.show_search_bar:
-            gpu.state.scissor_set(*zone_scissor)
+    if settings.show_search_bar:
+        gpu.state.scissor_set(*zone_scissor)
 
-            if state.list.search_focused:
-                fill(
-                    pill_x,
-                    search_pill_y,
-                    pill_w,
-                    search_draw_h,
-                    radius,
-                    (0.0, 0.0, 0.0, 0.6 * master_alpha),
-                )
-            else:
-                fill(
-                    pill_x,
-                    search_pill_y,
-                    pill_w,
-                    search_draw_h,
-                    radius,
-                    (0.0, 0.0, 0.0, 0.3 * master_alpha),
-                )
-
-            border(
+        if state.list.search_focused:
+            fill(
                 pill_x,
                 search_pill_y,
                 pill_w,
                 search_draw_h,
                 radius,
-                _alpha_mul(colors["bg_border"], master_alpha),
-                0.5,
+                (0.0, 0.0, 0.0, 0.6 * master_alpha),
+            )
+        else:
+            fill(
+                pill_x,
+                search_pill_y,
+                pill_w,
+                search_draw_h,
+                radius,
+                (0.0, 0.0, 0.0, 0.3 * master_alpha),
             )
 
-            gpu.state.scissor_set(*view_scissor)
+        border(
+            pill_x,
+            search_pill_y,
+            pill_w,
+            search_draw_h,
+            radius,
+            _alpha_mul(colors["bg_border"], master_alpha),
+            0.5,
+        )
 
-        # Zebra bands.
-        for (
-            _kind,
-            _label,
-            _node_name,
-            _slot_bottom,
-            row_idx,
-            draw_y,
-            _node,
-            _child_active,
-            _child_selected,
-        ) in visible_rows:
-            if row_idx & 1:
-                fill(pill_x, draw_y, pill_w, row_draw_h, 0.0, band_color)
+        gpu.state.scissor_set(*view_scissor)
 
-        # Header fills, outlines, and hit rects.
-        header_rects = []
-        toggle_rects = {}
+    # Zebra bands.
+    for (
+        _kind,
+        _label,
+        _node_name,
+        _slot_bottom,
+        row_idx,
+        draw_y,
+        _node,
+        _child_active,
+        _child_selected,
+    ) in visible_rows:
+        if row_idx & 1:
+            fill(pill_x, draw_y, pill_w, row_draw_h, 0.0, band_color)
 
-        for (
-            kind,
-            label,
-            _node_name,
-            slot_bottom,
-            _row_idx,
-            draw_y,
-            _node,
-            _child_active,
-            _child_selected,
-        ) in visible_rows:
-            if kind != _ROW_HEADER:
-                continue
+    # Header fills, outlines, and hit rects.
+    header_rects = []
+    toggle_rects = {}
 
-            is_active = label == type_active
+    for (
+        kind,
+        label,
+        _node_name,
+        slot_bottom,
+        _row_idx,
+        draw_y,
+        _node,
+        _child_active,
+        _child_selected,
+    ) in visible_rows:
+        if kind != _ROW_HEADER:
+            continue
 
-            if is_active:
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, active_fill_color)
-            elif type_selected_counts.get(label, 0) > 0:
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, selection_fill_color)
+        is_active = label == type_active
 
-            if hovered == label:
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, hover_color)
+        if is_active:
+            fill(pill_x, draw_y, pill_w, row_draw_h, radius, active_fill_color)
+        elif type_selected_counts.get(label, 0) > 0:
+            fill(pill_x, draw_y, pill_w, row_draw_h, radius, selection_fill_color)
 
-            if is_active:
-                border(pill_x, draw_y, pill_w, row_draw_h, radius, active_border_color, active_border_w)
+        if hovered == label:
+            fill(pill_x, draw_y, pill_w, row_draw_h, radius, hover_color)
 
-            header_rects.append((pill_x, slot_bottom, pill_w, row_h, label))
+        if is_active:
+            border(pill_x, draw_y, pill_w, row_draw_h, radius, active_border_color, active_border_w)
 
-            if entry_map.get(label, _DEFAULT_ENTRY)[2] > 1:
-                toggle_rects[label] = (content_x, slot_bottom, swatch + swatch_gap, row_h)
+        header_rects.append((pill_x, slot_bottom, pill_w, row_h, label))
 
-        state.list.row_rects = header_rects
-        state.list.toggle_rects = toggle_rects
+        if entry_map.get(label, _DEFAULT_ENTRY)[2] > 1:
+            toggle_rects[label] = (content_x, slot_bottom, swatch + swatch_gap, row_h)
 
-        # Child fills.
-        child_rects = []
+    state.list.row_rects = header_rects
+    state.list.toggle_rects = toggle_rects
 
-        for (
-            kind,
-            label,
-            node_name,
-            slot_bottom,
-            _row_idx,
-            draw_y,
-            _node,
-            child_active,
-            child_selected,
-        ) in visible_rows:
-            if kind != _ROW_CHILD:
-                continue
+    # Child fills.
+    child_rects = []
 
-            if child_active:
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, active_fill_color)
-            elif child_selected:
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, selection_fill_color)
+    for (
+        kind,
+        label,
+        node_name,
+        slot_bottom,
+        _row_idx,
+        draw_y,
+        _node,
+        child_active,
+        child_selected,
+    ) in visible_rows:
+        if kind != _ROW_CHILD:
+            continue
 
-            if child_active:
-                border(pill_x, draw_y, pill_w, row_draw_h, radius, active_border_color, active_border_w)
+        if child_active:
+            fill(pill_x, draw_y, pill_w, row_draw_h, radius, active_fill_color)
+        elif child_selected:
+            fill(pill_x, draw_y, pill_w, row_draw_h, radius, selection_fill_color)
 
-            if hovered_child == (label, node_name):
-                fill(pill_x, draw_y, pill_w, row_draw_h, radius, hover_color)
+        if child_active:
+            border(pill_x, draw_y, pill_w, row_draw_h, radius, active_border_color, active_border_w)
 
-            child_rects.append((pill_x, slot_bottom, pill_w, row_h, label, node_name))
+        if hovered_child == (label, node_name):
+            fill(pill_x, draw_y, pill_w, row_draw_h, radius, hover_color)
 
-        state.list.node_rects = child_rects
+        child_rects.append((pill_x, slot_bottom, pill_w, row_h, label, node_name))
 
-        # Expand guide lines (on top of the row fills).
-        children_get = children.get
+    state.list.node_rects = child_rects
 
-        for label in header_has_visible:
-            if label not in expanded:
-                continue
+    # Expand guide lines (on top of the row fills).
+    children_get = children.get
 
-            child_count = len(children_get(label, ()))
-            if child_count <= 0:
-                continue
+    for label in header_has_visible:
+        if label not in expanded:
+            continue
 
-            guide_top = header_slot_bottom.get(label)
-            if guide_top is None:
-                continue
+        child_count = len(children_get(label, ()))
+        if child_count <= 0:
+            continue
 
-            color = header_color(label, children, type_node_colors, type_colors, colors)
+        guide_top = header_slot_bottom.get(label)
+        if guide_top is None:
+            continue
 
-            line_color = (
-                _alpha_mul(color, master_alpha) if show_type_colors else _alpha_mul(colors["text"], 0.1 * master_alpha)
-            )
+        color = header_color(label, children, type_node_colors, type_colors, colors)
 
-            guide(
-                round(content_x + swatch / 2),
-                guide_top - 1,
-                child_count * row_h - 2,
-                ui_scale,
-                line_color,
-            )
+        line_color = (
+            _alpha_mul(color, master_alpha) if show_type_colors else _alpha_mul(colors["text"], 0.1 * master_alpha)
+        )
+
+        guide(
+            round(content_x + swatch / 2),
+            guide_top - 1,
+            child_count * row_h - 2,
+            ui_scale,
+            line_color,
+        )
 
 
 def _draw_list_text(
@@ -1287,215 +1281,214 @@ def _draw_list_text(
     entry_map: dict,
 ) -> None:
     """Draw glyph batch, row labels, counts, and search UI text."""
-    with _Timer("type_list.text"):
-        _draw_list_glyph_batch(
-            state,
-            geo["zone_x"],
-            round(geo["view_top"] + state.list.scroll),
+    _draw_list_glyph_batch(
+        state,
+        geo["zone_x"],
+        round(geo["view_top"] + state.list.scroll),
+    )
+
+    font_id = TYPE_LIST_FONT_ID
+    blf.size(font_id, geo["font_size"])
+
+    with_shadow = settings.show_text_shadow
+    if with_shadow:
+        blf.enable(font_id, blf.SHADOW)
+        blf.shadow(font_id, 3, 0, 0, 0, 255)
+        blf.shadow_offset(font_id, 0, -1)
+
+    label_x = geo["label_x"]
+    label_max_width = geo["label_max_width"]
+    icon_col_x = geo["icon_col_x"]
+    count_right = geo["count_right"]
+    row_h = geo["row_h"]
+    line_h = geo["line_h"]
+    zone_y = geo["zone_y"]
+    zone_h = geo["zone_h"]
+    show_counts = geo["show_counts"]
+    text_y_off = geo["text_y_off"]
+
+    text_color = geo["text_color"]
+    count_color = geo["count_color"]
+    selection_color = geo["selection_color"]
+    active_color = geo["active_color"]
+    match_color = geo["match_color"]
+
+    type_active = geo["type_active"]
+    type_selected_counts = geo["type_selected_counts"]
+    children = geo["children"]
+
+    search_pill_y = geo["search_pill_y"]
+    search_pad_v = geo["search_pad_v"]
+    search_draw_h = geo["search_draw_h"]
+    search_text_x = geo["search_text_x"]
+
+    view_top = geo["view_top"]
+    view_bottom = geo["view_bottom"]
+    zone_scissor = geo["zone_scissor"]
+    view_scissor = geo["view_scissor"]
+
+    child_label_x = label_x + icon_col_x
+    child_label_max_width = max(0.0, count_right - child_label_x)
+
+    child_clip_left = int(child_label_x)
+    child_clip_right = int(child_label_x + child_label_max_width)
+
+    clip_top = int(zone_y - row_h)
+    clip_bottom = int(zone_y + zone_h + row_h)
+
+    header_clip_left = int(label_x)
+    header_clip_right = int(label_x + label_max_width)
+
+    count_clip_right = int(count_right + geo["widest_count"]) if show_counts else 0
+
+    blf.enable(font_id, blf.CLIPPING)
+
+    search_query = state.list.search_query
+    norm_query = normalize_query(search_query)
+
+    if settings.show_search_bar:
+        search_cursor = min(max(state.list.search_cursor, 0), len(search_query))
+        search_text_y = search_pill_y + search_pad_v
+
+        clear_rect = state.list.search_clear_rect
+        search_text_right = clear_rect[0] - 2 * ui_scale if clear_rect else count_right
+
+        gpu.state.scissor_set(*zone_scissor)
+
+        icon_color = text_color if search_query else count_color
+        icon_size = search_draw_h * 0.55
+        _draw_search_filter_icon(
+            search_text_x,
+            search_pill_y + (search_draw_h - icon_size) / 2,
+            icon_size,
+            icon_color,
+            ui_scale,
         )
 
-        font_id = TYPE_LIST_FONT_ID
-        blf.size(font_id, geo["font_size"])
+        search_text_start_x = search_text_x + icon_size + 3 * ui_scale
+        state.list.search_text_start_x = search_text_start_x
 
-        with_shadow = settings.show_text_shadow
-        if with_shadow:
-            blf.enable(font_id, blf.SHADOW)
-            blf.shadow(font_id, 3, 0, 0, 0, 255)
-            blf.shadow_offset(font_id, 0, -1)
+        if state.list.search_focused:
+            caret_x = round(
+                search_text_start_x
+                + (blf.dimensions(font_id, search_query[:search_cursor])[0] if search_query else 0.0)
+            )
 
-        label_x = geo["label_x"]
-        label_max_width = geo["label_max_width"]
-        icon_col_x = geo["icon_col_x"]
-        count_right = geo["count_right"]
-        row_h = geo["row_h"]
-        line_h = geo["line_h"]
-        zone_y = geo["zone_y"]
-        zone_h = geo["zone_h"]
-        show_counts = geo["show_counts"]
-        text_y_off = geo["text_y_off"]
+            _draw_filled_rounded_rect(
+                caret_x,
+                round(search_pill_y),
+                max(2.0, 2.2 * ui_scale),
+                search_draw_h,
+                0.0,
+                _alpha_mul(geo["active_border_color"], master_alpha),
+            )
 
-        text_color = geo["text_color"]
-        count_color = geo["count_color"]
-        selection_color = geo["selection_color"]
-        active_color = geo["active_color"]
-        match_color = geo["match_color"]
+        search_text = search_query if search_query else "Filter"
 
-        type_active = geo["type_active"]
-        type_selected_counts = geo["type_selected_counts"]
-        children = geo["children"]
+        blf.clipping(font_id, int(search_text_start_x), clip_top, int(search_text_right), clip_bottom)
+        blf.position(font_id, search_text_start_x, search_text_y, 0)
+        blf.color(font_id, *(text_color if search_query else count_color))
+        blf.draw(font_id, search_text)
 
-        search_pill_y = geo["search_pill_y"]
-        search_pad_v = geo["search_pad_v"]
-        search_draw_h = geo["search_draw_h"]
-        search_text_x = geo["search_text_x"]
-
-        view_top = geo["view_top"]
-        view_bottom = geo["view_bottom"]
-        zone_scissor = geo["zone_scissor"]
-        view_scissor = geo["view_scissor"]
-
-        child_label_x = label_x + icon_col_x
-        child_label_max_width = max(0.0, count_right - child_label_x)
-
-        child_clip_left = int(child_label_x)
-        child_clip_right = int(child_label_x + child_label_max_width)
-
-        clip_top = int(zone_y - row_h)
-        clip_bottom = int(zone_y + zone_h + row_h)
-
-        header_clip_left = int(label_x)
-        header_clip_right = int(label_x + label_max_width)
-
-        count_clip_right = int(count_right + geo["widest_count"]) if show_counts else 0
-
-        blf.enable(font_id, blf.CLIPPING)
-
-        search_query = state.list.search_query
-        norm_query = normalize_query(search_query)
-
-        if settings.show_search_bar:
-            search_cursor = min(max(state.list.search_cursor, 0), len(search_query))
-            search_text_y = search_pill_y + search_pad_v
-
-            clear_rect = state.list.search_clear_rect
-            search_text_right = clear_rect[0] - 2 * ui_scale if clear_rect else count_right
-
-            gpu.state.scissor_set(*zone_scissor)
-
-            icon_color = text_color if search_query else count_color
-            icon_size = search_draw_h * 0.55
-            _draw_search_filter_icon(
-                search_text_x,
-                search_pill_y + (search_draw_h - icon_size) / 2,
-                icon_size,
-                icon_color,
+        if clear_rect:
+            _draw_search_clear_button(
+                clear_rect,
+                state.list.search_clear_hovered,
+                colors,
+                master_alpha,
                 ui_scale,
             )
 
-            search_text_start_x = search_text_x + icon_size + 3 * ui_scale
-            state.list.search_text_start_x = search_text_start_x
+        gpu.state.scissor_set(*view_scissor)
 
-            if state.list.search_focused:
-                caret_x = round(
-                    search_text_start_x
-                    + (blf.dimensions(font_id, search_query[:search_cursor])[0] if search_query else 0.0)
-                )
+        if not entries and search_query:
+            no_match_y = (view_bottom + view_top - line_h) / 2 + 1
 
-                _draw_filled_rounded_rect(
-                    caret_x,
-                    round(search_pill_y),
-                    max(2.0, 2.2 * ui_scale),
-                    search_draw_h,
-                    0.0,
-                    _alpha_mul(geo["active_border_color"], master_alpha),
-                )
+            blf.clipping(
+                font_id,
+                int(search_text_start_x),
+                int(view_bottom - row_h),
+                int(count_right),
+                int(view_top + row_h),
+            )
 
-            search_text = search_query if search_query else "Filter"
+            blf.position(font_id, search_text_start_x, no_match_y, 0)
+            blf.color(font_id, *count_color)
+            blf.draw(font_id, "No matches")
 
-            blf.clipping(font_id, int(search_text_start_x), clip_top, int(search_text_right), clip_bottom)
-            blf.position(font_id, search_text_start_x, search_text_y, 0)
-            blf.color(font_id, *(text_color if search_query else count_color))
-            blf.draw(font_id, search_text)
+    for (
+        kind,
+        label,
+        node_name,
+        _slot_bottom,
+        _row_idx,
+        draw_y,
+        node,
+        child_active,
+        child_selected,
+    ) in visible_rows:
+        text_y = draw_y + text_y_off
 
-            if clear_rect:
-                _draw_search_clear_button(
-                    clear_rect,
-                    state.list.search_clear_hovered,
-                    colors,
-                    master_alpha,
-                    ui_scale,
-                )
+        if kind == _ROW_HEADER:
+            count_text, count_width, full_count = entry_map.get(label, _DEFAULT_ENTRY)
 
-            gpu.state.scissor_set(*view_scissor)
+            is_active = label == type_active
+            is_sel = type_selected_counts.get(label, 0) > 0
 
-            if not entries and search_query:
-                no_match_y = (view_bottom + view_top - line_h) / 2 + 1
-
-                blf.clipping(
-                    font_id,
-                    int(search_text_start_x),
-                    int(view_bottom - row_h),
-                    int(count_right),
-                    int(view_top + row_h),
-                )
-
-                blf.position(font_id, search_text_start_x, no_match_y, 0)
-                blf.color(font_id, *count_color)
-                blf.draw(font_id, "No matches")
-
-        for (
-            kind,
-            label,
-            node_name,
-            _slot_bottom,
-            _row_idx,
-            draw_y,
-            node,
-            child_active,
-            child_selected,
-        ) in visible_rows:
-            text_y = draw_y + text_y_off
-
-            if kind == _ROW_HEADER:
-                count_text, count_width, full_count = entry_map.get(label, _DEFAULT_ENTRY)
-
-                is_active = label == type_active
-                is_sel = type_selected_counts.get(label, 0) > 0
-
-                if is_active:
-                    label_color = active_color
-                elif is_sel:
-                    label_color = selection_color
-                else:
-                    label_color = text_color
-
-                header_text = _group_header_text(label, full_count, children, nodes_by_name)
-
-                blf.clipping(font_id, header_clip_left, clip_top, header_clip_right, clip_bottom)
-                _draw_text_with_match(
-                    font_id,
-                    label_x,
-                    text_y,
-                    header_text,
-                    label_color,
-                    match_color,
-                    norm_query,
-                )
-
-                if show_counts:
-                    blf.clipping(font_id, header_clip_right, clip_top, count_clip_right, clip_bottom)
-                    blf.position(font_id, count_right - count_width, text_y, 0)
-                    blf.color(font_id, *count_color)
-                    blf.draw(font_id, count_text)
-
+            if is_active:
+                label_color = active_color
+            elif is_sel:
+                label_color = selection_color
             else:
-                if child_active:
-                    label_color = active_color
-                elif child_selected:
-                    label_color = selection_color
-                else:
-                    label_color = text_color
+                label_color = text_color
 
-                blf.clipping(font_id, child_clip_left, clip_top, child_clip_right, clip_bottom)
+            header_text = _group_header_text(label, full_count, children, nodes_by_name)
 
-                label_text = _child_label_text(node_name, node)
+            blf.clipping(font_id, header_clip_left, clip_top, header_clip_right, clip_bottom)
+            _draw_text_with_match(
+                font_id,
+                label_x,
+                text_y,
+                header_text,
+                label_color,
+                match_color,
+                norm_query,
+            )
 
-                _draw_text_with_match(
-                    font_id,
-                    child_label_x,
-                    text_y,
-                    label_text,
-                    label_color,
-                    match_color,
-                    norm_query,
-                )
+            if show_counts:
+                blf.clipping(font_id, header_clip_right, clip_top, count_clip_right, clip_bottom)
+                blf.position(font_id, count_right - count_width, text_y, 0)
+                blf.color(font_id, *count_color)
+                blf.draw(font_id, count_text)
 
-        blf.disable(font_id, blf.CLIPPING)
+        else:
+            if child_active:
+                label_color = active_color
+            elif child_selected:
+                label_color = selection_color
+            else:
+                label_color = text_color
 
-        if with_shadow:
-            blf.disable(font_id, blf.SHADOW)
+            blf.clipping(font_id, child_clip_left, clip_top, child_clip_right, clip_bottom)
 
-        gpu.state.blend_set("ALPHA")
+            label_text = _child_label_text(node_name, node)
+
+            _draw_text_with_match(
+                font_id,
+                child_label_x,
+                text_y,
+                label_text,
+                label_color,
+                match_color,
+                norm_query,
+            )
+
+    blf.disable(font_id, blf.CLIPPING)
+
+    if with_shadow:
+        blf.disable(font_id, blf.SHADOW)
+
+    gpu.state.blend_set("ALPHA")
 
 
 def _draw_list_scrollbar(
@@ -1506,38 +1499,37 @@ def _draw_list_scrollbar(
     geo: dict,
 ) -> None:
     """Draw the vertical list scrollbar thumb when content overflows."""
-    with _Timer("type_list.scrollbar"):
-        state.list.scrollbar_thumb = None
-        state.list.scrollbar_track = None
+    state.list.scrollbar_thumb = None
+    state.list.scrollbar_track = None
 
-        scroll_max = geo["scroll_max"]
-        total_h = geo["total_h"]
+    scroll_max = geo["scroll_max"]
+    total_h = geo["total_h"]
 
-        if scroll_max <= 0 or total_h <= 0:
-            return
+    if scroll_max <= 0 or total_h <= 0:
+        return
 
-        gpu.state.blend_set("ALPHA")
+    gpu.state.blend_set("ALPHA")
 
-        _bar_thickness, bar_offset = _get_scrollbar_style(ui_scale)
+    _bar_thickness, bar_offset = _get_scrollbar_style(ui_scale)
 
-        frac = state.list.scroll / scroll_max
-        active = state.list.hovered_scrollbar or state.list.scrollbar_dragging
-        thick = _scrollbar_thickness(ui_scale, active)
+    frac = state.list.scroll / scroll_max
+    active = state.list.hovered_scrollbar or state.list.scrollbar_dragging
+    thick = _scrollbar_thickness(ui_scale, active)
 
-        thumb_rect, track_rect = _draw_scrollbar_thumb(
-            round(geo["zone_x"] + geo["zone_w"] - thick - bar_offset),
-            geo["zone_y"] + bar_offset,
-            max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset, 0.0),
-            geo["view_h"] / total_h,
-            1.0 - frac,
-            colors,
-            master_alpha,
-            ui_scale,
-            active=active,
-        )
+    thumb_rect, track_rect = _draw_scrollbar_thumb(
+        round(geo["zone_x"] + geo["zone_w"] - thick - bar_offset),
+        geo["zone_y"] + bar_offset,
+        max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset, 0.0),
+        geo["view_h"] / total_h,
+        1.0 - frac,
+        colors,
+        master_alpha,
+        ui_scale,
+        active=active,
+    )
 
-        state.list.scrollbar_thumb = thumb_rect
-        state.list.scrollbar_track = track_rect
+    state.list.scrollbar_thumb = thumb_rect
+    state.list.scrollbar_track = track_rect
 
 
 # ---------------------------------------------------------------------------
@@ -1577,19 +1569,18 @@ def _draw_type_list(
 
     node_tree = bpy.context.space_data.edit_tree if bpy.context.space_data else None
 
-    with _Timer("type_list.cache"):
-        key = _type_list_cache_key(state, settings, colors, master_alpha, ui_scale)
+    key = _type_list_cache_key(state, settings, colors, master_alpha, ui_scale)
 
-        if key != state.cache.list_key or not state.cache.list_layout:
-            _build_type_list_cache(
-                state,
-                settings,
-                node_tree,
-                key,
-                colors,
-                master_alpha,
-                ui_scale,
-            )
+    if key != state.cache.list_key or not state.cache.list_layout:
+        _build_type_list_cache(
+            state,
+            settings,
+            node_tree,
+            key,
+            colors,
+            master_alpha,
+            ui_scale,
+        )
 
     entries = state.cache.list_entries or []
 
@@ -1668,64 +1659,63 @@ def _draw_type_list(
 
         active_node = node_tree.nodes.active if node_tree else None
 
-        with _Timer("type_list.rows"):
-            view_top = geo["view_top"]
-            view_bottom = geo["view_bottom"]
-            scroll = state.list.scroll
-            row_h = geo["row_h"]
+        view_top = geo["view_top"]
+        view_bottom = geo["view_bottom"]
+        scroll = state.list.scroll
+        row_h = geo["row_h"]
 
-            visible_rows = []
-            visible_keys = []
-            visible_index = {}
-            header_has_visible = set()
+        visible_rows = []
+        visible_keys = []
+        visible_index = {}
+        header_has_visible = set()
 
-            resolve_child = _resolve_child_state
+        resolve_child = _resolve_child_state
 
-            for row_idx, (kind, label, node_name, local_y) in enumerate(rows):
-                slot_top = view_top + scroll + local_y
-                slot_bottom = slot_top - row_h
+        for row_idx, (kind, label, node_name, local_y) in enumerate(rows):
+            slot_top = view_top + scroll + local_y
+            slot_bottom = slot_top - row_h
 
-                if slot_top <= view_bottom or slot_bottom >= view_top:
-                    continue
+            if slot_top <= view_bottom or slot_bottom >= view_top:
+                continue
 
-                draw_y = round(slot_bottom + row_gap_half)
+            draw_y = round(slot_bottom + row_gap_half)
 
-                if kind == _ROW_CHILD:
-                    node, child_active, child_selected = resolve_child(
-                        nodes_by_name,
-                        node_name,
-                        active_node,
-                    )
-                else:
-                    node = None
-                    child_active = False
-                    child_selected = False
-
-                visible_rows.append(
-                    (
-                        kind,
-                        label,
-                        node_name,
-                        slot_bottom,
-                        row_idx,
-                        draw_y,
-                        node,
-                        child_active,
-                        child_selected,
-                    )
+            if kind == _ROW_CHILD:
+                node, child_active, child_selected = resolve_child(
+                    nodes_by_name,
+                    node_name,
+                    active_node,
                 )
+            else:
+                node = None
+                child_active = False
+                child_selected = False
 
-                if kind == _ROW_HEADER:
-                    row_key = (_ROW_HEADER, label)
-                else:
-                    row_key = (_ROW_CHILD, label, node_name)
+            visible_rows.append(
+                (
+                    kind,
+                    label,
+                    node_name,
+                    slot_bottom,
+                    row_idx,
+                    draw_y,
+                    node,
+                    child_active,
+                    child_selected,
+                )
+            )
 
-                visible_index[row_key] = len(visible_keys)
-                visible_keys.append(row_key)
-                header_has_visible.add(label)
+            if kind == _ROW_HEADER:
+                row_key = (_ROW_HEADER, label)
+            else:
+                row_key = (_ROW_CHILD, label, node_name)
 
-            state.list.visible_row_keys = visible_keys
-            state.list.visible_row_index_map = visible_index
+            visible_index[row_key] = len(visible_keys)
+            visible_keys.append(row_key)
+            header_has_visible.add(label)
+
+        state.list.visible_row_keys = visible_keys
+        state.list.visible_row_index_map = visible_index
 
         _draw_list_fills(
             state,

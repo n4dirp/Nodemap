@@ -28,6 +28,9 @@ logger = logging.getLogger(base_package)
 # final position once movement settles.
 _MOVE_REFRESH_MIN_INTERVAL = 0.016
 
+# Socket types that can carry fields in Geometry Nodes (dashed-wire detection).
+_SUPPORTS_FIELDS = frozenset({"VALUE", "VECTOR", "RGBA", "BOOLEAN", "INT", "ROTATION", "MENU", "MATRIX", "STRING"})
+
 
 class _Timer:
     """Log elapsed milliseconds at TRACE level and become a no-op when disabled."""
@@ -674,27 +677,19 @@ def _link_is_dashed(link) -> bool:
     try:
         ntree = link.from_node.id_data
         if not ntree:
-            logger.debug("LINK DASHED: no id_data on from_node %s", getattr(link.from_node, "name", "?"))
             return False
         if ntree.type != "GEOMETRY":
-            logger.debug("LINK DASHED: tree type=%s (not GEOMETRY)", ntree.type)
             return False
     except (AttributeError, ReferenceError):
-        logger.debug("LINK DASHED: exception getting id_data")
         return False
     from_sock = link.from_socket
     if not from_sock:
-        logger.debug("LINK DASHED: no from_socket")
         return False
     sock_type = getattr(from_sock, "type", None)
-    _SUPPORTS_FIELDS = {"VALUE", "VECTOR", "RGBA", "BOOLEAN", "INT", "ROTATION", "MENU", "MATRIX", "STRING"}
     if sock_type not in _SUPPORTS_FIELDS:
-        logger.debug("LINK DASHED: from_sock.type=%s not in supports_fields set", sock_type)
         return False
     inferred = getattr(from_sock, "inferred_structure_type", None)
     is_dashed = inferred in ("FIELD", "DYNAMIC")
-    logger.debug("LINK DASHED: link %s->%s sock_type=%s inferred=%s dashed=%s",
-                 link.from_node.name, link.to_node.name, sock_type, inferred, is_dashed)
     return is_dashed
 
 
@@ -707,6 +702,7 @@ def _extract_raw_links(node_tree) -> tuple[list[tuple[str, str, str, str]], froz
     """
     raw_links: list[tuple[str, str, str, str]] = []
     dashed_keys: list[tuple[str, str, str, str]] = []
+    is_geometry = node_tree.type == "GEOMETRY"
     for link in node_tree.links:
         from_node = link.from_node
         if from_node and from_node.type != "FRAME":
@@ -717,7 +713,7 @@ def _extract_raw_links(node_tree) -> tuple[list[tuple[str, str, str, str]], froz
                 link.to_socket.identifier,
             )
             raw_links.append(key)
-            if _link_is_dashed(link):
+            if is_geometry and _link_is_dashed(link):
                 dashed_keys.append(key)
     return raw_links, frozenset(dashed_keys)
 
