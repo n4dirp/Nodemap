@@ -14,8 +14,9 @@
 - Smooth animations for frame actions
 
 ### Changed
+- Type list selections now apply on click instead of on release
 - Frame Selected now automatically adjusts the zoom to fit multiple nodes or a frame
-- Improved performance when working with large node graphs
+- Improved performance when working with large node graphs, and when multiple minimaps show the same node tree
 - Added per-tree minimap views, restoring the previous pan and zoom when returning to a node tree
 - All extension options are now available in the addon preferences
 
