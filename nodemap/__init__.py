@@ -15,6 +15,7 @@ import os
 import bpy
 from bpy.types import SpaceNodeEditor
 
+from .core.icons import _load_icons, _unload_icons
 from .core.state import _cleanup_shared_tree_caches, _ensure_area_states, _minimap_window_operators, _registration_state
 from .draw.overlay import draw_minimap
 from .ops.navigate import classes as operator_classes
@@ -64,6 +65,7 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
+    _load_icons()
     _update_logger_from_prefs()
 
     global _draw_handler
@@ -116,3 +118,5 @@ def unregister():
     _minimap_window_operators.clear()
     _cleanup_shared_tree_caches()
     _registration_state["done"] = False
+
+    _unload_icons()

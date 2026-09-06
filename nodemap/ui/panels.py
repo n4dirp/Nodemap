@@ -8,6 +8,7 @@ from bl_ui.utils import PresetPanel
 from bpy.types import Panel
 
 from ..core.helpers import get_addon_preferences
+from ..core.icons import _icon_id
 from ..core.state import _state
 from .presets import PRESET_SUBDIR
 
@@ -149,7 +150,7 @@ def draw_minimap_header_button(self, context):
 
     row = layout.row(align=True)
     row.active = space_node_editor.node_tree is not None and overlay.show_overlays
-    row.operator("nodemap.toggle", text="", depress=minimap_state.enabled, icon="META_PLANE")
+    row.operator("nodemap.toggle", text="", depress=minimap_state.enabled, icon_value=_icon_id("NODEMAP_ICON"))
     row.popover(panel="NODEMAP_PT_popup", text="")
 
 

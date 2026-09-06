@@ -52,7 +52,7 @@ LIST_SWATCH: float = 10.0
 LIST_SWATCH_GAP: float = 5.0
 LIST_COUNT_GAP: float = 8.0
 SCROLLBAR_HIT_PAD: float = 6.0
-LIST_ANIM_FRAMES: dict[str, int] = {"FAST": 10, "MEDIUM": 20}
+TYPE_LIST_ANIM_DURATION: float = 0.06
 EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
 
 # Scrollbar appearance

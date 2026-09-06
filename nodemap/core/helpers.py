@@ -12,7 +12,7 @@ from .. import __package__ as base_package
 from .constants import (
     EMPTY_FINGERPRINT,
     LABEL_MARGIN_PX,
-    LIST_ANIM_FRAMES,
+    TYPE_LIST_ANIM_DURATION,
     TYPE_LIST_FONT_SIZE,
     TYPE_LIST_MAX_WIDTH_PCT,
     TYPE_LIST_MIN_WIDTH,
@@ -308,8 +308,7 @@ def start_list_width_animation(minimap_state, settings) -> None:
     minimap_state.list.anim_active = True
     minimap_state.list.anim_from = minimap_state.list.list_width
     minimap_state.list.anim_target = 0.0 if not settings.show_type_list else -1.0
-    frames = LIST_ANIM_FRAMES.get(settings.pan_speed, 24)
-    minimap_state.list.anim_duration = frames / 60.0
+    minimap_state.list.anim_duration = TYPE_LIST_ANIM_DURATION
     minimap_state.list.anim_start = time.perf_counter()
 
 

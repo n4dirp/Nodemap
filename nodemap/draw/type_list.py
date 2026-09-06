@@ -256,7 +256,8 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
         (time.perf_counter() - state.list.anim_start) / max(state.list.anim_duration, 1e-4),
         1.0,
     )
-    eased = 1.0 - (1.0 - progress) ** 3
+    opening = state.list.anim_target >= state.list.anim_from
+    eased = 1.0 - (1.0 - progress) ** 3 if opening else progress ** 3
     new_width = state.list.anim_from + (state.list.anim_target - state.list.anim_from) * eased
 
     if progress >= 1.0:
