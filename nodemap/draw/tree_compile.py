@@ -40,6 +40,7 @@ def _socket_y(body_top: float, body_bot: float, visible_count: int, socket_index
         return (body_top + body_bot) * 0.5
     return body_top - body_range * (socket_index + 1) / (visible_count + 1)
 
+
 # Socket types that can carry fields in Geometry Nodes (dashed-wire detection).
 _SUPPORTS_FIELDS = frozenset({"VALUE", "VECTOR", "RGBA", "BOOLEAN", "INT", "ROTATION", "MENU", "MATRIX", "STRING"})
 
@@ -67,6 +68,15 @@ class _Timer:
 def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
     """Return True when two fingerprints differ only in the position-sum slot."""
     return old is not None and len(old) == len(current) and old[:1] == current[:1] and old[2:] == current[2:]
+
+
+def _is_bounds_stable_diff(old: tuple | None, current: tuple) -> bool:
+    """Return True when the diff cannot change the tree bounds.
+
+    Bounds depend only on node count, positions, and the hidden/dimension
+    sums, so position, active, selection, mute, and link slots may differ.
+    """
+    return old is not None and len(old) == len(current) and old[0] == current[0] and old[5:8] == current[5:8]
 
 
 def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, master_alpha, ui_scale):

@@ -64,6 +64,7 @@ from .gpu_draw import (
 )
 from .tree_compile import (
     _debounced_compile,
+    _is_bounds_stable_diff,
     _is_move_only_diff,
 )
 from .type_list import _draw_minimap_scrollbars, _draw_type_list, _step_list_width
@@ -1100,15 +1101,16 @@ def draw_minimap() -> None:
         return
     map_x, map_y, map_w, map_h, padding, y_margin = rect
 
-    move_pending = (
+    bounds_frozen = (
         shared.fingerprint is not None
         and shared.fingerprint != current_fingerprint
-        and _is_move_only_diff(shared.fingerprint, current_fingerprint)
+        and _is_bounds_stable_diff(shared.fingerprint, current_fingerprint)
     )
-    # Freeze framing while a move is pending settle: hold the tree bounds so
-    # the map scale/pivot does not creep live during a drag, keeping auto-
-    # bounds, nodes, and wires uniform on the settle frame instead.
-    if not move_pending:
+    # Freeze framing while a bounds-stable diff is pending settle: hold the
+    # tree bounds so the map scale/pivot does not creep live during a drag
+    # (a grab also flips the active/selection slots), keeping auto-bounds,
+    # nodes, and wires uniform on the settle frame instead.
+    if not bounds_frozen:
         bounds = _expand_bounds_margin(raw_bounds, ui_scale, map_h, padding)
         state.view.tree_bounds = bounds
 
