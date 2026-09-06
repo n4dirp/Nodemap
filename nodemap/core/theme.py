@@ -128,25 +128,9 @@ def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> 
     return fallback_color
 
 
-_theme_cache_key: tuple[int, int] = (0, 0)
-_theme_cache_result: dict[str, Any] = {}
-
-
 def _get_node_editor_theme_colors() -> dict[str, Any]:
-    """Fetch theme color palette for the minimap drawing.
-
-    The result is cached across frames and only rebuilt when the settings or
-    active Blender theme object changes.
-    """
+    """Fetch theme color palette for the minimap drawing."""
     prefs = get_addon_preferences()
-    settings_ptr = prefs.settings.as_pointer() if prefs else 0
-    try:
-        theme_ptr = bpy.context.preferences.themes[0].as_pointer() if bpy.context.preferences.themes else 0
-    except Exception:
-        theme_ptr = 0
-    cache_key = (settings_ptr, theme_ptr)
-    if cache_key == _theme_cache_key and _theme_cache_result:
-        return _theme_cache_result
 
     theme_bg = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
     if prefs and prefs.settings.use_custom_background:
@@ -183,7 +167,4 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
     }
-    global _theme_cache_key, _theme_cache_result  # noqa: PLW0603
-    _theme_cache_key = cache_key
-    _theme_cache_result = result
     return result
