@@ -699,7 +699,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         if settings.show_frames:
             col.prop(settings, "show_frame_labels", text="Frame Labels")
         if settings.show_node_labels:
-            col.prop(settings, "compact_node_labels", text="Compact")
+            col.prop(settings, "compact_node_labels", text="Compact Label")
 
         if settings.interactive:
             col = row.column(heading="Buttons")
@@ -728,31 +728,31 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group = layout.column()
         group.label(text="Theme")
         col = group.column()
-        col.prop(self.settings, "opacity", text="Opacity")
+        col.prop(settings, "opacity", text="Opacity")
 
         row = col.row(align=True, heading="Colors")
-        row.prop(self.settings, "use_custom_viewport_fill", text="View Highlight")
+        row.prop(settings, "use_custom_viewport_fill", text="View Highlight")
         sub = row.row(align=True)
-        sub.active = self.settings.use_custom_viewport_fill
-        sub.prop(self.settings, "viewport_fill_color", text="")
+        sub.active = settings.use_custom_viewport_fill
+        sub.prop(settings, "viewport_fill_color", text="")
 
         row = col.row(align=True)
-        row.prop(self.settings, "show_viewport_overlay", text="View Dimming")
+        row.prop(settings, "show_viewport_overlay", text="View Dimming")
         sub = row.row(align=True)
-        sub.active = self.settings.show_viewport_overlay
-        sub.prop(self.settings, "viewport_overlay_color", text="")
+        sub.active = settings.show_viewport_overlay
+        sub.prop(settings, "viewport_overlay_color", text="")
 
         row = col.row(align=True)
-        row.prop(self.settings, "use_custom_background", text="Background")
+        row.prop(settings, "use_custom_background", text="Background")
         sub = row.row(align=True)
-        sub.active = self.settings.use_custom_background
-        sub.prop(self.settings, "background_color", text="")
+        sub.active = settings.use_custom_background
+        sub.prop(settings, "background_color", text="")
 
         row = col.row(align=True)
-        row.prop(self.settings, "use_custom_text", text="Text Color")
+        row.prop(settings, "use_custom_text", text="Text Color")
         sub = row.row(align=True)
-        sub.active = self.settings.use_custom_text
-        sub.prop(self.settings, "text_color", text="")
+        sub.active = settings.use_custom_text
+        sub.prop(settings, "text_color", text="")
         row = col.row(align=True)
         row.prop(settings, "show_node_colors", text="Node Colors")
         row.prop(settings, "show_text_shadow", text="Text Shadows")

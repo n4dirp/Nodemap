@@ -18,7 +18,7 @@ class NODEMAP_PT_popup(Panel):
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
-    bl_ui_units_x = 11
+    bl_ui_units_x = 12
 
     @classmethod
     def poll(cls, context):
@@ -57,27 +57,38 @@ class NODEMAP_PT_popup(Panel):
         header, body = layout.panel("NODEMAP_PT_layout", default_closed=False)
         header.label(text="Objects")
         if body:
-            grid = body.grid_flow(
-                row_major=True,
-                columns=2,
-                even_columns=True,
-                even_rows=True,
-                align=False,
-            )
+            row = body.row()
+            col1 = row.column()
+            col1.prop(settings, "show_frames", text="Frames")
+            col1.prop(settings, "show_node_outline", text="Node Outline")
+            col1.prop(settings, "show_reroutes", text="Reroutes")
+            col1.prop(settings, "show_socket_indicators", text="Sockets")
+            col1.prop(settings, "show_node_count", text="Total Count")
 
-            grid.prop(settings, "show_frames", text="Frames")
-            sub = grid.row()
+            if settings.interactive:
+                col1.separator()
+                col = col1.column(align=True)
+                col.prop(settings, "show_type_list", text="Type List")
+                sub = col.row()
+                sub.active = settings.show_type_list
+                sub.prop(settings, "show_search_bar", text="Filter Bar")
+
+            col2 = row.column()
+            col = col2.column(align=True)
+            col.prop(settings, "show_wires", text="Wires")
+            sub = col.row()
+            sub.active = settings.show_wires
+            sub.prop(settings, "show_dashed_wires", text="Dashed Wires")
+
+            col2.separator()
+            col = col2.column(align=True)
+            col.prop(settings, "show_node_labels", text="Node Labels")
+            sub = col.row()
+            sub.active = settings.show_node_labels
+            sub.prop(settings, "compact_node_labels", text="Compact Labels")
+            sub = col.row()
             sub.active = settings.show_frames
             sub.prop(settings, "show_frame_labels", text="Frame Labels")
-            grid.prop(settings, "show_node_labels", text="Node Labels")
-            grid.prop(settings, "show_node_outline", text="Node Outline")
-            grid.prop(settings, "show_socket_indicators", text="Node Sockets")
-            grid.prop(settings, "show_reroutes", text="Reroutes")
-            grid.prop(settings, "show_node_count", text="Total Count")
-            if settings.interactive:
-                grid.prop(settings, "show_type_list", text="Type List")
-                grid.prop(settings, "show_search_bar", text="Filter Bar")
-            grid.prop(settings, "show_wires", text="Wires")
 
             if settings.interactive:
                 header, body = layout.panel("NODEMAP_PT_buttons", default_closed=False)
@@ -85,7 +96,7 @@ class NODEMAP_PT_popup(Panel):
                 if body:
                     col = body.column()
                     row = col.row()
-                    col = row.column()
+                    col = row.column(align=True)
                     col.prop(settings, "show_frame_all_button", text="Frame All")
                     col.prop(settings, "show_frame_view_button", text="Frame View")
                     if not settings.follow_view:
@@ -95,20 +106,29 @@ class NODEMAP_PT_popup(Panel):
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")
                     col.prop(settings, "show_move_button", text="Move Handle")
 
-            header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
-            header.label(text="Theme")
-            if body:
-                col = body.column()
-                col.prop(settings, "opacity", text="Opacity")
+        header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
+        header.label(text="Theme")
+        if body:
+            col = body.column()
+            col.prop(settings, "opacity", text="Opacity")
 
-                row = col.row()
-                row.prop(settings, "show_node_colors", text="Node Colors")
-                sub = row.row()
-                sub.active = settings.show_wires
-                sub.prop(settings, "show_wire_color", text="Wire Colors")
-                sub = row.row()
-                sub.active = settings.show_wires
-                sub.prop(settings, "show_dashed_wires", text="Dashed Fields")
+            row = col.row(align=True)
+            row.prop(settings, "use_custom_viewport_fill", text="View Highlight")
+            sub = row.row(align=True)
+            sub.active = settings.use_custom_viewport_fill
+            sub.prop(settings, "viewport_fill_color", text="")
+
+            row = col.row(align=True)
+            row.prop(settings, "use_custom_background", text="Background")
+            sub = row.row(align=True)
+            sub.active = settings.use_custom_background
+            sub.prop(settings, "background_color", text="")
+
+            row = col.row()
+            row.prop(settings, "show_node_colors", text="Node Colors")
+            sub = row.row()
+            sub.active = settings.show_wires
+            sub.prop(settings, "show_wire_color", text="Wire Colors")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=True)
         header.label(text="Options")
