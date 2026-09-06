@@ -106,6 +106,9 @@ class NODEMAP_PT_popup(Panel):
                 sub = row.row()
                 sub.active = settings.show_wires
                 sub.prop(settings, "show_wire_color", text="Wire Colors")
+                sub = row.row()
+                sub.active = settings.show_wires
+                sub.prop(settings, "show_dashed_wires", text="Dashed Fields")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=True)
         header.label(text="Options")

@@ -15,7 +15,7 @@ import os
 import bpy
 from bpy.types import SpaceNodeEditor
 
-from .core.state import _ensure_area_states, _minimap_window_operators, _registration_state
+from .core.state import _cleanup_shared_tree_caches, _ensure_area_states, _minimap_window_operators, _registration_state
 from .draw.overlay import draw_minimap
 from .ops.navigate import classes as operator_classes
 from .ui.panels import classes as panel_classes
@@ -114,4 +114,5 @@ def unregister():
             pass
 
     _minimap_window_operators.clear()
+    _cleanup_shared_tree_caches()
     _registration_state["done"] = False

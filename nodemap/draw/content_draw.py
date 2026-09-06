@@ -27,7 +27,8 @@ def _content_pivot(
     state: MinimapState, scale: float, tree_center_x: float, tree_center_y: float
 ) -> tuple[tuple[float, float] | None, float, float, float]:
     """Return the origin, content scale factor, and pivot for the content matrix."""
-    origin = state.cache.tree_data.get("origin") if state.cache.tree_data else None
+    tree_data = state.tree_data()
+    origin = tree_data.get("origin") if tree_data else None
     if not origin:
         return None, 1.0, 0.0, 0.0
     batch_scale = state.cache.batch_scale if state.cache.batch_scale > 0.0 else scale
@@ -96,7 +97,7 @@ def _draw_layer_wire_highlight(
     highlight_batches = state.cache.wire_highlight_batch
     if not (settings.show_wires and highlight_batches):
         return
-    tree_data = state.cache.tree_data
+    tree_data = state.tree_data()
     wire_color = tree_data.get("wire_highlight_color") if tree_data else None
     if wire_color is None:
         return

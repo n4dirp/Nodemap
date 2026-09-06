@@ -614,7 +614,10 @@ def _ensure_minimap_batches(
     wire_thickness: float = 1.0,
 ):
     """Bake content batches in map-local space, rebuilding only when stale."""
-    tree_data = minimap_state.cache.tree_data
+    shared = minimap_state.shared
+    if shared is None:
+        return
+    tree_data = shared.tree_data
     if tree_data is None:
         return
     origin = tree_data.get("origin")
@@ -623,7 +626,7 @@ def _ensure_minimap_batches(
 
     query = minimap_state.list.search_query.strip()
     key = (
-        minimap_state.cache.position_version,
+        shared.position_version,
         round(ui_scale, 3),
         show_borders,
         bool(query and list_visible),
@@ -638,7 +641,7 @@ def _ensure_minimap_batches(
     # must gate the early return too — otherwise wires stay frozen at their
     # pre-drag positions until an unrelated rebuild trigger fires.
     wire_key = (
-        minimap_state.cache.tree_version,
+        shared.tree_version,
         round(ui_scale, 3),
         int(wire_curvature),
         round(wire_thickness, 3),

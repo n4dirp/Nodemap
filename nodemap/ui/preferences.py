@@ -65,12 +65,13 @@ def _update_invalidate_all(self, context):
         return
     try:
         from ..core.helpers import redraw_ui
-        from ..core.state import _minimap_state
+        from ..core.state import _minimap_state, _shared_tree_caches
 
         for state in _minimap_state.values():
-            state.cache.fingerprint = None
             state.cache._batches_dirty = True
-            state.cache.force_immediate = True
+        for shared in _shared_tree_caches.values():
+            shared.fingerprint = None
+            shared.force_immediate = True
         redraw_ui("NODE_EDITOR")
     except (ImportError, AttributeError):
         pass
@@ -263,7 +264,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     background_color: FloatVectorProperty(
         name="Background Color",
         description="Custom background color for the minimap overlay",
-        default=(0.2, 0.2, 0.2, 1.0),
+        default=(0.25, 0.25, 0.25, 1.0),
         size=4,
         min=0.0,
         max=1.0,
@@ -455,6 +456,12 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_wire_color: BoolProperty(
         name="Socket Wire Colors",
         description="Color wires by the output socket type",
+        default=True,
+        update=_update_invalidate_all,
+    )
+    show_dashed_wires: BoolProperty(
+        name="Dashed Field Wires",
+        description="Draw field and modifier wires dashed in Geometry Node trees",
         default=True,
         update=_update_invalidate_all,
     )
@@ -756,6 +763,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             group.label(text="Wires")
             row = group.row(align=True)
             row.prop(settings, "show_wire_color", text="Wire Colors")
+            row.prop(settings, "show_dashed_wires", text="Dashed Fields")
             row.prop(settings, "highlight_selected_wires", text="Highlight Selection")
 
             col = group.column(heading="Noodle Curving")

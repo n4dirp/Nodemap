@@ -127,15 +127,31 @@ class ListState:
 
 
 @dataclass
-class RenderCache:
-    """Cache compiled tree data and GPU batches."""
+class SharedTreeCache:
+    """Cache compiled tree data and its compile schedule, shared per node tree.
+
+    All areas showing the same node tree share one ``tree_data`` compile,
+    one fingerprint, and one pending settle timer instead of compiling per
+    area. GPU batches stay per-area because culling, scale, and hover state
+    differ between minimaps.
+    """
 
     fingerprint: Any = None
+    tree_data: dict | None = None
+    tree_version: int = 0
+    position_version: int = 0
     pending_timer: Any = None
     pending_timer_deadline: float = 0.0
     pending_fingerprint: Any = None
+    pending_immediate: bool = False
+    pending_settle_flush: bool = False
     force_immediate: bool = False
-    tree_data: dict | None = None
+
+
+@dataclass
+class RenderCache:
+    """Cache per-area GPU batches and type-list layout state."""
+
     backdrops_batch: Any = None
     borders_batch: Any = None
     highlight_borders_batch: Any = None
@@ -156,14 +172,11 @@ class RenderCache:
     list_effective_expanded: set = field(default_factory=set)
     list_nodes_by_name: dict = field(default_factory=dict)
     list_swatches_batch: Any = None
-    tree_version: int = 0
-    position_version: int = 0
     batch_key: Any = None
     batch_scale: float = 1.0
     batch_anchor: Vec2 = (0.0, 0.0)
     wire_key: Any = None
     wire_scale: float = 1.0
-    pending_settle_flush: bool = False
     last_seen_scale: float = 0.0
     scale_last_change_ts: float = 0.0
     _batches_dirty: bool = False
@@ -202,17 +215,11 @@ class RenderCache:
         for name in field_names:
             setattr(self, name, defaults[name])
 
-    def invalidate_all(self) -> None:
-        """Clear all compiled batch data, fingerprints, and tree data."""
-        self._reset_fields(self._BATCH_FIELDS)
-        self.fingerprint = None
-        self.tree_data = None
-
     def invalidate_batches_only(self) -> None:
-        """Clear GPU batch data while preserving tree data and fingerprints.
+        """Clear GPU batch data for display-only preference changes.
 
-        Use for display-only preference changes that affect rendering, not
-        tree data.
+        Use when a setting affects rendering but not what tree data must be
+        compiled; the shared tree data and fingerprints are left untouched.
         """
         self._reset_fields(self._BATCH_FIELDS)
 
@@ -229,11 +236,52 @@ class MinimapState:
     buttons: ButtonState = field(default_factory=ButtonState)
     last_tree_ptr: int | None = None
     tree_views: dict[int, tuple[float, float, float]] = field(default_factory=dict)
+    shared: SharedTreeCache | None = None
+
+    def tree_data(self) -> dict | None:
+        """Return the compiled tree data shared by this area's node tree."""
+        shared = self.shared
+        return shared.tree_data if shared is not None else None
+
+    def request_immediate_compile(self) -> None:
+        """Flag the shared tree cache so the next draw compiles immediately."""
+        shared = self.shared
+        if shared is not None:
+            shared.force_immediate = True
 
 
 _minimap_state: dict[int, MinimapState] = {}
 _minimap_window_operators: dict[int, Any] = {}
+_shared_tree_caches: dict[int, SharedTreeCache] = {}
 _registration_state: dict[str, bool] = {"done": False}
+
+
+def _shared_tree_cache(tree_ptr: int) -> SharedTreeCache:
+    """Return the shared compile cache for a node tree pointer, creating it if needed."""
+    shared = _shared_tree_caches.get(tree_ptr)
+    if shared is None:
+        shared = SharedTreeCache()
+        _shared_tree_caches[tree_ptr] = shared
+    return shared
+
+
+def _unregister_pending_timer(shared: SharedTreeCache) -> None:
+    """Unregister the shared cache's pending settle timer, if any."""
+    if shared.pending_timer is None:
+        return
+    try:
+        bpy.app.timers.unregister(shared.pending_timer)
+    except (ValueError, RuntimeError):
+        pass
+    shared.pending_timer = None
+
+
+def _cleanup_shared_tree_caches() -> None:
+    """Unregister pending settle timers and drop all shared tree caches (unload)."""
+    for shared in _shared_tree_caches.values():
+        _unregister_pending_timer(shared)
+    _shared_tree_caches.clear()
+
 
 # Define interactive minimap buttons as (id, show-preference attribute).
 # Order defines the top-edge horizontal capsule (right-aligned).
@@ -266,22 +314,37 @@ def _state(area_ptr: int | None = None) -> MinimapState:
 
 
 def _cleanup_area_states() -> None:
-    """Remove stale entries from `_minimap_state` for closed NODE_EDITOR areas."""
+    """Remove stale entries from `_minimap_state` and `_shared_tree_caches`."""
     window_manager = bpy.context.window_manager
     if not window_manager:
         return
     active_area_pointers: set[int] = set()
+    live_tree_pointers: set[int] = set()
     for window in window_manager.windows:
         if not window or not window.screen:
             continue
         for area in window.screen.areas:
-            if area.type == "NODE_EDITOR":
-                active_area_pointers.add(area.as_pointer())
+            if area.type != "NODE_EDITOR":
+                continue
+            active_area_pointers.add(area.as_pointer())
+            space = area.spaces.active if area.spaces else None
+            tree = getattr(space, "edit_tree", None) if space is not None else None
+            if tree is not None:
+                try:
+                    live_tree_pointers.add(tree.as_pointer())
+                except ReferenceError:
+                    pass
     stale_pointers = [area_ptr for area_ptr in _minimap_state if area_ptr not in active_area_pointers]
     for area_ptr in stale_pointers:
         del _minimap_state[area_ptr]
     if stale_pointers:
         logger.debug("_cleanup_area_states: removed %d stale entries", len(stale_pointers))
+    stale_tree_pointers = [tree_ptr for tree_ptr in _shared_tree_caches if tree_ptr not in live_tree_pointers]
+    for tree_ptr in stale_tree_pointers:
+        _unregister_pending_timer(_shared_tree_caches[tree_ptr])
+        del _shared_tree_caches[tree_ptr]
+    if stale_tree_pointers:
+        logger.debug("_cleanup_area_states: removed %d stale tree caches", len(stale_tree_pointers))
 
 
 def _ensure_area_states() -> None:

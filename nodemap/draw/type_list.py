@@ -297,8 +297,9 @@ def _type_list_cache_key(
         _theme_rgba(f"node_editor.{attr}", colors["node"])[:3] for attr in _COLOR_TAG_TO_THEME_ATTR.values()
     )
 
+    tree_version = state.shared.tree_version if state.shared is not None else 0
     return (
-        state.cache.tree_version,
+        tree_version,
         settings.type_list_sort,
         settings.show_node_colors,
         settings.show_type_colors,
@@ -322,7 +323,7 @@ def _build_type_list_cache(
     ui_scale: float,
 ) -> None:
     """Build cached entries, row layout, entry map, and baked glyph batch."""
-    tree_data = state.cache.tree_data or {}
+    tree_data = state.tree_data() or {}
     type_stats = tree_data.get("type_stats") or {}
 
     state.cache.list_nodes_by_name = {n.name: n for n in node_tree.nodes} if node_tree else {}
@@ -422,8 +423,9 @@ def _bake_list_glyph_batch(
     entry_map: dict,
 ) -> None:
     """Bake static swatches and expand chevrons into one batched rect pass."""
-    type_colors = (state.cache.tree_data or {}).get("type_colors") or {}
-    type_node_colors = (state.cache.tree_data or {}).get("type_node_colors") or {}
+    tree_data = state.tree_data() or {}
+    type_colors = tree_data.get("type_colors") or {}
+    type_node_colors = tree_data.get("type_node_colors") or {}
     children = state.cache.list_filtered_children or state.cache.list_children or {}
 
     show_type_colors = settings.show_type_colors and settings.show_node_colors
@@ -968,7 +970,7 @@ def _compute_zone_geometry(
     active_fill_color = _alpha_mul(colors["viewport_fill"], 0.4 * master_alpha)
     active_border_color = colors["viewport_fill"]
 
-    tree_data = state.cache.tree_data or {}
+    tree_data = state.tree_data() or {}
     type_colors = tree_data.get("type_colors") or {}
     type_node_colors = tree_data.get("type_node_colors") or {}
     type_selected_counts = tree_data.get("type_selected_counts") or {}
@@ -1560,7 +1562,7 @@ def _draw_type_list(
         _clear_list_interaction(state)
         return
 
-    tree_data = state.cache.tree_data
+    tree_data = state.tree_data()
     type_stats = tree_data.get("type_stats") if tree_data else None
 
     if not type_stats:

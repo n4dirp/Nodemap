@@ -35,7 +35,9 @@ from ..core.state import (
     ResizeHandle,
     _minimap_window_operators,
     _registration_state,
+    _shared_tree_cache,
     _state,
+    _unregister_pending_timer,
 )
 from ..core.theme import (
     _alpha_mul,
@@ -1048,6 +1050,16 @@ def draw_minimap() -> None:
     if not node_tree or not node_tree.nodes or len(node_tree.nodes) == 0:
         return
 
+    # Compile state (tree data, fingerprint, settle timer) is shared by all
+    # areas showing the same node tree, so each tree compiles once instead
+    # of once per minimap. GPU batches below stay per-area.
+    try:
+        tree_ptr = node_tree.as_pointer()
+    except ReferenceError:
+        return
+    shared = _shared_tree_cache(tree_ptr)
+    state.shared = shared
+
     # Cache the editor viewport rect once for this frame; reused by the
     # transform/clamp logic and the viewport overlay draws below.
     visible = _get_visible_rect(space, region)
@@ -1089,8 +1101,9 @@ def draw_minimap() -> None:
     map_x, map_y, map_w, map_h, padding, y_margin = rect
 
     move_pending = (
-        state.cache.fingerprint is not None
-        and _is_move_only_diff(state.cache.fingerprint, current_fingerprint)
+        shared.fingerprint is not None
+        and shared.fingerprint != current_fingerprint
+        and _is_move_only_diff(shared.fingerprint, current_fingerprint)
     )
     # Freeze framing while a move is pending settle: hold the tree bounds so
     # the map scale/pivot does not creep live during a drag, keeping auto-
@@ -1105,10 +1118,6 @@ def draw_minimap() -> None:
 
     # Per-tree view persistence: reset pan/zoom when switching node trees,
     # but restore the saved view when revisiting the same tree.
-    try:
-        tree_ptr = node_tree.as_pointer() if node_tree else None
-    except ReferenceError:
-        tree_ptr = None
     if tree_ptr is not None:
         if state.last_tree_ptr is None:
             saved = state.tree_views.get(tree_ptr)
@@ -1164,7 +1173,7 @@ def draw_minimap() -> None:
     # Refresh tree data: pure position changes (node drags) are deferred to
     # the debounced settle flush so bounds, nodes, and wires update together;
     # anything else schedules a debounced full compile.
-    old_fingerprint = state.cache.fingerprint
+    old_fingerprint = shared.fingerprint
     if old_fingerprint != current_fingerprint:
         move_only = _is_move_only_diff(old_fingerprint, current_fingerprint)
         if move_only:
@@ -1172,7 +1181,11 @@ def draw_minimap() -> None:
             # and the wire unfreeze to the debounced settle flush so that
             # auto-bounds, nodes, and wires all update together instead of
             # staggering (bounds -> nodes -> wires) during a drag.
-            state.cache.pending_settle_flush = True
+            shared.pending_settle_flush = True
+        # An expanding type list needs compiled type stats to measure its
+        # target width; list click actions also request an immediate compile
+        # so the visual feedback is not delayed by the debounce interval.
+        want_immediate = (state.list.anim_active and state.list.anim_target < 0) or shared.force_immediate
         # Always keep a settle timer armed: it flushes frozen wire/marker
         # batches (forced via pending_settle_flush) or runs the pending full
         # compile. Re-arm (push back) only when the fingerprint changed again
@@ -1181,29 +1194,25 @@ def draw_minimap() -> None:
         # starved by continuous redraws.
         delay = settings.debounce_delay
         now = time.perf_counter()
-        if state.cache.pending_timer is not None and state.cache.pending_fingerprint != current_fingerprint:
-            if now < state.cache.pending_timer_deadline:
-                try:
-                    bpy.app.timers.unregister(state.cache.pending_timer)
-                except ValueError:
-                    pass
-                state.cache.pending_timer = None
-        if state.cache.pending_timer is None:
+        if shared.pending_timer is not None:
+            if shared.pending_fingerprint != current_fingerprint and now < shared.pending_timer_deadline:
+                _unregister_pending_timer(shared)
+            elif want_immediate and not shared.pending_immediate:
+                # A deferred timer cannot serve an immediate request; re-arm
+                # so the compile fires on the next event loop iteration.
+                _unregister_pending_timer(shared)
+        if shared.pending_timer is None:
 
             def _settle_fire():
-                return _debounced_compile(state, node_tree, colors, settings, master_alpha, ui_scale)
+                return _debounced_compile(shared, node_tree, colors, settings, master_alpha, ui_scale)
 
-            # An expanding type list needs compiled type stats to measure its
-            # target width; compile immediately instead of after the debounce.
-            # List click actions also request an immediate compile so the visual
-            # feedback is not delayed by the debounce interval.
-            immediate = (state.list.anim_active and state.list.anim_target < 0) or state.cache.force_immediate
-            interval = 0.0 if immediate else delay
+            interval = 0.0 if want_immediate else delay
             bpy.app.timers.register(_settle_fire, first_interval=interval)
-            state.cache.pending_timer = _settle_fire
-            state.cache.pending_timer_deadline = now + delay
-            state.cache.pending_fingerprint = current_fingerprint
-            state.cache.force_immediate = False
+            shared.pending_timer = _settle_fire
+            shared.pending_immediate = want_immediate
+            shared.pending_timer_deadline = now + delay
+            shared.pending_fingerprint = current_fingerprint
+            shared.force_immediate = False
 
     # Build screen-space batches (cached; applies current zoom/pan via matrix)
     # When a structural preference changed, _batches_dirty forces a batch
@@ -1212,7 +1221,7 @@ def draw_minimap() -> None:
     # event-loop iteration, producing a second rebuild with fresh data.
     if state.cache._batches_dirty:
         state.cache._batches_dirty = False
-        state.cache.position_version += 1
+        shared.position_version += 1
     map_anchor_x, map_anchor_y, scale, tree_center_x, tree_center_y = _get_minimap_transform(
         state, space, region, visible
     )

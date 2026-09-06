@@ -780,7 +780,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._list_child_pressed = None
                 still_over = _list_child_at(self._mouse_x, self._mouse_y, state) == (label, node_name)
                 if _in_list_zone(self._mouse_x, self._mouse_y, state) and still_over:
-                    state.cache.force_immediate = True
+                    state.request_immediate_compile()
                     if event.shift:
                         selection.apply_list_range(
                             self, context, state, ("child", label, node_name), self._list_last_row_index
@@ -804,7 +804,7 @@ class NODEMAP_OT_navigate(Operator):
                     else:
                         state.list.expanded.add(label)
                     state.cache.list_key = None
-                    state.cache.force_immediate = True
+                    state.request_immediate_compile()
                     self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._list_row_pressed:
@@ -814,7 +814,7 @@ class NODEMAP_OT_navigate(Operator):
                     _in_list_zone(self._mouse_x, self._mouse_y, state)
                     and _list_row_at(self._mouse_x, self._mouse_y, state) == label
                 ):
-                    state.cache.force_immediate = True
+                    state.request_immediate_compile()
                     if event.shift:
                         selection.apply_list_range(self, context, state, ("header", label), self._list_last_row_index)
                     elif event.ctrl:
@@ -866,7 +866,7 @@ class NODEMAP_OT_navigate(Operator):
                 return {"RUNNING_MODAL"}
             if not self._dragging and self._was_in_minimap:
                 if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                    state.cache.force_immediate = True
+                    state.request_immediate_compile()
                     selection.handle_click_selection(
                         self, context, event, state, frame=settings.left_click_action == "SELECT_FRAME"
                     )
@@ -1094,7 +1094,7 @@ class NODEMAP_OT_navigate(Operator):
                 child_row = _list_child_at(self._mouse_x, self._mouse_y, state)
                 if child_row:
                     child_label, node_name = child_row
-                    state.cache.force_immediate = True
+                    state.request_immediate_compile()
                     if event.shift:
                         selection.apply_list_range(
                             self, context, state, ("child", child_label, node_name), self._list_last_row_index
@@ -1123,11 +1123,11 @@ class NODEMAP_OT_navigate(Operator):
                         else:
                             state.list.expanded.add(row_label)
                         state.cache.list_key = None
-                        state.cache.force_immediate = True
+                        state.request_immediate_compile()
                         self._redraw_ui()
                         self._was_in_minimap = False
                         return {"RUNNING_MODAL"}
-                    state.cache.force_immediate = True
+                    state.request_immediate_compile()
                     if event.shift:
                         selection.apply_list_range(
                             self, context, state, ("header", row_label), self._list_last_row_index
@@ -1166,7 +1166,7 @@ class NODEMAP_OT_navigate(Operator):
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
             if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                state.cache.force_immediate = True
+                state.request_immediate_compile()
                 selection.handle_click_selection(
                     self, context, event, state, frame=settings.right_click_action == "SELECT_FRAME"
                 )

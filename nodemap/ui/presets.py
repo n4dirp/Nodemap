@@ -70,6 +70,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_text_shadow",
         "settings.show_node_colors",
         "settings.show_wire_color",
+        "settings.show_dashed_wires",
         "settings.use_custom_noodle_curving",
         "settings.noodle_curving",
         "settings.wire_thickness",

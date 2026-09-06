@@ -282,7 +282,7 @@ def _get_type_list_width(
     """
     if not settings or not settings.show_type_list or not settings.interactive:
         return 0.0
-    tree_data = minimap_state.cache.tree_data
+    tree_data = minimap_state.tree_data()
     type_stats = tree_data.get("type_stats") if tree_data else None
     if not type_stats:
         return 0.0

@@ -245,7 +245,7 @@ def select_type_nodes(
     node_tree = space.edit_tree
     if not node_tree:
         return
-    type_nodes = (state.cache.tree_data or {}).get("type_nodes") or {}
+    type_nodes = (state.tree_data() or {}).get("type_nodes") or {}
     names = type_nodes.get(label)
     if not names:
         return

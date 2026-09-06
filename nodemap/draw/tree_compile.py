@@ -12,7 +12,7 @@ from ..core.helpers import (
     _get_node_initials,
     get_tree_fingerprint,
 )
-from ..core.state import MinimapState
+from ..core.state import SharedTreeCache
 from ..core.theme import (
     _COLOR_TAG_TO_THEME_ATTR,
     _alpha_mul,
@@ -69,43 +69,53 @@ def _is_move_only_diff(old: tuple | None, current: tuple) -> bool:
     return old is not None and len(old) == len(current) and old[:1] == current[:1] and old[2:] == current[2:]
 
 
-def _debounced_compile(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
+def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, master_alpha, ui_scale):
     """Compile tree data after the fingerprint settles, then force a redraw."""
     include_selection = settings.show_node_outline or settings.highlight_selected_wires
-    current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
-    old_fingerprint = minimap_state.cache.fingerprint
+    try:
+        current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
+    except (AttributeError, ReferenceError):
+        # The tree went away while the timer was pending; drop the schedule.
+        shared.pending_timer = None
+        shared.pending_timer_deadline = 0.0
+        shared.pending_fingerprint = None
+        shared.pending_immediate = False
+        return None
+    old_fingerprint = shared.fingerprint
     unchanged = old_fingerprint == current_fingerprint
     trace = logger.isEnabledFor(TRACE_LEVEL)
-    if unchanged and not minimap_state.cache.pending_settle_flush:
-        minimap_state.cache.pending_timer = None
-        minimap_state.cache.pending_timer_deadline = 0.0
-        minimap_state.cache.pending_fingerprint = None
+    if unchanged and not shared.pending_settle_flush:
+        shared.pending_timer = None
+        shared.pending_timer_deadline = 0.0
+        shared.pending_fingerprint = None
+        shared.pending_immediate = False
         if trace:
             logger.trace("SETTLE skip: fingerprint unchanged, nothing pending")
         return None
     applied = False
     path = "compile"
-    if unchanged and minimap_state.cache.tree_data:
+    if unchanged and shared.tree_data:
         # Positions were fully patched by _apply_move_updates; rebaking the
         # frozen wire/marker generation skips the full recompile.
-        minimap_state.cache.tree_version += 1
+        shared.tree_version += 1
         applied = True
         path = "settle_bump"
-    elif _is_move_only_diff(old_fingerprint, current_fingerprint) and minimap_state.cache.tree_data:
-        applied = _apply_move_updates(minimap_state, node_tree)
+    elif _is_move_only_diff(old_fingerprint, current_fingerprint) and shared.tree_data:
+        applied = _apply_move_updates(shared, node_tree)
         if applied:
-            minimap_state.cache.fingerprint = current_fingerprint
+            shared.fingerprint = current_fingerprint
             # Movement settled: unfreeze wire/marker batches so they snap to
             # the patched positions without a full recompile.
-            minimap_state.cache.tree_version += 1
+            shared.tree_version += 1
             path = "move_patch"
     if not applied:
-        _compile_tree_data(minimap_state, node_tree, colors, settings, master_alpha, ui_scale)
-        minimap_state.cache.fingerprint = current_fingerprint
-    minimap_state.cache.pending_timer = None
-    minimap_state.cache.pending_timer_deadline = 0.0
-    minimap_state.cache.pending_fingerprint = None
-    minimap_state.cache.pending_settle_flush = False
+        _compile_tree_data(shared, node_tree, colors, settings, master_alpha, ui_scale)
+        shared.fingerprint = current_fingerprint
+    shared.pending_timer = None
+    shared.pending_timer_deadline = 0.0
+    shared.pending_fingerprint = None
+    shared.pending_immediate = False
+    shared.pending_settle_flush = False
     if trace:
         logger.trace("SETTLE %s", path)
     from ..core.helpers import redraw_ui
@@ -497,7 +507,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
     }
 
 
-def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings, master_alpha, ui_scale):
+def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, master_alpha, ui_scale):
     """Compute tree-space data for nodes, wires, sockets, and labels.
 
     Called only when the node tree fingerprint changes (tree topology,
@@ -505,7 +515,8 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     are NOT applied here — content batches are baked in map-local space
     by ``_ensure_minimap_batches()`` and placed with a matrix transform.
 
-    Stores result in ``minimap_state.cache.tree_data``.
+    Stores result in ``shared.tree_data`` so every area showing this node
+    tree reuses the same compile.
     """
     nodes = node_tree.nodes
     active_node = nodes.active
@@ -640,8 +651,9 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     # ------------------------------------------------------------------
     show_wire_highlight = show_wires and settings.highlight_selected_wires
     highlight_names = {node.name for node in nodes if node.select} if show_wire_highlight else None
+    show_dashed = getattr(settings, "show_dashed_wires", True)
     if show_wires:
-        raw_links, dashed_keys = _extract_raw_links(node_tree)
+        raw_links, dashed_keys = _extract_raw_links(node_tree, detect_dashed=show_dashed)
     else:
         raw_links = []
         dashed_keys = frozenset()
@@ -657,6 +669,7 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
     tree_data["wire_highlight_items"] = wire_highlight_items
     tree_data["wire_highlight_dashed_items"] = wire_highlight_dashed_items
     tree_data["dashed_keys"] = dashed_keys
+    tree_data["show_dashed_wires"] = show_dashed
     # Wire opacity influences the highlight at 50% so dimmed wires dim their
     # highlight too (wire_opacity 0.0 → 50% of full, 1.0 → full).
     tree_data["wire_highlight_color"] = (
@@ -680,9 +693,9 @@ def _compile_tree_data(minimap_state: MinimapState, node_tree, colors, settings,
                 depth += 1
         frame_depths[ptr] = depth
     tree_data["frame_depths"] = frame_depths
-    minimap_state.cache.tree_data = tree_data
-    minimap_state.cache.tree_version += 1
-    minimap_state.cache.position_version += 1
+    shared.tree_data = tree_data
+    shared.tree_version += 1
+    shared.position_version += 1
 
 
 def _link_is_dashed(link) -> bool:
@@ -711,12 +724,14 @@ def _link_is_dashed(link) -> bool:
     return is_dashed
 
 
-def _extract_raw_links(node_tree) -> tuple[list[tuple[str, str, str, str]], frozenset]:
+def _extract_raw_links(node_tree, detect_dashed: bool = True) -> tuple[list[tuple[str, str, str, str]], frozenset]:
     """Extract ``(from_name, from_id, to_name, to_id)`` tuples for all links.
 
     Also returns a frozenset of link keys that should be drawn dashed
-    (field / modifier sockets).  Pure RNA pass; only needed when topology
-    changes since results are persisted on ``tree_data["raw_links"]``.
+    (field / modifier sockets).  When *detect_dashed* is ``False`` the
+    dashed set is always empty and all wires render solid.  Pure RNA pass;
+    only needed when topology changes since results are persisted on
+    ``tree_data["raw_links"]``.
     """
     raw_links: list[tuple[str, str, str, str]] = []
     dashed_keys: list[tuple[str, str, str, str]] = []
@@ -731,7 +746,7 @@ def _extract_raw_links(node_tree) -> tuple[list[tuple[str, str, str, str]], froz
                 link.to_socket.identifier,
             )
             raw_links.append(key)
-            if is_geometry and _link_is_dashed(link):
+            if detect_dashed and is_geometry and _link_is_dashed(link):
                 dashed_keys.append(key)
     return raw_links, frozenset(dashed_keys)
 
@@ -789,7 +804,7 @@ def _group_socket_dots(by_node: dict[int, list[tuple[tuple, float, float]]]) -> 
     return grouped
 
 
-def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
+def _apply_move_updates(shared: SharedTreeCache, node_tree) -> bool:
     """Patch cached tree data in place after pure position changes.
 
     Refresh node positions, socket/wire endpoints, and group markers
@@ -798,7 +813,7 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
     Returns True when applied; False when cached tables are missing and a
     full recompile is required.
     """
-    tree_data = minimap_state.cache.tree_data
+    tree_data = shared.tree_data
     if not tree_data:
         return False
     node_infos = tree_data.get("node_infos")
@@ -974,6 +989,8 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
             raw_links, _dashed_keys = _extract_raw_links(node_tree)
         highlight_names = tree_data.get("highlight_link_names")
         dashed_keys = tree_data.get("dashed_keys")
+        if not tree_data.get("show_dashed_wires", True):
+            dashed_keys = frozenset()
         wire_items, wire_dashed_items, wire_highlight_items, wire_highlight_dashed_items = _resolve_wire_items(
             raw_links, out_pos, in_pos, highlight_names, dashed_keys
         )
@@ -981,5 +998,5 @@ def _apply_move_updates(minimap_state: MinimapState, node_tree) -> bool:
         tree_data["wire_dashed_items"] = wire_dashed_items
         tree_data["wire_highlight_items"] = wire_highlight_items
         tree_data["wire_highlight_dashed_items"] = wire_highlight_dashed_items
-        minimap_state.cache.position_version += 1
+        shared.position_version += 1
     return True
