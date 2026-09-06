@@ -563,7 +563,7 @@ class NODEMAP_OT_navigate(Operator):
                     self._mmb_dragging = False
                     self._mmb_drag_start = None
                     _clamp_pan_to_viewport(self._space, self._region, state)
-                    if settings and self._anim._animations_enabled(settings, context):
+                    if self._anim._animations_enabled(context):
                         self._anim.smooth_velocity[0] *= 0.5
                         self._anim.smooth_velocity[1] *= 0.5
                         speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
@@ -824,7 +824,7 @@ class NODEMAP_OT_navigate(Operator):
                     self._pan_acc[1] += self._anim.drag_target[1]
                     self._anim.drag_target = [0.0, 0.0]
                     self._anim.drag_active = False
-                if settings and self._anim._animations_enabled(settings, context):
+                if self._anim._animations_enabled(context):
                     speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
                     if speed > 2.0:
                         self._anim.inertia_active = True
@@ -1035,7 +1035,7 @@ class NODEMAP_OT_navigate(Operator):
                     self._pan_acc[1] += self._anim.drag_target[1]
                     self._anim.drag_target = [0.0, 0.0]
                     self._anim.drag_active = False
-                if settings and self._anim._animations_enabled(settings, context):
+                if self._anim._animations_enabled(context):
                     speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
                     if speed > 2.0:
                         self._anim.inertia_active = True
@@ -1107,7 +1107,7 @@ class NODEMAP_OT_navigate(Operator):
                         key = ("child", child_label, node_name)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                     if not (event.shift or event.ctrl):
-                        if not self._anim.view_selected_animated(context, settings):
+                        if not self._anim.view_selected_animated(context):
                             try:
                                 with self._override_ctx(context):
                                     bpy.ops.node.view_selected()
@@ -1140,7 +1140,7 @@ class NODEMAP_OT_navigate(Operator):
                         key = ("header", row_label)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                     if not (event.shift or event.ctrl):
-                        if not self._anim.view_selected_animated(context, settings):
+                        if not self._anim.view_selected_animated(context):
                             try:
                                 with self._override_ctx(context):
                                     bpy.ops.node.view_selected()
@@ -1283,7 +1283,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._dragging = True
                 if self._was_in_minimap:
                     state.interaction.pressed = True
-                    smooth = settings and self._anim._animations_enabled(settings, context, default=False)
+                    smooth = self._anim._animations_enabled(context)
                     self._pan_view(context, dx, dy, smooth)
                     self._drag_start = (self._mouse_x, self._mouse_y)
             return {"RUNNING_MODAL"}
@@ -1392,7 +1392,7 @@ class NODEMAP_OT_navigate(Operator):
         state = self._state
         if not state:
             return
-        smooth = bool(settings) and self._anim._animations_enabled(settings, context)
+        smooth = self._anim._animations_enabled(context)
         area_ptr = self._area.as_pointer() if self._area else 0
         match button_id:
             case "ALL":
@@ -1541,9 +1541,7 @@ class NODEMAP_OT_navigate(Operator):
             return
 
         state.interaction.pressed = True
-        addon = get_addon_preferences(context)
-        settings = addon.settings if addon else None
-        if settings and self._anim._animations_enabled(settings, context):
+        if self._anim._animations_enabled(context):
             self._anim.anim_target = [float(pan_x), float(pan_y)]
             self._anim.anim_applied = [0.0, 0.0]
             self._anim.anim_progress = 0.0

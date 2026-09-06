@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 from .. import __package__ as base_package
-from ..core.helpers import _find_node_at, _get_node_dims, _get_ui_scale, get_addon_preferences
+from ..core.helpers import _find_node_at, _get_node_dims, _get_ui_scale
 
 if TYPE_CHECKING:
     from bpy.types import Context, Event, Region
@@ -158,9 +158,7 @@ def handle_click_selection(
                 node_tree.nodes.active = node
 
         if frame:
-            addon = get_addon_preferences(context)
-            settings = addon.settings if addon else None
-            if not (settings and op._anim.view_selected_animated(context, settings)):
+            if not op._anim.view_selected_animated(context):
                 try:
                     with op._override_ctx(context):
                         bpy.ops.node.view_selected()

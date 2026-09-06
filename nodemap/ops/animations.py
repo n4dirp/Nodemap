@@ -10,6 +10,8 @@ import bpy
 
 from .. import __package__ as base_package
 from ..core.helpers import get_addon_preferences
+from ..geo.framing import _compute_editor_frame_selected_targets
+from ..geo.transforms import _clamp_pan_to_viewport, _get_visible_rect
 
 if TYPE_CHECKING:
     from bpy.types import Context, Region, SpaceNodeEditor
@@ -18,6 +20,9 @@ if TYPE_CHECKING:
     from .navigate import NODEMAP_OT_navigate
 
 logger = logging.getLogger(base_package)
+
+# Animation duration in frames for each pan-speed preference.
+_PAN_SPEED_FRAMES: dict[str, float] = {"FAST": 8.0, "MEDIUM": 16.0}
 
 
 class AnimationController:
@@ -127,45 +132,78 @@ class AnimationController:
                 pass
             self.smooth_timer = None
 
+    def _settings(self, context: Context):
+        """Return the add-on settings for *context*."""
+        return get_addon_preferences(context).settings
+
+    def _animation_frames(self, context: Context) -> float:
+        """Return the animation duration in frames for the current pan speed."""
+        return _PAN_SPEED_FRAMES[self._settings(context).pan_speed]
+
+    @staticmethod
+    def _ease(progress: float) -> float:
+        """Ease-out cubic interpolation for *progress* in [0, 1]."""
+        return 1.0 - (1.0 - progress) ** 3
+
+    def _take_pan(self, vx: float, vy: float) -> tuple[int, int]:
+        """Accumulate *vx/vy* in the shared pan buffer and return the integer part."""
+        op = self._op
+        op._pan_acc[0] += vx
+        op._pan_acc[1] += vy
+        dx = int(op._pan_acc[0])
+        dy = int(op._pan_acc[1])
+        op._pan_acc[0] -= dx
+        op._pan_acc[1] -= dy
+        return dx, dy
+
+    def _pan_editor(self, context: Context, dx: int, dy: int) -> None:
+        """Pan the editor viewport by *dx/dy* pixels, ignoring no-ops."""
+        if dx == 0 and dy == 0:
+            return
+        try:
+            with self._op._override_ctx(context):
+                bpy.ops.view2d.pan(deltax=dx, deltay=dy)
+        except RuntimeError:
+            pass
+
+    def _finish_center_animation(self, context: Context) -> None:
+        """Snap the view to the center-animation target and stop."""
+        remaining_x = self.anim_target[0] - self.anim_applied[0]
+        remaining_y = self.anim_target[1] - self.anim_applied[1]
+        if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
+            self._pan_editor(context, int(remaining_x), int(remaining_y))
+        self.anim_active = False
+        self.destroy_timer(context)
+
+    def _finish_frame_animation(self, context: Context) -> None:
+        """Snap the minimap view to the frame-animation target and stop."""
+        op = self._op
+        state: MinimapState | None = op._state
+        if state:
+            state.view.anchor_zoom = self.frame_anim_target_zoom
+            state.view.user_zoom = self.frame_anim_target_zoom
+            state.view.pan = (self.frame_anim_target_pan[0], self.frame_anim_target_pan[1])
+            _clamp_pan_to_viewport(op._space, op._region, state)
+        self.frame_anim_active = False
+        self.frame_anim_progress = 0.0
+        self.destroy_timer(context)
+
     def cancel_smooth(self, context: Context) -> None:
         """Snap all active animations to their targets and stop."""
-        from ..geo.transforms import _clamp_pan_to_viewport
-
-        op = self._op
         if self.inertia_active:
             self.inertia_active = False
             self.inertia_mode = None
             self.smooth_velocity = [0.0, 0.0]
             self.destroy_timer(context)
         if self.anim_active:
-            if self.anim_applied[0] != self.anim_target[0] or self.anim_applied[1] != self.anim_target[1]:
-                remaining_x = self.anim_target[0] - self.anim_applied[0]
-                remaining_y = self.anim_target[1] - self.anim_applied[1]
-                if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
-                    try:
-                        with op._override_ctx(context):
-                            bpy.ops.view2d.pan(deltax=int(remaining_x), deltay=int(remaining_y))
-                    except RuntimeError:
-                        pass
-            self.anim_active = False
-            self.destroy_timer(context)
+            self._finish_center_animation(context)
         if self.frame_anim_active:
-            state: MinimapState | None = op._state
-            if state:
-                state.view.anchor_zoom = self.frame_anim_target_zoom
-                state.view.user_zoom = self.frame_anim_target_zoom
-                state.view.pan = (self.frame_anim_target_pan[0], self.frame_anim_target_pan[1])
-                _clamp_pan_to_viewport(op._space, op._region, state)
-            self.frame_anim_active = False
-            self.frame_anim_progress = 0.0
-            self.destroy_timer(context)
+            self._finish_frame_animation(context)
         if self.editor_anim_active:
             self._cancel_editor_animation(context)
 
     def apply_inertia(self, context: Context) -> None:
         """Decay inertia and apply pan deltas."""
-        from ..geo.transforms import _clamp_pan_to_viewport
-
         op = self._op
         decay = 0.92
         self.smooth_velocity[0] *= decay
@@ -176,31 +214,16 @@ class AnimationController:
             self.inertia_mode = None
             self.destroy_timer(context)
             return
+        dx, dy = self._take_pan(self.smooth_velocity[0], self.smooth_velocity[1])
         if self.inertia_mode == "PAN":
             state: MinimapState | None = op._state
             if state:
-                op._pan_acc[0] += self.smooth_velocity[0]
-                op._pan_acc[1] += self.smooth_velocity[1]
-                dx = int(op._pan_acc[0])
-                dy = int(op._pan_acc[1])
-                op._pan_acc[0] -= dx
-                op._pan_acc[1] -= dy
                 if dx != 0 or dy != 0:
                     state.view.pan = (state.view.pan[0] + dx, state.view.pan[1] + dy)
                     _clamp_pan_to_viewport(op._space, op._region, state)
         elif self.inertia_mode == "VIEW":
-            op._pan_acc[0] += self.smooth_velocity[0]
-            op._pan_acc[1] += self.smooth_velocity[1]
-            dx = int(op._pan_acc[0])
-            dy = int(op._pan_acc[1])
-            op._pan_acc[0] -= dx
-            op._pan_acc[1] -= dy
             if dx != 0 or dy != 0:
-                try:
-                    with op._override_ctx(context):
-                        bpy.ops.view2d.pan(deltax=dx, deltay=dy)
-                except RuntimeError:
-                    pass
+                self._pan_editor(context, dx, dy)
                 _clamp_pan_to_viewport(op._space, op._region, op._state)
         op._redraw_ui()
 
@@ -212,8 +235,6 @@ class AnimationController:
         the cursor. Both are also normalized by the real frame delta, so heavy
         redraws (big trees at low fps) do not stretch the lag.
         """
-        from ..geo.transforms import _clamp_pan_to_viewport
-
         op = self._op
         if not self.drag_active:
             return
@@ -233,20 +254,11 @@ class AnimationController:
         dy = self.drag_target[1] * follow
         dx = max(min(dx, max_move), -max_move)
         dy = max(min(dy, max_move), -max_move)
-        op._pan_acc[0] += dx
-        op._pan_acc[1] += dy
         self.drag_target[0] -= dx
         self.drag_target[1] -= dy
-        pan_x = int(op._pan_acc[0])
-        pan_y = int(op._pan_acc[1])
-        op._pan_acc[0] -= pan_x
-        op._pan_acc[1] -= pan_y
+        pan_x, pan_y = self._take_pan(dx, dy)
         if pan_x != 0 or pan_y != 0:
-            try:
-                with op._override_ctx(context):
-                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-            except RuntimeError:
-                pass
+            self._pan_editor(context, pan_x, pan_y)
             _clamp_pan_to_viewport(op._space, op._region, op._state)
         if not op._dragging:
             self.drag_active = False
@@ -257,24 +269,11 @@ class AnimationController:
         op = self._op
         if not self.anim_active:
             return
-        addon = get_addon_preferences(context)
-        settings = addon.settings if addon else None
-        speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
-        self.anim_progress += 1 / frames
+        self.anim_progress += 1 / self._animation_frames(context)
         if self.anim_progress >= 1.0:
-            remaining_x = self.anim_target[0] - self.anim_applied[0]
-            remaining_y = self.anim_target[1] - self.anim_applied[1]
-            if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
-                try:
-                    with op._override_ctx(context):
-                        bpy.ops.view2d.pan(deltax=int(remaining_x), deltay=int(remaining_y))
-                except RuntimeError:
-                    pass
-            self.anim_active = False
-            self.destroy_timer(context)
+            self._finish_center_animation(context)
             return
-        eased = 1.0 - (1.0 - self.anim_progress) ** 3
+        eased = self._ease(self.anim_progress)
         desired_x = self.anim_target[0] * eased
         desired_y = self.anim_target[1] * eased
         delta_x = desired_x - self.anim_applied[0]
@@ -288,11 +287,7 @@ class AnimationController:
         self.anim_acc[0] -= dx
         self.anim_acc[1] -= dy
         if dx != 0 or dy != 0:
-            try:
-                with op._override_ctx(context):
-                    bpy.ops.view2d.pan(deltax=dx, deltay=dy)
-            except RuntimeError:
-                pass
+            self._pan_editor(context, dx, dy)
         op._redraw_ui()
 
     def start_frame_animation(self, context: Context, target_zoom: float, target_pan: list[float]) -> None:
@@ -313,8 +308,6 @@ class AnimationController:
 
     def apply_frame_animation(self, context: Context) -> None:
         """Step the frame zoom+pan animation forward one frame."""
-        from ..geo.transforms import _clamp_pan_to_viewport
-
         op = self._op
         if not self.frame_anim_active:
             return
@@ -323,23 +316,13 @@ class AnimationController:
             self.frame_anim_active = False
             self.destroy_timer(context)
             return
-        addon = get_addon_preferences(context)
-        settings = addon.settings if addon else None
-        speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
-        progress = self.frame_anim_progress + 1 / frames
+        progress = self.frame_anim_progress + 1 / self._animation_frames(context)
         self.frame_anim_progress = progress
         if progress >= 1.0:
-            state.view.anchor_zoom = self.frame_anim_target_zoom
-            state.view.user_zoom = self.frame_anim_target_zoom
-            state.view.pan = (self.frame_anim_target_pan[0], self.frame_anim_target_pan[1])
-            _clamp_pan_to_viewport(op._space, op._region, state)
-            self.frame_anim_active = False
-            self.frame_anim_progress = 0.0
-            self.destroy_timer(context)
+            self._finish_frame_animation(context)
             op._redraw_ui()
             return
-        eased = 1.0 - (1.0 - progress) ** 3
+        eased = self._ease(progress)
         state.view.user_zoom = (
             self.frame_anim_start_zoom + (self.frame_anim_target_zoom - self.frame_anim_start_zoom) * eased
         )
@@ -351,14 +334,11 @@ class AnimationController:
         _clamp_pan_to_viewport(op._space, op._region, state)
         op._redraw_ui()
 
-    def view_selected_animated(self, context: Context, settings) -> bool:
+    def view_selected_animated(self, context: Context) -> bool:
         """Ease the editor viewport onto the selected nodes; True when started."""
-        from ..geo.framing import _compute_editor_frame_selected_targets
-
-        op = self._op
-        if not self._animations_enabled(settings, context):
+        if not self._animations_enabled(context):
             return False
-        targets = _compute_editor_frame_selected_targets(op._space, op._region)
+        targets = _compute_editor_frame_selected_targets(self._op._space, self._op._region)
         if targets is None:
             return False
         self.start_editor_animation(context, list(targets))
@@ -366,8 +346,6 @@ class AnimationController:
 
     def start_editor_animation(self, context: Context, target_rect: list[float]) -> None:
         """Begin animating the editor viewport toward the target tree-space rect."""
-        from ..geo.transforms import _get_visible_rect
-
         op = self._op
         visible = _get_visible_rect(op._space, op._region)
         if not visible:
@@ -389,11 +367,7 @@ class AnimationController:
             self.editor_anim_active = False
             self.destroy_timer(context)
             return
-        addon = get_addon_preferences(context)
-        settings = addon.settings if addon else None
-        speed = settings.pan_speed if settings else "MEDIUM"
-        frames = {"FAST": 10, "MEDIUM": 20}.get(speed, 24)
-        progress = self.editor_anim_progress + 1 / frames
+        progress = self.editor_anim_progress + 1 / self._animation_frames(context)
         if progress >= 1.0:
             self._correct_editor_view(context, self.editor_anim_target_rect)
             self.editor_anim_active = False
@@ -402,7 +376,7 @@ class AnimationController:
             op._redraw_ui()
             return
         self.editor_anim_progress = progress
-        eased = 1.0 - (1.0 - progress) ** 3
+        eased = self._ease(progress)
         desired = [
             start + (target - start) * eased
             for start, target in zip(self.editor_anim_start_rect, self.editor_anim_target_rect)
@@ -410,12 +384,11 @@ class AnimationController:
         self._correct_editor_view(context, desired)
         op._redraw_ui()
 
-    def _animations_enabled(self, settings, context: Context, default: bool = True) -> bool:
+    def _animations_enabled(self, context: Context) -> bool:
+        """Return True when animations are allowed by preferences and accessibility."""
         if context.preferences.view.use_reduce_motion:
             return False
-        if settings is None:
-            return default
-        return settings.use_animations
+        return self._settings(context).use_animations
 
     def _editor_view_close(self, visible: tuple[float, float, float, float], target: list[float]) -> bool:
         """Return True when the editor viewport already frames *target*."""
@@ -437,8 +410,6 @@ class AnimationController:
 
     def _correct_editor_view(self, context: Context, desired: list[float]) -> None:
         """Nudge the editor view2d one monotonic step toward the desired rect."""
-        from ..geo.transforms import _get_visible_rect
-
         op = self._op
         space: SpaceNodeEditor | None = op._space
         region: Region | None = op._region
@@ -480,12 +451,7 @@ class AnimationController:
         dcy = (desired[1] + desired[3] - current[1] - current[3]) / 2
         pan_x = int(round(dcx * view_zoom_x))
         pan_y = int(round(dcy * view_zoom_y))
-        if pan_x != 0 or pan_y != 0:
-            try:
-                with op._override_ctx(context):
-                    bpy.ops.view2d.pan(deltax=pan_x, deltay=pan_y)
-            except RuntimeError:
-                pass
+        self._pan_editor(context, pan_x, pan_y)
 
     def _cancel_editor_animation(self, context: Context) -> None:
         """Snap the editor viewport to the animation target and stop stepping."""
