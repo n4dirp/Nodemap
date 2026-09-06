@@ -776,19 +776,9 @@ class NODEMAP_OT_navigate(Operator):
                 self._activate_armed_button(context, settings)
                 return {"RUNNING_MODAL"}
             if self._list_child_pressed:
-                label, node_name = self._list_child_pressed
+                # The selection already ran on press; just consume the release
+                # so it does not fall through to the map click handler.
                 self._list_child_pressed = None
-                still_over = _list_child_at(self._mouse_x, self._mouse_y, state) == (label, node_name)
-                if _in_list_zone(self._mouse_x, self._mouse_y, state) and still_over:
-                    state.request_immediate_compile()
-                    if event.shift:
-                        selection.apply_list_range(
-                            self, context, state, ("child", label, node_name), self._list_last_row_index
-                        )
-                    elif event.ctrl:
-                        selection.select_single_node(self, context, node_name, toggle=True)
-                    else:
-                        selection.select_single_node(self, context, node_name)
                 return {"RUNNING_MODAL"}
             if self._list_toggle_pressed:
                 label = self._list_toggle_pressed
@@ -808,19 +798,9 @@ class NODEMAP_OT_navigate(Operator):
                     self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._list_row_pressed:
-                label = self._list_row_pressed
+                # The selection already ran on press; just consume the release
+                # so it does not fall through to the map click handler.
                 self._list_row_pressed = None
-                if (
-                    _in_list_zone(self._mouse_x, self._mouse_y, state)
-                    and _list_row_at(self._mouse_x, self._mouse_y, state) == label
-                ):
-                    state.request_immediate_compile()
-                    if event.shift:
-                        selection.apply_list_range(self, context, state, ("header", label), self._list_last_row_index)
-                    elif event.ctrl:
-                        selection.select_type_nodes(self, context, label, toggle=True)
-                    else:
-                        selection.select_type_nodes(self, context, label)
                 return {"RUNNING_MODAL"}
             if self._resize_handle:
                 self._resize_handle = None
@@ -951,10 +931,20 @@ class NODEMAP_OT_navigate(Operator):
                     return {"RUNNING_MODAL"}
                 child_row = _list_child_at(self._mouse_x, self._mouse_y, state)
                 if child_row:
+                    # The flag is only armed so the release is consumed by the
+                    # left-mouse release handler instead of the map click.
                     self._list_child_pressed = child_row
-                    if not event.shift and not event.ctrl:
-                        child_label, child_node_name = child_row
-                        key = ("child", child_label, child_node_name)
+                    label, node_name = child_row
+                    state.request_immediate_compile()
+                    if event.shift:
+                        selection.apply_list_range(
+                            self, context, state, ("child", label, node_name), self._list_last_row_index
+                        )
+                    elif event.ctrl:
+                        selection.select_single_node(self, context, node_name, toggle=True)
+                    else:
+                        selection.select_single_node(self, context, node_name)
+                        key = ("child", label, node_name)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                 else:
                     row_label = _list_row_at(self._mouse_x, self._mouse_y, state)
@@ -963,8 +953,19 @@ class NODEMAP_OT_navigate(Operator):
                         if toggle_rect and _in_rect(self._mouse_x, self._mouse_y, toggle_rect):
                             self._list_toggle_pressed = row_label
                         else:
+                            # The flag is only armed so the release is
+                            # consumed by the left-mouse release handler
+                            # instead of the map click.
                             self._list_row_pressed = row_label
-                            if not event.shift and not event.ctrl:
+                            state.request_immediate_compile()
+                            if event.shift:
+                                selection.apply_list_range(
+                                    self, context, state, ("header", row_label), self._list_last_row_index
+                                )
+                            elif event.ctrl:
+                                selection.select_type_nodes(self, context, row_label, toggle=True)
+                            else:
+                                selection.select_type_nodes(self, context, row_label)
                                 key = ("header", row_label)
                                 self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
                 return {"RUNNING_MODAL"}
