@@ -36,7 +36,11 @@ def _get_map_content_rect(minimap_state: MinimapState) -> tuple[float, float, fl
 
 
 def _preserve_view_for_list_width(
-    minimap_state: MinimapState, old_width: float, new_width: float, ui_scale: float | None = None
+    minimap_state: MinimapState,
+    old_width: float,
+    new_width: float,
+    ui_scale: float | None = None,
+    min_delta: float = 0.5,
 ) -> None:
     """Adjust ``minimap_state.view.pan/zoom`` so the same world rect stays framed after width change.
 
@@ -47,9 +51,11 @@ def _preserve_view_for_list_width(
     nodes translate and scale to occupy the same position inside the reduced
     available space.
 
-    No-op when rect/bounds are degenerate or widths are equal within 0.5px.
+    No-op when rect/bounds are degenerate or widths are equal within ``min_delta`` px.
+    The animation path passes ``min_delta=0.0`` so eased steps map the list
+    width change exactly; interactive deltas keep the 0.5px tolerance.
     """
-    if abs(new_width - old_width) < 0.5:
+    if abs(new_width - old_width) < min_delta:
         return
     if not minimap_state.view.rect or minimap_state.view.rect[2] <= 1 or minimap_state.view.rect[3] <= 1:
         return
@@ -63,12 +69,8 @@ def _preserve_view_for_list_width(
     # world-rect preservation would fight that dynamic. Skip automatic
     # compensation there and let _get_minimap_transform / _clamp_pan_to_viewport
     # handle it.
-    try:
-        addon_prefs_block = get_addon_preferences()
-        if addon_prefs_block and addon_prefs_block.settings.follow_view:
-            return
-    except Exception:
-        pass
+    if get_addon_preferences().settings.follow_view:
+        return
 
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
@@ -180,12 +182,8 @@ def _preserve_view_for_map_resize(
 
     # Follow-view mode recomputes zoom/clamp every draw; compensating here
     # would fight that dynamic. Skip, like _preserve_view_for_list_width.
-    try:
-        addon_prefs_block = get_addon_preferences()
-        if addon_prefs_block and addon_prefs_block.settings.follow_view:
-            return
-    except Exception:
-        pass
+    if get_addon_preferences().settings.follow_view:
+        return
 
     bbox_w = max(bounds[2] - bounds[0], 1.0)
     bbox_h = max(bounds[3] - bounds[1], 1.0)
@@ -266,8 +264,7 @@ def _get_minimap_transform(
     inner_l, inner_b, inner_w, inner_h, _bw, _bh, base_scale, _tree_center_x, _tree_center_y = base_geom
 
     # Dynamic Auto-Zoom if follow_view is active
-    addon_prefs_block = get_addon_preferences()
-    if addon_prefs_block and addon_prefs_block.settings.follow_view:
+    if get_addon_preferences().settings.follow_view:
         if space is None:
             space = bpy.context.space_data
         if region is None:
@@ -308,8 +305,7 @@ def _clamp_pan_to_viewport(
 
     No-op when the ``follow_view`` preference is off.
     """
-    addon_prefs_block = get_addon_preferences()
-    if not addon_prefs_block or not addon_prefs_block.settings.follow_view:
+    if not get_addon_preferences().settings.follow_view:
         return
 
     if visible is None:

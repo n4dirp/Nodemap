@@ -206,12 +206,13 @@ def _maybe_preserve_view_for_list_width(
     current_width: float,
     new_width: float,
     ui_scale: float,
+    min_delta: float = 0.5,
 ) -> None:
     """Preserve view alignment when the list width changes meaningfully."""
-    if abs(new_width - current_width) >= 0.5:
+    if abs(new_width - current_width) >= min_delta:
         from ..geo.transforms import _preserve_view_for_list_width
 
-        _preserve_view_for_list_width(state, current_width, new_width, ui_scale)
+        _preserve_view_for_list_width(state, current_width, new_width, ui_scale, min_delta)
 
 
 def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: float) -> None:
@@ -264,12 +265,19 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
     if progress >= 1.0:
         new_width = state.list.anim_target
 
-    _maybe_preserve_view_for_list_width(
-        state,
-        state.list.list_width,
-        new_width,
-        ui_scale,
-    )
+    # Apply every animation step exactly. Discarding the tiny eased deltas
+    # (default 0.5px tolerance) would break the round trip: the divider
+    # inset/wiggling at the sub-pixel end of the curve would never transfer
+    # to pan/zoom, so each expand/collapse cycle leaves a small residue that
+    # accumulates across toggles when the zoomed zone is off-center.
+    if new_width != state.list.list_width:
+        _maybe_preserve_view_for_list_width(
+            state,
+            state.list.list_width,
+            new_width,
+            ui_scale,
+            min_delta=0.0,
+        )
     state.list.list_width = new_width
 
     if progress >= 1.0:
@@ -1500,6 +1508,21 @@ def _draw_list_scrollbar(
 
     gpu.state.blend_set("ALPHA")
 
+    track_x = round(geo["zone_x"] + geo["zone_w"] - SCROLLBAR_THICKNESS_HOVER - 1 * int(SCROLLBAR_INSET * ui_scale))
+    track_y = geo["zone_y"] + int(SCROLLBAR_INSET * ui_scale)
+    track_h = max(geo["view_top"] - geo["zone_y"] - 2 * int(SCROLLBAR_INSET * ui_scale), 0.0)
+
+    if state.list.hovered_scrollbar:
+        hover_fill_color = (0, 0, 0, 0.1 * master_alpha)
+        _draw_filled_rounded_rect(
+            track_x,
+            track_y,
+            SCROLLBAR_THICKNESS_HOVER,
+            track_h,
+            SCROLLBAR_THICKNESS_HOVER / 2.0,
+            hover_fill_color,
+        )
+
     _bar_thickness, bar_offset = _get_scrollbar_style(ui_scale)
 
     frac = state.list.scroll / scroll_max
@@ -1509,7 +1532,7 @@ def _draw_list_scrollbar(
     thumb_rect, track_rect = _draw_scrollbar_thumb(
         round(geo["zone_x"] + geo["zone_w"] - thick - bar_offset),
         geo["zone_y"] + bar_offset,
-        max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset, 0.0),
+        (max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset, 0.0)),
         geo["view_h"] / total_h,
         1.0 - frac,
         colors,

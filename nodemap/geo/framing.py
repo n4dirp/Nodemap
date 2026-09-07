@@ -2,7 +2,7 @@
 
 import bpy
 
-from ..core.constants import EDITOR_FIT_MARGIN, MAX_FRAME_ZOOM
+from ..core.constants import EDITOR_FIT_MARGIN, HANDLE_THICKNESS, MAX_FRAME_ZOOM
 from ..core.helpers import (
     _expand_bounds_margin,
     _get_node_dims,
@@ -47,8 +47,7 @@ def _compute_frame_all_targets(
     bounds = _expand_bounds_margin(bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding)
     minimap_state.view.tree_bounds = bounds
 
-    addon_prefs_block = get_addon_preferences()
-    follow = addon_prefs_block and addon_prefs_block.settings.follow_view
+    follow = get_addon_preferences().settings.follow_view
 
     if not follow:
         return 1.0, 0.0, 0.0
@@ -211,8 +210,12 @@ def _compute_frame_selected_targets(
     )
 
     if len(selected) > 1 or selected[0].type == "FRAME":
+        margin_px = (HANDLE_THICKNESS * 2) * _get_ui_scale()
+        bounds_h = max(max_y - min_y, 1.0)
+        inner_h = max(rect[3] - 2 * minimap_state.view.inner_padding, 1.0)
+        margin = margin_px * bounds_h / inner_h
         zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(
-            (min_x, min_y, max_x, max_y), fill=True, area_ptr=area_ptr
+            (min_x - margin, min_y - margin, max_x + margin, max_y + margin), fill=True, area_ptr=area_ptr
         )
         return min(zoom, MAX_FRAME_ZOOM), pan_x, pan_y
 
@@ -316,8 +319,7 @@ def frame_view(
     if not visible:
         return
 
-    addon_prefs_block = get_addon_preferences()
-    fill = addon_prefs_block and addon_prefs_block.settings.frame_view_fill
+    fill = get_addon_preferences().settings.frame_view_fill
 
     rect = minimap_state.view.rect
     _, _, map_w, map_h = rect
