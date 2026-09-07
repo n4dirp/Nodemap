@@ -19,7 +19,7 @@ class NODEMAP_PT_popup(Panel):
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
-    bl_ui_units_x = 12
+    bl_ui_units_x = 14
 
     @classmethod
     def poll(cls, context):
@@ -43,69 +43,70 @@ class NODEMAP_PT_popup(Panel):
         sub.alignment = "RIGHT"
         NODEMAP_PT_presets.draw_panel_header(sub)
         sub.separator()
-
         sub.operator("nodemap.open_pref", text="", icon="PREFERENCES", emboss=False)
 
-        header, body = layout.panel("NODEMAP_PT_frame", default_closed=False)
-        header.label(text="Frame")
-        if body:
-            row = body.row(align=True)
-            row.operator("nodemap.frame_all", text="All")
-            row.operator("nodemap.frame_view", text="View")
-            if not settings.follow_view:
-                row.operator("nodemap.frame_selected", text="Selected")
-
         header, body = layout.panel("NODEMAP_PT_layout", default_closed=False)
-        header.label(text="Objects")
+        header.label(text="Nodes")
         if body:
-            row = body.row()
-            col1 = row.column()
-            col1.prop(settings, "show_frames", text="Frames")
-            col1.prop(settings, "show_node_outline", text="Node Outline")
-            col1.prop(settings, "show_reroutes", text="Reroutes")
-            col1.prop(settings, "show_socket_indicators", text="Sockets")
-            col1.prop(settings, "show_node_count", text="Total Count")
+            flow = body.grid_flow(row_major=True, columns=3, even_columns=False, even_rows=False, align=True)
+            flow.prop(settings, "show_node_colors", text="Node Colors")
+            flow.prop(settings, "show_node_outline", text="Outlines")
+            flow.prop(settings, "show_socket_indicators", text="Sockets")
+            flow.prop(settings, "show_reroutes", text="Reroutes")
+            flow.prop(settings, "show_frames", text="Frames")
+            flow.prop(settings, "show_node_count", text="Count")
 
-            if settings.interactive:
-                col1.separator()
-                col = col1.column(align=True)
-                col.prop(settings, "show_type_list", text="Type List")
-                sub = col.row()
-                sub.active = settings.show_type_list
-                sub.prop(settings, "show_search_bar", text="Filter Bar")
+        header, body = layout.panel("NODEMAP_PT_wires", default_closed=True)
+        header.prop(settings, "show_wires", text="Wires")
+        if body:
+            body.active = settings.show_wires
+            flow = body.grid_flow(row_major=True, columns=2, even_columns=False, even_rows=False, align=True)
+            flow.prop(settings, "show_wire_color", text="Wire Colors")
+            flow.prop(settings, "show_dashed_wires", text="Dashes")
+            flow.prop(settings, "highlight_selected_wires", text="Highlights")
 
-            col2 = row.column()
-            col = col2.column(align=True)
-            col.prop(settings, "show_wires", text="Wires")
-            sub = col.row()
-            sub.active = settings.show_wires
-            sub.prop(settings, "show_dashed_wires", text="Dashed Wires")
+            row = flow.row()
+            row.prop(settings, "use_custom_noodle_curving", text="")
+            sub = row.row(align=True)
+            sub.active = settings.use_custom_noodle_curving
+            sub.prop(settings, "noodle_curving", text="Curving", slider=True)
 
-            col2.separator()
-            col = col2.column(align=True)
-            col.prop(settings, "show_node_labels", text="Node Labels")
-            sub = col.row()
-            sub.active = settings.show_node_labels
-            sub.prop(settings, "compact_node_labels", text="Compact Labels")
-            sub = col.row()
-            sub.active = settings.show_frames
-            sub.prop(settings, "show_frame_labels", text="Frame Labels")
+            flow.prop(settings, "wire_thickness", text="Thickness", slider=True)
+            flow.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
-            if settings.interactive:
-                header, body = layout.panel("NODEMAP_PT_buttons", default_closed=False)
-                header.label(text="Buttons")
-                if body:
-                    col = body.column()
-                    row = col.row()
-                    col = row.column(align=True)
-                    col.prop(settings, "show_frame_all_button", text="Frame All")
-                    col.prop(settings, "show_frame_view_button", text="Frame View")
-                    if not settings.follow_view:
-                        col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+        header, body = layout.panel("NODEMAP_PT_labels", default_closed=False)
+        header.label(text="Labels")
+        if body:
+            flow = body.grid_flow(row_major=False, columns=2, even_columns=False, even_rows=False, align=True)
+            flow.prop(settings, "show_node_labels", text="Node Labels")
+            flow.prop(settings, "compact_node_labels", text="Compact")
+            flow.prop(settings, "show_frame_labels", text="Frame Labels")
 
-                    col = row.column()
-                    col.prop(settings, "show_list_toggle_button", text="List Toggle")
-                    col.prop(settings, "show_move_button", text="Move Handle")
+        if settings.interactive:
+            header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
+            header.prop(settings, "show_type_list", text="Type List")
+            if body:
+                body.active = settings.show_type_list
+                flow = body.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=False, align=True)
+                flow.prop(settings, "show_search_bar", text="Filter Bar")
+                sub = flow.row(align=True)
+                sub.active = settings.show_node_colors
+                sub.prop(settings, "show_type_colors", text="Type Colors")
+
+            header, body = layout.panel("NODEMAP_PT_buttons", default_closed=False)
+            header.label(text="Buttons")
+            if body:
+                col = body.column()
+                row = col.row()
+                col = row.column(align=True)
+                col.prop(settings, "show_frame_all_button", text="Frame All")
+                col.prop(settings, "show_frame_view_button", text="Frame View")
+                if not settings.follow_view:
+                    col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+
+                col = row.column()
+                col.prop(settings, "show_list_toggle_button", text="List Toggle")
+                col.prop(settings, "show_move_button", text="Move Handle")
 
         header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
         header.label(text="Theme")
@@ -120,23 +121,41 @@ class NODEMAP_PT_popup(Panel):
             sub.prop(settings, "viewport_fill_color", text="")
 
             row = col.row(align=True)
+            row.prop(settings, "show_viewport_overlay", text="View Dimming")
+            sub = row.row(align=True)
+            sub.active = settings.show_viewport_overlay
+            sub.prop(settings, "viewport_overlay_color", text="")
+
+            row = col.row(align=True)
             row.prop(settings, "use_custom_background", text="Background")
             sub = row.row(align=True)
             sub.active = settings.use_custom_background
             sub.prop(settings, "background_color", text="")
 
-            row = col.row()
-            row.prop(settings, "show_node_colors", text="Node Colors")
-            sub = row.row()
-            sub.active = settings.show_wires
-            sub.prop(settings, "show_wire_color", text="Wire Colors")
+            row = col.row(align=True)
+            row.prop(settings, "use_custom_text", text="Text Color")
+            sub = row.row(align=True)
+            sub.active = settings.use_custom_text
+            sub.prop(settings, "text_color", text="")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=True)
-        header.label(text="Options")
+        header.label(text="Interaction")
         if body:
-            flow = body.grid_flow(columns=2)
-            flow.prop(settings, "interactive", text="Interactive Map")
+            flow = body.grid_flow(row_major=False, columns=2, even_columns=False, even_rows=False, align=True)
+            flow.prop(settings, "interactive", text="Map Navigation")
+            sub = flow.row(align=True)
+            sub.active = settings.interactive
+            sub.prop(settings, "use_animations", text="Animations")
             flow.prop(settings, "follow_view", text="Follow View")
+
+        header, body = layout.panel("NODEMAP_PT_frame", default_closed=False)
+        header.label(text="Frame")
+        if body:
+            row = body.row(align=True)
+            row.operator("nodemap.frame_all", text="All")
+            row.operator("nodemap.frame_view", text="View")
+            if not settings.follow_view:
+                row.operator("nodemap.frame_selected", text="Selected")
 
 
 def draw_minimap_header_button(self, context):
