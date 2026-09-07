@@ -170,10 +170,10 @@ def _compute_minimap_rect(
     docks_bottom = corner in ("BOTTOM_RIGHT", "BOTTOM_LEFT", "BOTTOM_BORDER")
     top_margin = margin if docks_bottom else y_margin
     bottom_margin = y_margin if docks_bottom else margin
-    map_x = max(map_x, float(safe_x_min) + x_margin)
-    map_w = min(map_w, float(safe_x_max) - map_x - x_margin)
-    map_y = max(map_y, float(safe_y_min) + bottom_margin)
-    map_h = min(map_h, float(safe_y_max) - map_y - top_margin)
+    map_x = round(max(map_x, float(safe_x_min) + x_margin))
+    map_w = round(min(map_w, float(safe_x_max) - map_x - x_margin))
+    map_y = round(max(map_y, float(safe_y_min) + bottom_margin))
+    map_h = round(min(map_h, float(safe_y_max) - map_y - top_margin))
 
     # Only bail if the minimap would be too small to be useful
     min_dim_width = MIN_MAP_WIDTH * ui_scale
@@ -204,79 +204,6 @@ def _snap_sides_for(position: str) -> frozenset[str]:
         "RIGHT_BORDER": frozenset({"right"}),
     }
     return corners.get(position, edges.get(position, frozenset()))
-
-
-def _draw_background(
-    map_x: float,
-    map_y: float,
-    map_w: float,
-    map_h: float,
-    colors: dict,
-    master_alpha: float,
-    snapped: bool = False,
-    moving: bool = False,
-) -> tuple[tuple[float, float, float, float], float]:
-    """Draw the minimap backdrop rounded rect and border."""
-
-    bg_color = _alpha_mul(colors["bg"], master_alpha)
-    panel_roundness = colors.get("panel_roundness", 4.0)
-    shadow_offset = 1
-    border_color = _alpha_mul(colors["bg_border"], master_alpha)
-    if moving and not snapped:
-        border_color = (1.0, 1.0, 1.0, 0.05)
-    border_width = 1.0 if moving else 0.5
-
-    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color)
-    _draw_rounded_rect_border(
-        map_x - shadow_offset,
-        map_y - shadow_offset,
-        map_w + shadow_offset * 2,
-        map_h + shadow_offset * 2,
-        panel_roundness,
-        (0, 0, 0, 0.15 * master_alpha),
-        0.5,
-    )
-    _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
-
-    return bg_color, panel_roundness
-
-
-def _draw_snap_sides(
-    map_x: float,
-    map_y: float,
-    map_w: float,
-    map_h: float,
-    colors: dict,
-    master_alpha: float,
-    snap_sides: frozenset[str],
-) -> None:
-    """Draw a thin highlight pill on each snapped map side."""
-    ui_scale = _get_ui_scale()
-    thickness = 3.0 * ui_scale
-    handle_margin = 6 * ui_scale
-    inset = 2.0 * ui_scale
-    color = _alpha_mul(colors["text"], 0.25 * master_alpha)
-
-    if "top" in snap_sides:
-        _draw_pill(
-            map_x + handle_margin,
-            map_y + map_h - inset - thickness,
-            map_w - 2 * handle_margin,
-            thickness,
-            color,
-        )
-    if "bottom" in snap_sides:
-        _draw_pill(map_x + handle_margin, map_y + inset, map_w - 2 * handle_margin, thickness, color)
-    if "left" in snap_sides:
-        _draw_pill(map_x + inset, map_y + handle_margin, thickness, map_h - 2 * handle_margin, color)
-    if "right" in snap_sides:
-        _draw_pill(
-            map_x + map_w - inset - thickness,
-            map_y + handle_margin,
-            thickness,
-            map_h - 2 * handle_margin,
-            color,
-        )
 
 
 def _setup_scissor(
@@ -331,6 +258,63 @@ def _teardown_scissor(saved_state: tuple[bool, bool, tuple[int, int, int, int]])
             pass
 
 
+def _draw_background(
+    map_x: float, map_y: float, map_w: float, map_h: float, colors: dict, master_alpha: float
+) -> tuple[tuple[float, float, float, float], float]:
+    """Draw the minimap backdrop rounded rect and border."""
+
+    bg_color = _alpha_mul(colors["bg"], master_alpha)
+    panel_roundness = colors.get("panel_roundness", 4.0)
+    shadow_offset = 1
+    border_color = _alpha_mul(colors["bg_border"], master_alpha)
+    border_width = 0.5
+
+    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color)
+    _draw_rounded_rect_border(
+        map_x - shadow_offset,
+        map_y - shadow_offset,
+        map_w + shadow_offset * 2,
+        map_h + shadow_offset * 2,
+        panel_roundness,
+        (0, 0, 0, 0.15 * master_alpha),
+        0.5,
+    )
+    _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
+
+    return bg_color, panel_roundness
+
+
+def _draw_moving_border(map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, moving, snapped):
+    if moving and not snapped:
+        border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        border_width = 2.5 * ui_scale
+        _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
+
+
+def _draw_edge_pills(
+    map_x: float,
+    map_y: float,
+    map_w: float,
+    map_h: float,
+    ui_scale: float,
+    side_colors: dict[str, tuple[float, float, float, float]] | None,
+) -> None:
+    """Draw a highlight pill on each map side with a non-None color."""
+    if not side_colors:
+        return
+    thickness = 3.0 * ui_scale
+    margin = 6 * ui_scale
+    inset = 2.0 * ui_scale
+    if (color := side_colors.get("top")) is not None:
+        _draw_pill(map_x + margin, map_y + map_h - inset - thickness, map_w - 2 * margin, thickness, color)
+    if (color := side_colors.get("bottom")) is not None:
+        _draw_pill(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, color)
+    if (color := side_colors.get("left")) is not None:
+        _draw_pill(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, color)
+    if (color := side_colors.get("right")) is not None:
+        _draw_pill(map_x + map_w - inset - thickness, map_y + margin, thickness, map_h - 2 * margin, color)
+
+
 def _draw_resize_handles(
     map_x: float,
     map_y: float,
@@ -349,10 +333,9 @@ def _draw_resize_handles(
     width_clamped = state.view.width_clamped
     height_clamped = state.view.height_clamped
 
-    color_base = _alpha_mul(colors["text"], 0.25 * master_alpha)
-    color_warn = _alpha_mul(colors["text"], master_alpha)
+    color_base = _alpha_mul(colors["text"], master_alpha)
+    color_warn = _alpha_mul(colors["viewport_fill"], master_alpha)
     handle_thickness = 3.0 * ui_scale
-    handle_margin = 6 * ui_scale
 
     if resize_handle == ResizeHandle.LIST:
         zone_rect = state.list.list_zone_rect
@@ -371,13 +354,12 @@ def _draw_resize_handles(
             - handle_thickness / 2.0
         )
         # Clamp to zone vertical extent with small margin so pill stays inside.
-        zone_margin = 2 * ui_scale
         divider_color = color_warn if state.list.width_clamped else color_base
         _draw_pill(
-            divider_x,
-            zone_y + zone_margin,
+            round(divider_x),
+            zone_y,
             handle_thickness,
-            max(zone_height - 2 * zone_margin, 1.0),
+            zone_height,
             divider_color,
         )
         return
@@ -393,47 +375,15 @@ def _draw_resize_handles(
     elif resize_handle in (ResizeHandle.BOTTOM, ResizeHandle.BOTTOM_LEFT, ResizeHandle.BOTTOM_RIGHT):
         height_side = "bottom"
 
-    if width_side == "left":
-        pill_x = map_x + 2 * ui_scale
-        _draw_pill(
-            pill_x,
-            map_y + handle_margin,
-            handle_thickness,
-            map_h - 2 * handle_margin,
-            color_warn if width_clamped else color_base,
-        )
-    elif width_side == "right":
-        pill_x = map_x + map_w - 2 * ui_scale - handle_thickness
-        _draw_pill(
-            pill_x,
-            map_y + handle_margin,
-            handle_thickness,
-            map_h - 2 * handle_margin,
-            color_warn if width_clamped else color_base,
-        )
-
-    if height_side == "top":
-        pill_y = map_y + map_h - 2 * ui_scale - handle_thickness
-        _draw_pill(
-            map_x + handle_margin,
-            pill_y,
-            map_w - 2 * handle_margin,
-            handle_thickness,
-            color_warn if height_clamped else color_base,
-        )
-    elif height_side == "bottom":
-        pill_y = map_y + 2 * ui_scale
-        _draw_pill(
-            map_x + handle_margin,
-            pill_y,
-            map_w - 2 * handle_margin,
-            handle_thickness,
-            color_warn if height_clamped else color_base,
-        )
+    side_colors: dict[str, tuple[float, float, float, float]] = {}
+    if width_side:
+        side_colors[width_side] = color_warn if width_clamped else color_base
+    if height_side:
+        side_colors[height_side] = color_warn if height_clamped else color_base
+    _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, side_colors or None)
 
 
 def _draw_view_fill(
-    settings,
     space,
     region,
     map_x: float,
@@ -1261,22 +1211,12 @@ def draw_minimap() -> None:
         original_blend = None
     gpu.state.blend_set("ALPHA")
 
-    bg_color, panel_roundness = _draw_background(
-        map_x,
-        map_y,
-        map_w,
-        map_h,
-        colors,
-        master_alpha,
-        state.view.snapped,
-        state.view.moving,
-    )
+    bg_color, panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha)
 
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]
 
     _draw_view_fill(
-        settings,
         space,
         region,
         map_x,
@@ -1351,7 +1291,8 @@ def draw_minimap() -> None:
     _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state)
 
     if state.view.snapped and (snap_sides := _snap_sides_for(settings.current_position)):
-        _draw_snap_sides(map_x, map_y, map_w, map_h, colors, master_alpha, snap_sides)
+        snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, {side: snap_color for side in snap_sides})
 
     _draw_node_count(settings, content_count, state, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
 
@@ -1364,6 +1305,7 @@ def draw_minimap() -> None:
         state.tree_views[current_ptr] = (state.view.user_zoom, state.view.pan[0], state.view.pan[1])
 
     _teardown_scissor(scissor_state)
+
     try:
         gpu.state.blend_set(original_blend if original_blend else "NONE")
     except Exception:
@@ -1373,6 +1315,19 @@ def draw_minimap() -> None:
     try:
         gpu.state.blend_set("ALPHA")
         _draw_type_list(settings, state, map_x, map_y, map_h, padding, colors, master_alpha, ui_scale)
+
+        _draw_moving_border(
+            map_x,
+            map_y,
+            map_w,
+            map_h,
+            panel_roundness,
+            colors,
+            master_alpha,
+            ui_scale,
+            state.view.moving,
+            state.view.snapped,
+        )
     finally:
         try:
             gpu.state.blend_set(original_blend if original_blend else "NONE")
