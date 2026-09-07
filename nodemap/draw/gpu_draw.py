@@ -6,6 +6,7 @@ from typing import Any
 import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
+from mathutils import Matrix
 
 from ..core.theme import _srgb_to_linear
 
@@ -24,6 +25,8 @@ _BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_NOODLE_SHADER: gpu.types.GPUShader | None = None
+
+_BATCH_CACHE: dict[tuple, Any] = {}
 
 _FILL_VERT_SRC = """
 void main() {
@@ -578,6 +581,39 @@ def _get_batch_noodle_shader() -> gpu.types.GPUShader:
     return _BATCH_NOODLE_SHADER
 
 
+def _get_cached_quad_batch(
+    shader: gpu.types.GPUShader, w: float, h: float, pad: float = 2.0, pad_uv: bool = False
+) -> Any:
+    """Return a cached ``batch_for_shader`` for a rounded-rect quad.
+
+    The batch geometry is a quad spanning the rectangle plus *pad* pixels of
+    anti-aliasing slack on every side.  The quad is centred at the origin so
+    callers translate it with the ModelViewProjectionMatrix.  Uniforms
+    (``color``, ``halfSize``, ``radius``, …) are set per draw call and do
+    not affect the batch geometry.  When *pad_uv* is true the UVs stretch by
+    the same *pad* so the anti-aliasing band sits centred on the SDF edge
+    (pills, which use a symmetric ``smoothstep(-0.5, 0.5)`` coverage).
+    """
+    key = (shader, w, h, pad, pad_uv)
+    if key not in _BATCH_CACHE:
+        # Cap cache size: UI chrome rects have a bounded set of sizes, but
+        # animations and user-driven resize can pan through many values.
+        if len(_BATCH_CACHE) >= 256:
+            _BATCH_CACHE.clear()
+        half_w, half_h = w / 2, h / 2
+        cw, ch = half_w + pad, half_h + pad
+        if pad_uv:
+            uv_w, uv_h = cw, ch
+        else:
+            uv_w, uv_h = half_w, half_h
+        data = {
+            "pos": [(-cw, -ch, 0.0), (cw, -ch, 0.0), (cw, ch, 0.0), (-cw, ch, 0.0)],
+            "uv": [(-uv_w, -uv_h), (uv_w, -uv_h), (uv_w, uv_h), (-uv_w, uv_h)],
+        }
+        _BATCH_CACHE[key] = batch_for_shader(shader, "TRIS", data, indices=((0, 1, 2), (2, 3, 0)))
+    return _BATCH_CACHE[key]
+
+
 def _build_pill_batch(
     wires: list[tuple[float, float, float, float]],
     thickness: float,
@@ -815,6 +851,24 @@ def _build_noodle_batch(
     return shader, batch
 
 
+def _mvp() -> Any:
+    """Return the current ModelViewProjectionMatrix.
+
+    The model-view matrix is read per call because some draws run inside a
+    Matrix push/rotate block (icon X patterns), so the MVP cannot be cached.
+    """
+    return gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+
+
+def _translated_mvp(tx: float, ty: float) -> Any:
+    """Return the ModelViewProjectionMatrix translated by ``(tx, ty)``.
+
+    Cached quad batches are centred at the origin; an explicit translation
+    matrix positions a quad at screen ``(tx, ty)`` (the rectangle centre).
+    """
+    return _mvp() @ Matrix.Translation((tx, ty, 0.0))
+
+
 def _draw_text_with_shadow(
     font_id: int, text: str, x: float, y: float, color: tuple[float, ...], size: int, with_shadow: bool = True
 ):
@@ -839,26 +893,10 @@ def _draw_filled_rounded_rect(x, y, width, height, radius, color):
 
     shader = _get_sdf_fill_shader()
     half_w, half_h = width / 2, height / 2
-
-    vertices = (
-        (x, y, 0.0),
-        (x + width, y, 0.0),
-        (x + width, y + height, 0.0),
-        (x, y + height, 0.0),
-    )
-    uvs = (
-        (-half_w, -half_h),
-        (half_w, -half_h),
-        (half_w, half_h),
-        (-half_w, half_h),
-    )
-    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+    batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radius", radius)
@@ -885,10 +923,7 @@ def _draw_filled_quad(
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
+    shader.uniform_float("ModelViewProjectionMatrix", _mvp())
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (1.0, 1.0))
     shader.uniform_float("radius", 0.0)
@@ -903,26 +938,10 @@ def _draw_filled_rounded_rect_varying(x, y, width, height, radii, color):
 
     shader = _get_sdf_fill_varying_shader()
     half_w, half_h = width / 2, height / 2
-
-    vertices = (
-        (x, y, 0.0),
-        (x + width, y, 0.0),
-        (x + width, y + height, 0.0),
-        (x, y + height, 0.0),
-    )
-    uvs = (
-        (-half_w, -half_h),
-        (half_w, -half_h),
-        (half_w, half_h),
-        (-half_w, half_h),
-    )
-    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+    batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radii", radii)
@@ -969,10 +988,7 @@ def _draw_filled_rounded_rect_with_hole(
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
+    shader.uniform_float("ModelViewProjectionMatrix", _mvp())
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("outerData", (half_w, half_h, outer_radius, inner_radius))
     shader.uniform_float("innerOffset", (inner_off_x, inner_off_y))
@@ -1014,10 +1030,7 @@ def _draw_filled_rounded_rect_clipped(x, y, width, height, radius, color, clip_x
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
+    shader.uniform_float("ModelViewProjectionMatrix", _mvp())
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("sizeData", (half_w, half_h, radius, clip_radius))
     shader.uniform_float("clipData", (off_x, off_y, clip_half_w, clip_half_h))
@@ -1031,26 +1044,10 @@ def _draw_rounded_rect_border(x, y, width, height, radius, color, line_width=1.0
 
     shader = _get_sdf_border_shader()
     half_w, half_h = width / 2, height / 2
-
-    vertices = (
-        (x, y, 0.0),
-        (x + width, y, 0.0),
-        (x + width, y + height, 0.0),
-        (x, y + height, 0.0),
-    )
-    uvs = (
-        (-half_w, -half_h),
-        (half_w, -half_h),
-        (half_w, half_h),
-        (-half_w, half_h),
-    )
-    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+    batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radius", radius)
@@ -1068,26 +1065,10 @@ def _draw_rounded_rect_border_varying_sides(
 
     shader = _get_sdf_border_varying_sides_shader()
     half_w, half_h = width / 2, height / 2
-
-    vertices = (
-        (x, y, 0.0),
-        (x + width, y, 0.0),
-        (x + width, y + height, 0.0),
-        (x, y + height, 0.0),
-    )
-    uvs = (
-        (-half_w, -half_h),
-        (half_w, -half_h),
-        (half_w, half_h),
-        (-half_w, half_h),
-    )
-    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+    batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radii", radii)
@@ -1105,32 +1086,12 @@ def _draw_pill(x, y, width, height, color):
     shader = _get_pill_shader()
     half_w, half_h = width / 2, height / 2
 
-    aa_pad = 2.0
-
-    vertices = (
-        (x - aa_pad, y - aa_pad, 0.0),
-        (x + width + aa_pad, y - aa_pad, 0.0),
-        (x + width + aa_pad, y + height + aa_pad, 0.0),
-        (x - aa_pad, y + height + aa_pad, 0.0),
-    )
-    uvs = (
-        (-half_w - aa_pad, -half_h - aa_pad),
-        (half_w + aa_pad, -half_h - aa_pad),
-        (half_w + aa_pad, half_h + aa_pad),
-        (-half_w - aa_pad, half_h + aa_pad),
-    )
-
-    batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
+    batch = _get_cached_quad_batch(shader, width, height, pad_uv=True)
 
     shader.bind()
-    shader.uniform_float(
-        "ModelViewProjectionMatrix",
-        gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-    )
-
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
-
     batch.draw(shader)
 
 
