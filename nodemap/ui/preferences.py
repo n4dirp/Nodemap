@@ -674,8 +674,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "minimap_height", text="Y")
 
         col = group.column(align=True)
-        col.prop(settings, "max_width_percent", text="Max Region X")
-        col.prop(settings, "max_height_percent", text="Y")
+        col.prop(settings, "max_width_percent", text="Max Width")
+        col.prop(settings, "max_height_percent", text="Max Height")
 
         layout.separator(type="LINE")
         group = layout.column()
@@ -715,6 +715,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             group = group.column()
             group.label(text="Type List")
             col = group.column()
+            col.active = settings.show_type_list
             row = col.row()
             row.prop(settings, "type_list_sort", text="Sort", expand=True)
             col.prop(settings, "type_list_font_size", text="Font Size")
@@ -723,6 +724,26 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             sub = row.row()
             sub.active = settings.show_node_colors
             sub.prop(settings, "show_type_colors", text="Type Colors")
+
+        group.separator()
+        group = group.column()
+        group.label(text="Wires")
+        col = group.column()
+        col.active = settings.show_wires
+        row = col.row(align=True)
+        row.prop(settings, "show_wire_color", text="Wire Colors")
+        row.prop(settings, "show_dashed_wires", text="Dashed Fields")
+        row.prop(settings, "highlight_selected_wires", text="Highlight Selection")
+
+        sub = col.column(heading="Noodle Curving")
+        row = sub.row(align=True, heading="")
+        row.prop(settings, "use_custom_noodle_curving", text="")
+        sub = row.row(align=True)
+        sub.active = settings.use_custom_noodle_curving
+        sub.row().prop(settings, "noodle_curving", text="", expand=True)
+
+        col.prop(settings, "wire_thickness", text="Thickness")
+        col.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
         layout.separator(type="LINE")
         group = layout.column()
@@ -755,24 +776,6 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.prop(settings, "text_color", text="")
         row = col.row(align=True)
         row.prop(settings, "show_text_shadow", text="Text Shadows")
-
-        group.separator()
-        group = group.column()
-        group.label(text="Wires")
-        row = group.row(align=True)
-        row.prop(settings, "show_wire_color", text="Wire Colors")
-        row.prop(settings, "show_dashed_wires", text="Dashed Fields")
-        row.prop(settings, "highlight_selected_wires", text="Highlight Selection")
-
-        col = group.column(heading="Noodle Curving")
-        row = col.row(align=True, heading="")
-        row.prop(settings, "use_custom_noodle_curving", text="")
-        sub = row.row(align=True)
-        sub.active = settings.use_custom_noodle_curving
-        sub.row().prop(settings, "noodle_curving", text="", expand=True)
-
-        group.prop(settings, "wire_thickness", text="Thickness")
-        group.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
         layout.separator(type="LINE")
         group = layout.column()

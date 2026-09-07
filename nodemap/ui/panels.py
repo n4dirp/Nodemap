@@ -19,7 +19,7 @@ class NODEMAP_PT_popup(Panel):
     bl_label = "Nodemap Options"
     bl_space_type = "NODE_EDITOR"
     bl_region_type = "HEADER"
-    bl_ui_units_x = 14
+    bl_ui_units_x = 12
 
     @classmethod
     def poll(cls, context):
@@ -48,11 +48,11 @@ class NODEMAP_PT_popup(Panel):
         header, body = layout.panel("NODEMAP_PT_layout", default_closed=False)
         header.label(text="Nodes")
         if body:
-            flow = body.grid_flow(row_major=True, columns=3, even_columns=False, even_rows=False, align=True)
+            flow = body.grid_flow(row_major=True, columns=2, even_columns=False, even_rows=False, align=True)
             flow.prop(settings, "show_node_colors", text="Node Colors")
             flow.prop(settings, "show_node_outline", text="Outlines")
-            flow.prop(settings, "show_socket_indicators", text="Sockets")
             flow.prop(settings, "show_reroutes", text="Reroutes")
+            flow.prop(settings, "show_socket_indicators", text="Sockets")
             flow.prop(settings, "show_frames", text="Frames")
             flow.prop(settings, "show_node_count", text="Count")
 
