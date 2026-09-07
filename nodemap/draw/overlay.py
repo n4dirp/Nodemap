@@ -285,9 +285,13 @@ def _draw_background(
 
 
 def _draw_moving_border(map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, moving, snapped):
+    if moving:
+        bg_color = _alpha_mul(colors["bg"], 0.3 * master_alpha)
+        panel_roundness = colors.get("panel_roundness", 4.0)
+        _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color)
     if moving and not snapped:
         border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-        border_width = 2.5 * ui_scale
+        border_width = 0.5 * ui_scale
         _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
 
 
@@ -306,13 +310,17 @@ def _draw_edge_pills(
     margin = 6 * ui_scale
     inset = 2.0 * ui_scale
     if (color := side_colors.get("top")) is not None:
-        _draw_pill(map_x + margin, map_y + map_h - inset - thickness, map_w - 2 * margin, thickness, color)
+        _draw_rounded_rect_border(
+            map_x + margin, map_y + map_h - inset - thickness, map_w - 2 * margin, thickness, 0, color
+        )
     if (color := side_colors.get("bottom")) is not None:
-        _draw_pill(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, color)
+        _draw_rounded_rect_border(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, 0, color)
     if (color := side_colors.get("left")) is not None:
-        _draw_pill(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, color)
+        _draw_rounded_rect_border(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, 0, color)
     if (color := side_colors.get("right")) is not None:
-        _draw_pill(map_x + map_w - inset - thickness, map_y + margin, thickness, map_h - 2 * margin, color)
+        _draw_rounded_rect_border(
+            map_x + map_w - inset - thickness, map_y + margin, thickness, map_h - 2 * margin, 0, color
+        )
 
 
 def _draw_resize_handles(
@@ -715,7 +723,7 @@ def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float) ->
 
 def _get_visible_minimap_buttons(settings) -> list[str]:
     """Return ids of enabled minimap buttons in draw order."""
-    if not settings or not settings.interactive:
+    if not settings.interactive:
         return []
     visible = [button_id for button_id, pref_attr in _MINIMAP_BUTTONS if getattr(settings, pref_attr, True)]
     # Frame Selected is meaningless with Follow View (the viewport drives framing).
@@ -832,8 +840,7 @@ def _layout_minimap_buttons(
 
 def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count=0):
     """Draw the interactive minimap buttons and record their hit rects."""
-    addon = get_addon_preferences()
-    settings = addon.settings if addon else None
+    settings = get_addon_preferences().settings
     state = _state()
     state.buttons.rects.clear()
 
@@ -847,7 +854,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
 
     # Move-grip drag handle is available whenever interactive mode is on, which
     # is the mode that enables repositioning the map.
-    if "DRAG" in rects and settings and settings.interactive:
+    if "DRAG" in rects and settings.interactive:
         drag_x, drag_y, drag_size = rects["DRAG"]
         drag_h = BUTTON_SIZE * ui_scale
         _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color)
@@ -971,10 +978,7 @@ def draw_minimap() -> None:
         logger.debug("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
         return
 
-    prefs = get_addon_preferences(context)
-    if prefs is None:
-        return
-    settings = prefs.settings
+    settings = get_addon_preferences(context).settings
 
     # Defer auto-launch until registration is fully complete
     # to avoid invoking the modal with a stale context.
@@ -1288,12 +1292,6 @@ def draw_minimap() -> None:
 
     _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count)
 
-    _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state)
-
-    if state.view.snapped and (snap_sides := _snap_sides_for(settings.current_position)):
-        snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-        _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, {side: snap_color for side in snap_sides})
-
     _draw_node_count(settings, content_count, state, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
 
     # Persist current view for this tree so it can be restored when revisiting.
@@ -1328,6 +1326,13 @@ def draw_minimap() -> None:
             state.view.moving,
             state.view.snapped,
         )
+
+        _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state)
+
+        if state.view.snapped and (snap_sides := _snap_sides_for(settings.current_position)):
+            snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+            _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, {side: snap_color for side in snap_sides})
+
     finally:
         try:
             gpu.state.blend_set(original_blend if original_blend else "NONE")
