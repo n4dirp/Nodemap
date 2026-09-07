@@ -512,25 +512,26 @@ class NODEMAP_OT_navigate(Operator):
             return self._handle_list_search(context, event)
 
         # Ctrl+F over the minimap: reveal the type list (if hidden) and focus
-        # its filter field.
+        # its filter field. Ignored when the filter bar is hidden so the key
+        # passes through to the editor.
         if (
             event.type == "F"
             and event.value == "PRESS"
             and in_minimap
             and event.ctrl
             and not (event.shift or event.alt)
+            and (settings is None or settings.show_search_bar)
         ):
-            if settings:
-                if not settings.show_type_list:
-                    settings.show_type_list = True
-                    start_list_width_animation(state, settings)
-                state.list.search_focused = True
-                state.list.search_cursor = len(state.list.search_query)
-                # Entering text-input mode: show the I-beam so the pointer
-                # indicates typing, like clicking the filter field.
-                context.window.cursor_modal_set("TEXT")
-                self._last_cursor = "TEXT"
-                self._redraw_ui()
+            if not settings.show_type_list:
+                settings.show_type_list = True
+                start_list_width_animation(state, settings)
+            state.list.search_focused = True
+            state.list.search_cursor = len(state.list.search_query)
+            # Entering text-input mode: show the I-beam so the pointer
+            # indicates typing, like clicking the filter field.
+            context.window.cursor_modal_set("TEXT")
+            self._last_cursor = "TEXT"
+            self._redraw_ui()
             return {"RUNNING_MODAL"}
 
         match event.type:
@@ -598,10 +599,9 @@ class NODEMAP_OT_navigate(Operator):
 
             case "T":
                 if event.value == "PRESS" and in_minimap and not (event.ctrl or event.shift or event.alt):
-                    if settings:
-                        settings.show_type_list = not settings.show_type_list
-                        start_list_width_animation(state, settings)
-                        self._redraw_ui()
+                    settings.show_type_list = not settings.show_type_list
+                    start_list_width_animation(state, settings)
+                    self._redraw_ui()
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -765,7 +765,7 @@ class NODEMAP_OT_navigate(Operator):
                             state.list.search_query,
                             self._mouse_x,
                             state.list.search_text_start_x,
-                            settings.type_list_font_size if settings else 10,
+                            settings.type_list_font_size,
                         )
                     else:
                         state.list.search_cursor = len(state.list.search_query)
@@ -845,7 +845,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._anim.destroy_timer(context)
                 return {"RUNNING_MODAL"}
             if not self._dragging and self._was_in_minimap:
-                if settings and settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
+                if settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
                     state.request_immediate_compile()
                     selection.handle_click_selection(
                         self, context, event, state, frame=settings.left_click_action == "SELECT_FRAME"
@@ -987,7 +987,7 @@ class NODEMAP_OT_navigate(Operator):
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
-            if settings and settings.left_click_action in ("PAN", "SELECT_PAN"):
+            if settings.left_click_action in ("PAN", "SELECT_PAN"):
                 self._drag_start = (self._mouse_x, self._mouse_y)
                 self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
             return {"RUNNING_MODAL"}
@@ -1083,7 +1083,7 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_handle_r
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
-                self._list_width_start_px = settings.type_list_width if settings else 160
+                self._list_width_start_px = settings.type_list_width
                 cursor = _CURSOR_MAP[divider_handle_r]
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
@@ -1166,12 +1166,12 @@ class NODEMAP_OT_navigate(Operator):
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
-            if settings and settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
+            if settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
                 state.request_immediate_compile()
                 selection.handle_click_selection(
                     self, context, event, state, frame=settings.right_click_action == "SELECT_FRAME"
                 )
-            if settings and settings.right_click_action in ("PAN", "SELECT_PAN"):
+            if settings.right_click_action in ("PAN", "SELECT_PAN"):
                 self._drag_start = (self._mouse_x, self._mouse_y)
                 self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
             self._was_in_minimap = False
@@ -1377,11 +1377,9 @@ class NODEMAP_OT_navigate(Operator):
         ):
             return
         if button_id == "LIST":
-            if settings:
-                settings.show_type_list = not settings.show_type_list
-                start_list_width_animation(state, settings)
-                self._redraw_ui()
-            return
+            settings.show_type_list = not settings.show_type_list
+            start_list_width_animation(state, settings)
+            self._redraw_ui()
         self._dispatch_frame_action(context, settings, button_id)
 
     def _dispatch_frame_action(self, context: Context, settings, button_id: str) -> None:

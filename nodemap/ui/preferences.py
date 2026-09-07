@@ -353,7 +353,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     show_frame_selected_button: BoolProperty(
         name="Frame Selected Button",
         description="Show a Frame-selected button inside the minimap",
-        default=False,
+        default=True,
         update=_update_invalidate_batches,
     )
 

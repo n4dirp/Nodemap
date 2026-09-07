@@ -130,22 +130,22 @@ def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> 
 
 def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
-    prefs = get_addon_preferences()
+    settings = get_addon_preferences().settings
 
     theme_bg = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
-    if prefs and prefs.settings.use_custom_background:
-        bg = tuple(prefs.settings.background_color)
+    if settings.use_custom_background:
+        bg = tuple(settings.background_color)
     else:
         bg = theme_bg
 
     text_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     label_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
-    if prefs and prefs.settings.use_custom_text:
-        text_color = label_color = tuple(prefs.settings.text_color)
+    if settings.use_custom_text:
+        text_color = label_color = tuple(settings.text_color)
 
     selected = _theme_rgba("user_interface.wcol_regular.ThemeWidgetColors.inner_sel", (0.28, 0.45, 0.7, 1.0))
-    if prefs and prefs.settings.use_custom_viewport_fill:
-        viewport_fill = tuple(prefs.settings.viewport_fill_color)
+    if settings.use_custom_viewport_fill:
+        viewport_fill = tuple(settings.viewport_fill_color)
     else:
         viewport_fill = selected
 

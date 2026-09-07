@@ -5,7 +5,7 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Minimap geometry
 # ---------------------------------------------------------------------------
-MIN_MAP_WIDTH: int = 120
+MIN_MAP_WIDTH: int = 160
 MIN_MAP_HEIGHT: int = 80
 
 # ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ HANDLE_THICKNESS: int = 6
 # Dock / snap-to-border
 # ---------------------------------------------------------------------------
 MAP_SNAP_TOLERANCE: float = 8.0
-DOCK_DWELL_MS: float = 120.0
+DOCK_DWELL_MS: float = 180.0
 
 # Corners snap from farther away than plain edges so they win whenever the map
 # is near one. The centered edge docks are narrow: the map center must sit
@@ -56,10 +56,10 @@ TYPE_LIST_ANIM_DURATION: float = 0.06
 EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
 
 # Scrollbar appearance
-SCROLLBAR_THICKNESS: float = 3.0
-SCROLLBAR_THICKNESS_HOVER: float = 6.0
+SCROLLBAR_THICKNESS: float = 4.0
+SCROLLBAR_THICKNESS_HOVER: float = 7.0
 SCROLLBAR_INSET: float = 2.0
-SCROLLBAR_MIN_THUMB: float = 6.0
+SCROLLBAR_MIN_THUMB: float = 14.0
 SCROLLBAR_ALPHA: float = 0.65
 TYPE_LIST_ANIM_AWAIT_TIMEOUT: float = 1.0
 TYPE_LIST_MIN_LABEL_W: float = 32.0
