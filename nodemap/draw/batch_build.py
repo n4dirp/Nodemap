@@ -908,10 +908,12 @@ def _convert_wire_endpoints(
         if use_curve:
             # Cubic Bezier matching Blender's node link type (ease-out /
             # ease-in): horizontal handles whose length scales with the
-            # horizontal span only, exactly like
-            # ``dist = curving * 0.10 * |x3 - x0|`` in
-            # ``calculate_inner_link_bezier_points``.
-            dist_h = curvature * 0.10 * abs(dx)
+            # horizontal span only, reduced near-horizontal links by the same
+            # slope clamp as ``calculate_inner_link_bezier_points``
+            # (``factor = min(1.0, slope * (4.5 - 0.25 * curving))``).
+            slope = (abs(dy) / abs(dx)) if abs(dx) > 1e-9 else 0.0
+            factor = min(1.0, slope * (4.5 - 0.25 * curvature))
+            dist_h = curvature * 0.10 * abs(dx) * factor
             controls.append((x1, y1, x1 + dist_h, y1, x2 - dist_h, y2, x2, y2))
         else:
             length = math.hypot(dx, dy)
@@ -1009,7 +1011,7 @@ def _rebuild_wire_marker_batches(
                 wire_batches.append((color, batch, thickness * 0.5))
 
     dash_len = max(3.0, 4.0 * bake_scale)
-    dash_gap = max(2.0, 3.0 * bake_scale)
+    dash_gap = max(2.0, dash_len / 3.0)
     # Dashed wires for field / modifier sockets — reuse the same batch list
     # so content_draw draws them without any changes. The dash pattern is a
     # shader uniform for straight (one pill per segment) and curved batches
