@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+_ROW_HEADER = "header"
+_ROW_CHILD = "child"
+
 
 def normalize_query(query: str) -> str:
     """Strip surrounding whitespace and lowercase the search query."""
@@ -138,3 +141,22 @@ def filter_type_list(
     # query is active instead of applying its name/count sort.
     visible.sort(key=lambda item: (item[0], item[1].lower()))
     return [(label, count) for _rank, label, count in visible], effective, filtered_children
+
+
+def _iter_type_list_layout(
+    entries: list[tuple[str, str, float, int]],
+    children: dict[str, list[str]],
+    expanded: set,
+    row_h: float,
+):
+    """Yield `(kind, label, node_name, local_y_top)` for each list row."""
+    y = 0.0
+
+    for label, _count_text, _count_w, count in entries:
+        yield (_ROW_HEADER, label, None, y)
+        y -= row_h
+
+        if count > 1 and label in expanded:
+            for node_name in children.get(label, ()):
+                yield (_ROW_CHILD, label, node_name, y)
+                y -= row_h

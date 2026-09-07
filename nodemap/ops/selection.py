@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING
 import bpy
 
 from .. import __package__ as base_package
-from ..core.helpers import _find_node_at, _get_node_dims, _get_ui_scale
+from ..core.constants import BUTTON_SIZE
+from ..core.helpers import _find_node_at, _get_node_dims, _get_ui_scale, get_addon_preferences
+from ..core.list_filter import (
+    _ROW_CHILD,
+    _ROW_HEADER,
+    _iter_type_list_layout,
+    filter_type_list,
+)
 
 if TYPE_CHECKING:
     from bpy.types import Context, Event, Region
@@ -323,3 +330,154 @@ def select_single_node(
             node.select = True
             node_tree.nodes.active = node
     op._redraw_ui()
+
+
+def _find_list_row_index(
+    rows: list[tuple],
+    label: str,
+    node_name: str,
+    target_is_child: bool,
+) -> int | None:
+    """Return the index of *label*'s target row in *rows*, or None.
+
+    The node's own child row is preferred when it is listed; the header row
+    is the fallback (single-node types list no child rows, and a child may be
+    hidden by an active search). Returns None when the label has no row at all.
+    """
+    header_index = None
+    child_index = None
+    for index, (kind, row_label, row_node_name, _local_y) in enumerate(rows):
+        if row_label != label:
+            continue
+        if kind == _ROW_HEADER:
+            if header_index is None:
+                header_index = index
+        elif kind == _ROW_CHILD and row_node_name == node_name:
+            if child_index is None:
+                child_index = index
+    if target_is_child and child_index is not None:
+        return child_index
+    if header_index is not None:
+        return header_index
+    return child_index
+
+
+def _scroll_list_to_row(
+    state: MinimapState,
+    row_count: int,
+    row_index: int,
+    row_h: float,
+    settings,
+) -> bool:
+    """Scroll the type list to reveal *row_index*; return True when it changed.
+
+    The row is aligned to the viewport top when it is below the current view
+    and to the bottom when it is above. A row already visible leaves the
+    scroll untouched. The scroll is clamped to *row_count*'s range; the next
+    draw pass re-clamps to the exact (possibly grown) scroll max.
+    """
+    zone_rect = state.list.list_zone_rect
+    if zone_rect is None:
+        return False
+    ui_scale = _get_ui_scale()
+    search_h = (BUTTON_SIZE - 1) * ui_scale if settings.show_search_bar else 0.0
+    row_pad_v = ui_scale
+    view_h = max(zone_rect[3] - search_h - 2 * row_pad_v - 1, row_h)
+    scroll_max = max(0.0, row_count * row_h - view_h)
+
+    scroll = state.list.scroll
+    row_top = row_index * row_h
+    row_bottom = (row_index + 1) * row_h
+    if row_top < scroll + view_h and row_bottom > scroll:
+        return False
+
+    if row_bottom <= scroll:
+        new_scroll = row_bottom - view_h
+    else:
+        new_scroll = row_top
+    new_scroll = min(max(new_scroll, 0.0), scroll_max)
+    if new_scroll == scroll:
+        return False
+    state.list.scroll = new_scroll
+    return True
+
+
+def focus_list_on_active_node(op: NODEMAP_OT_navigate, context: Context) -> None:
+    """Expand and scroll the type list to reveal the active node's row.
+
+    No-op when the type list is hidden or there is no active node. When the
+    active node's type group holds more than one node the group is expanded so
+    the node gets its own child row. The list scroll is set to bring the target
+    row into view without touching the node editor view.
+    """
+    prefs = get_addon_preferences(context)
+    settings = prefs.settings if prefs else None
+    state = op._state
+    if settings is None or state is None:
+        return
+    if state.list.list_width <= 0:
+        return
+    node_tree = op._space.edit_tree if op._space else None
+    if not node_tree:
+        return
+    active_node = node_tree.nodes.active
+    if active_node is None:
+        return
+
+    tree_data = state.tree_data() or {}
+    type_nodes = tree_data.get("type_nodes") or {}
+    type_stats = tree_data.get("type_stats") or {}
+    search_texts = tree_data.get("type_search") or None
+
+    label = None
+    for key, names in type_nodes.items():
+        if active_node.name in names:
+            label = key
+            break
+    if label is None:
+        label = tree_data.get("type_active_label")
+    if not label:
+        return
+
+    target_is_child = type_stats.get(label, 0) > 1
+
+    changed = False
+    if target_is_child and label not in state.list.expanded:
+        state.list.expanded.add(label)
+        state.cache.list_key = None
+        changed = True
+
+    # Rebuild the rows exactly as the next draw pass will so the target index
+    # lines up with the rendered layout.
+    visible, effective_expanded, filtered_children = filter_type_list(
+        type_stats,
+        type_nodes,
+        state.list.expanded,
+        state.list.search_query,
+        search_texts=search_texts,
+    )
+    effective_expanded = effective_expanded or set()
+    filtered_children = filtered_children or {}
+
+    if not state.list.search_query.strip():
+        if settings.type_list_sort == "NAME":
+            visible.sort(key=lambda label_count: label_count[0].lower())
+        else:
+            visible.sort(key=lambda label_count: (-label_count[1], label_count[0]))
+
+    entries: list[tuple[str, str, float, int]] = []
+    for entry_label, display_count in visible:
+        full_count = type_stats.get(entry_label, display_count)
+        entries.append((entry_label, str(display_count), 0.0, full_count))
+
+    row_h = state.list.row_height
+    rows = list(_iter_type_list_layout(entries, filtered_children, effective_expanded, row_h))
+    row_index = _find_list_row_index(rows, label, active_node.name, target_is_child)
+    if row_index is None:
+        return
+
+    if _scroll_list_to_row(state, len(rows), row_index, row_h, settings):
+        changed = True
+
+    if changed:
+        op._redraw_ui()

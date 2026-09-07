@@ -1428,6 +1428,7 @@ class NODEMAP_OT_navigate(Operator):
                         self._anim.start_frame_animation(context, target_zoom, [targets[1], targets[2]])
                 else:
                     frame_selected(self._space, self._region, area_ptr)
+                selection.focus_list_on_active_node(self, context)
 
     def _pan_view(self, context: Context, dx: int, dy: int, smooth: bool = False) -> None:
         state = self._state

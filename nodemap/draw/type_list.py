@@ -30,6 +30,9 @@ from ..core.helpers import (
     _schedule_list_anim_redraw,
 )
 from ..core.list_filter import (
+    _ROW_CHILD,
+    _ROW_HEADER,
+    _iter_type_list_layout,
     filter_type_list,
     match_span,
     normalize_query,
@@ -50,8 +53,6 @@ from .gpu_draw import (
     _get_batch_rect_shader,
 )
 
-_ROW_HEADER = "header"
-_ROW_CHILD = "child"
 _DEFAULT_ENTRY = ("", 0.0, 1)
 
 
@@ -257,7 +258,7 @@ def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: floa
         1.0,
     )
     opening = state.list.anim_target >= state.list.anim_from
-    eased = 1.0 - (1.0 - progress) ** 3 if opening else progress ** 3
+    eased = 1.0 - (1.0 - progress) ** 3 if opening else progress**3
     new_width = state.list.anim_from + (state.list.anim_target - state.list.anim_from) * eased
 
     if progress >= 1.0:
@@ -621,8 +622,8 @@ def _header_type_color(
     return type_colors.get(label, colors["node"])
 
 
-def _group_header_text(label: str, count: int, children: dict, nodes_by_name: dict) -> str:
-    """Return header text, appending `(label)` for a lone group node."""
+def _type_header_text(label: str, count: int, children: dict, nodes_by_name: dict) -> str:
+    """Return header text, appending the lone node's label or group tree name."""
     if count != 1:
         return label
 
@@ -631,7 +632,7 @@ def _group_header_text(label: str, count: int, children: dict, nodes_by_name: di
         return label
 
     node = (nodes_by_name or {}).get(names[0])
-    if node is None or getattr(node, "type", "") != "GROUP":
+    if node is None:
         return label
 
     try:
@@ -639,17 +640,22 @@ def _group_header_text(label: str, count: int, children: dict, nodes_by_name: di
     except Exception:
         node_label = ""
 
+    if node_label:
+        return f"{label} ({node_label})"
+
+    if getattr(node, "type", "") != "GROUP":
+        return label
+
     try:
         tree = getattr(node, "node_tree", None)
         tree_name = getattr(tree, "name", "") if tree is not None else ""
     except Exception:
         tree_name = ""
 
-    sub = node_label or tree_name
-    if not sub:
+    if not tree_name:
         return label
 
-    return f"{label} ({sub})"
+    return f"{label} ({tree_name})"
 
 
 def _child_label_text(node_name: str, node) -> str:
@@ -671,25 +677,6 @@ def _child_label_text(node_name: str, node) -> str:
         return tree.name
 
     return node_name
-
-
-def _iter_type_list_layout(
-    entries: list[tuple[str, str, float, int]],
-    children: dict[str, list[str]],
-    expanded: set,
-    row_h: float,
-):
-    """Yield `(kind, label, node_name, local_y_top)` for each list row."""
-    y = 0.0
-
-    for label, _count_text, _count_w, count in entries:
-        yield (_ROW_HEADER, label, None, y)
-        y -= row_h
-
-        if count > 1 and label in expanded:
-            for node_name in children.get(label, ()):
-                yield (_ROW_CHILD, label, node_name, y)
-                y -= row_h
 
 
 def _draw_expand_guide_line(x: float, top: float, height: float, ui_scale: float, color) -> None:
@@ -1445,7 +1432,7 @@ def _draw_list_text(
             else:
                 label_color = text_color
 
-            header_text = _group_header_text(label, full_count, children, nodes_by_name)
+            header_text = _type_header_text(label, full_count, children, nodes_by_name)
 
             blf.clipping(font_id, header_clip_left, clip_top, header_clip_right, clip_bottom)
             _draw_text_with_match(
