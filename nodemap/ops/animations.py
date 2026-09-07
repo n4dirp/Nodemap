@@ -184,6 +184,10 @@ class AnimationController:
             state.view.user_zoom = self.frame_anim_target_zoom
             state.view.pan = (self.frame_anim_target_pan[0], self.frame_anim_target_pan[1])
             _clamp_pan_to_viewport(op._space, op._region, state)
+            # The final frame lands inside the zoom-settle window, which would
+            # defer the batch rebuild; force it so the bake matches the target
+            # scale even if no later redraw follows.
+            state.cache._batches_dirty = True
         self.frame_anim_active = False
         self.frame_anim_progress = 0.0
         self.destroy_timer(context)

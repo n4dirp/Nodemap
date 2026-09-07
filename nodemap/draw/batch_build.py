@@ -177,6 +177,8 @@ class _BakeContext:
     cull_bottom: float
     cull_top: float
     show_borders: bool
+    node_backdrop: tuple
+    frame_backdrop: tuple
     hovered_type: str | None
     hovered_node_name: str | None
     highlight_outline: tuple | None
@@ -212,7 +214,11 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
     is_filtered_out = ctx.filter_names is not None and info.get("name") not in ctx.filter_names
     fill_color = info["fill_color"]
     if is_filtered_out:
-        fill_color = (fill_color[0], fill_color[1], fill_color[2], fill_color[3] * 0.25)
+        # Non-matching nodes fall back to the default backdrop colors
+        # (node_backdrop for nodes, frame_node for frames) instead of their
+        # per-type color, keeping the dimmed alpha.
+        backdrop = ctx.frame_backdrop if is_frame else ctx.node_backdrop
+        fill_color = _alpha_mul(backdrop, 0.6)
 
     if is_frame:
         node_r = info["node_r_base"] * ctx.ui_scale * 1.6
@@ -607,6 +613,8 @@ def _ensure_minimap_batches(
     tree_center_y,
     ui_scale,
     master_alpha,
+    node_backdrop,
+    frame_backdrop,
     show_borders,
     list_visible=False,
     highlight_border=None,
@@ -816,6 +824,8 @@ def _ensure_minimap_batches(
         cull_bottom=cull_bottom,
         cull_top=cull_top,
         show_borders=show_borders,
+        node_backdrop=_srgb_to_linear(_alpha_mul(node_backdrop, master_alpha)),
+        frame_backdrop=_srgb_to_linear(_alpha_mul(frame_backdrop, master_alpha)),
         hovered_type=hovered_type,
         hovered_node_name=hovered_node_name,
         highlight_outline=highlight_outline,

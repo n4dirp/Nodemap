@@ -93,6 +93,10 @@ def frame_all(
     minimap_state.view.anchor_zoom = zoom
     minimap_state.view.user_zoom = zoom
     minimap_state.view.pan = (pan_x, pan_y)
+    # Force a batch rebuild on the next draw: the one-shot zoom/pan change must
+    # re-bake nodes/text at the new scale immediately, not wait for a settle
+    # window that may never flush (operators stop after a single redraw).
+    minimap_state.cache._batches_dirty = True
     _redraw()
 
 
@@ -140,6 +144,8 @@ def _frame_to_bounds(
     minimap_state.view.anchor_zoom = zoom
     minimap_state.view.user_zoom = zoom
     minimap_state.view.pan = (pan_x, pan_y)
+    # Force a batch rebuild on the next draw (see frame_all).
+    minimap_state.cache._batches_dirty = True
     _redraw()
 
 
@@ -295,6 +301,8 @@ def frame_selected(
         minimap_state.view.anchor_zoom = zoom
         minimap_state.view.user_zoom = zoom
     minimap_state.view.pan = (pan_x, pan_y)
+    # Force a batch rebuild on the next draw (see frame_all).
+    minimap_state.cache._batches_dirty = True
     _redraw()
 
 

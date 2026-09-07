@@ -1202,6 +1202,8 @@ def draw_minimap() -> None:
         tree_center_y,
         ui_scale,
         master_alpha,
+        colors["node"],
+        colors["frame_node"],
         show_borders,
         bool(settings.show_type_list),
         highlight_border,
