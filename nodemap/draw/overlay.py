@@ -3,6 +3,7 @@
 import logging
 import math
 import time
+from typing import Any
 
 import blf
 import bpy
@@ -272,7 +273,7 @@ def _teardown_scissor(saved_state: tuple[bool, bool, tuple[int, int, int, int]])
 
 
 def _draw_background(
-    map_x: float, map_y: float, map_w: float, map_h: float, colors: dict, master_alpha: float
+    map_x: float, map_y: float, map_w: float, map_h: float, colors: dict, master_alpha: float, mvp: Any = None
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
 
@@ -282,7 +283,7 @@ def _draw_background(
     border_color = _alpha_mul(colors["background_border"], master_alpha)
     border_width = 0.5
 
-    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color)
+    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color, mvp=mvp)
     _draw_rounded_rect_border(
         map_x - shadow_offset,
         map_y - shadow_offset,
@@ -291,22 +292,26 @@ def _draw_background(
         panel_roundness,
         (0, 0, 0, 0.15 * master_alpha),
         0.5,
+        mvp=mvp,
     )
-    _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
+    _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
 
     return bg_color, panel_roundness
 
 
-def _draw_moving_border(map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, moving, snapped):
+def _draw_moving_border(
+    map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, moving, snapped, mvp: Any = None
+):
     if moving:
-        bg_color = _alpha_mul(colors["background"], 0.3 * master_alpha)
-        panel_roundness = colors.get("panel_roundness", 4.0)
-        _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color)
+        # bg_color = _alpha_mul(colors["background"], 0.2 * master_alpha)
+        _draw_filled_rounded_rect(
+            map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.4 * master_alpha), mvp=mvp
+        )
 
         if not snapped:
             border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
             border_width = 0.5 * ui_scale
-            _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
+            _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
 
 
 def _draw_edge_pills(
@@ -316,6 +321,7 @@ def _draw_edge_pills(
     map_h: float,
     ui_scale: float,
     side_colors: dict[str, tuple[float, float, float, float]] | None,
+    mvp: Any = None,
 ) -> None:
     """Draw a highlight pill on each map side with a non-None color."""
     if not side_colors:
@@ -325,15 +331,15 @@ def _draw_edge_pills(
     inset = 2.0 * ui_scale
     if (color := side_colors.get("top")) is not None:
         _draw_filled_rounded_rect(
-            map_x + margin, map_y + map_h - inset - thickness, map_w - 2 * margin, thickness, 0, color
+            map_x + margin, map_y + map_h - inset - thickness, map_w - 2 * margin, thickness, 0, color, mvp=mvp
         )
     if (color := side_colors.get("bottom")) is not None:
-        _draw_filled_rounded_rect(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, 0, color)
+        _draw_filled_rounded_rect(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, 0, color, mvp=mvp)
     if (color := side_colors.get("left")) is not None:
-        _draw_filled_rounded_rect(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, 0, color)
+        _draw_filled_rounded_rect(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, 0, color, mvp=mvp)
     if (color := side_colors.get("right")) is not None:
         _draw_filled_rounded_rect(
-            map_x + map_w - inset - thickness, map_y + margin, thickness, map_h - 2 * margin, 0, color
+            map_x + map_w - inset - thickness, map_y + margin, thickness, map_h - 2 * margin, 0, color, mvp=mvp
         )
 
 
@@ -346,6 +352,7 @@ def _draw_resize_handles(
     master_alpha: float,
     ui_scale: float,
     state: MinimapState,
+    mvp: Any = None,
 ) -> None:
     """Draw full-edge resize indicators, colored orange when the percentage cap is active."""
     resize_handle = state.interaction.resize_active
@@ -377,7 +384,7 @@ def _draw_resize_handles(
         )
         # Clamp to zone vertical extent with small margin so pill stays inside.
         divider_color = color_warn if state.list.width_clamped else color_base
-        _draw_filled_rounded_rect(round(divider_x), zone_y, handle_thickness, zone_height, 0, divider_color)
+        _draw_filled_rounded_rect(round(divider_x), zone_y, handle_thickness, zone_height, 0, divider_color, mvp=mvp)
         return
 
     width_side = None
@@ -396,7 +403,7 @@ def _draw_resize_handles(
         side_colors[width_side] = color_warn if width_clamped else color_base
     if height_side:
         side_colors[height_side] = color_warn if height_clamped else color_base
-    _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, side_colors or None)
+    _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, side_colors or None, mvp=mvp)
 
 
 def _draw_view_fill(
@@ -416,6 +423,7 @@ def _draw_view_fill(
     master_alpha: float,
     ui_scale: float,
     visible: tuple[float, float, float, float] | None = None,
+    mvp: Any = None,
 ) -> None:
     """Draw a filled rect over the active view region, behind nodes and wires."""
     if visible is None:
@@ -452,6 +460,7 @@ def _draw_view_fill(
         map_w,
         map_h,
         panel_roundness * 1.2,
+        mvp=mvp,
     )
 
 
@@ -475,6 +484,7 @@ def _draw_viewport_overlay(
     scissor_active: bool,
     state: MinimapState | None = None,
     visible: tuple[float, float, float, float] | None = None,
+    mvp: Any = None,
 ) -> None:
     """Draw the viewport rect outline and optional darkened overlay."""
     if visible is None:
@@ -519,9 +529,10 @@ def _draw_viewport_overlay(
                     hole_height,
                     0,
                     overlay,
+                    mvp=mvp,
                 )
             else:
-                _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness, overlay)
+                _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness, overlay, mvp=mvp)
         finally:
             if scissor_temporarily_disabled:
                 gpu.state.scissor_test_set(True)
@@ -530,7 +541,7 @@ def _draw_viewport_overlay(
     if hole_width > 0 and hole_height > 0:
         outline_color = _alpha_mul(colors["viewport_fill"], master_alpha)
         border_width = 1.5 * ui_scale
-        _draw_rounded_rect_border(view_x, view_y, view_w, view_h, node_roundness, outline_color, border_width)
+        _draw_rounded_rect_border(view_x, view_y, view_w, view_h, node_roundness, outline_color, border_width, mvp=mvp)
 
 
 def _draw_node_count(
@@ -562,28 +573,44 @@ def _draw_node_count(
     _draw_text_with_shadow(font_id, info_text, text_x, text_y, text_color, font_size, settings.show_text_shadow)
 
 
-def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw the frame-all corner brackets icon."""
     inset = 5 * ui_scale
     stroke_thickness = max(1, int(1.5 * ui_scale))
     arm_length = size * 0.15
 
     # Top-left bracket
-    _draw_filled_rounded_rect(x + inset, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color)
-    _draw_filled_rounded_rect(x + inset, y + inset, stroke_thickness, arm_length, stroke_thickness * 0.5, color)
-    # Top-right bracket
     _draw_filled_rounded_rect(
-        x + size - inset - arm_length, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color
+        x + inset, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
     )
     _draw_filled_rounded_rect(
-        x + size - inset - stroke_thickness, y + inset, stroke_thickness, arm_length, stroke_thickness * 0.5, color
+        x + inset, y + inset, stroke_thickness, arm_length, stroke_thickness * 0.5, color, mvp=mvp
+    )
+    # Top-right bracket
+    _draw_filled_rounded_rect(
+        x + size - inset - arm_length, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
+    )
+    _draw_filled_rounded_rect(
+        x + size - inset - stroke_thickness,
+        y + inset,
+        stroke_thickness,
+        arm_length,
+        stroke_thickness * 0.5,
+        color,
+        mvp=mvp,
     )
     # Bottom-left bracket
     _draw_filled_rounded_rect(
-        x + inset, y + size - inset - stroke_thickness, arm_length, stroke_thickness, stroke_thickness * 0.5, color
+        x + inset,
+        y + size - inset - stroke_thickness,
+        arm_length,
+        stroke_thickness,
+        stroke_thickness * 0.5,
+        color,
+        mvp=mvp,
     )
     _draw_filled_rounded_rect(
-        x + inset, y + size - inset - arm_length, stroke_thickness, arm_length, stroke_thickness * 0.5, color
+        x + inset, y + size - inset - arm_length, stroke_thickness, arm_length, stroke_thickness * 0.5, color, mvp=mvp
     )
     # Bottom-right bracket
     _draw_filled_rounded_rect(
@@ -593,6 +620,7 @@ def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: floa
         stroke_thickness,
         stroke_thickness * 0.5,
         color,
+        mvp=mvp,
     )
     _draw_filled_rounded_rect(
         x + size - inset - stroke_thickness,
@@ -601,10 +629,11 @@ def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: floa
         arm_length,
         stroke_thickness * 0.5,
         color,
+        mvp=mvp,
     )
 
 
-def _paint_frame_view_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+def _paint_frame_view_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw the frame-view viewport rectangle icon."""
     inset = 5 * ui_scale
     border_thickness = max(4, int(4.0 * ui_scale))
@@ -616,17 +645,20 @@ def _paint_frame_view_icon(x: float, y: float, size: float, color, ui_scale: flo
         border_thickness,
         color,
         0.5 * ui_scale,
+        mvp=mvp,
     )
 
 
-def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw the frame-selected rails and center box icon."""
     inset = 5 * ui_scale
     stroke_thickness = max(1, int(1.5 * ui_scale))
     arm_length = size * 0.15
 
     # Left/right rails connecting top and bottom corners
-    _draw_filled_rounded_rect(x + inset, y + inset, stroke_thickness, size - 2 * inset, stroke_thickness * 0.5, color)
+    _draw_filled_rounded_rect(
+        x + inset, y + inset, stroke_thickness, size - 2 * inset, stroke_thickness * 0.5, color, mvp=mvp
+    )
     _draw_filled_rounded_rect(
         x + size - inset - stroke_thickness,
         y + inset,
@@ -634,14 +666,23 @@ def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale:
         size - 2 * inset,
         stroke_thickness * 0.5,
         color,
+        mvp=mvp,
     )
     # Corner arms
-    _draw_filled_rounded_rect(x + inset, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color)
     _draw_filled_rounded_rect(
-        x + size - inset - arm_length, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color
+        x + inset, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
     )
     _draw_filled_rounded_rect(
-        x + inset, y + size - inset - stroke_thickness, arm_length, stroke_thickness, stroke_thickness * 0.5, color
+        x + size - inset - arm_length, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
+    )
+    _draw_filled_rounded_rect(
+        x + inset,
+        y + size - inset - stroke_thickness,
+        arm_length,
+        stroke_thickness,
+        stroke_thickness * 0.5,
+        color,
+        mvp=mvp,
     )
     _draw_filled_rounded_rect(
         x + size - inset - arm_length,
@@ -650,16 +691,19 @@ def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale:
         stroke_thickness,
         stroke_thickness * 0.5,
         color,
+        mvp=mvp,
     )
 
     # Center box
     center_box_w = center_box_h = 2 * ui_scale
     center_box_x = x + (size - center_box_w) / 2
     center_box_y = y + (size - center_box_h) / 2
-    _draw_filled_rounded_rect(center_box_x, center_box_y, center_box_w, center_box_h, 1.5 * ui_scale, color)
+    _draw_filled_rounded_rect(center_box_x, center_box_y, center_box_w, center_box_h, 1.5 * ui_scale, color, mvp=mvp)
 
 
-def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: float, active: bool = False) -> None:
+def _paint_list_toggle_icon(
+    x: float, y: float, size: float, color, ui_scale: float, active: bool = False, mvp: Any = None
+) -> None:
     """Draw the list-toggle icon: three horizontal bars, or an X when active."""
     stroke_thickness = max(1, int(1.5 * ui_scale))
     if not active:
@@ -676,6 +720,7 @@ def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: fl
                 stroke_thickness,
                 stroke_thickness * 0.5,
                 color,
+                mvp=mvp,
             )
         return
 
@@ -706,7 +751,7 @@ _BUTTON_ICONS = {
 }
 
 
-def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float) -> None:
+def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw a move grip icon: two rows of four dots (like a drag handle)."""
     dot_size = 1.0 * ui_scale
     gap = 2.0 * ui_scale
@@ -724,6 +769,7 @@ def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float) ->
                 dot_size,
                 dot_size / 2,
                 color,
+                mvp=mvp,
             )
 
 
@@ -844,7 +890,9 @@ def _layout_minimap_buttons(
     return rects
 
 
-def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count=0):
+def _draw_minimap_buttons(
+    map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count=0, mvp: Any = None
+):
     """Draw the interactive minimap buttons and record their hit rects."""
     settings = get_addon_preferences().settings
     state = _state()
@@ -863,19 +911,19 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
     if "DRAG" in rects and settings.interactive:
         drag_x, drag_y, drag_size = rects["DRAG"]
         drag_h = BUTTON_SIZE * ui_scale
-        _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color)
-        _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, border_color, 0.5)
+        _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color, mvp=mvp)
+        _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, border_color, 0.5, mvp=mvp)
         is_moving = state.view.moving
         is_hovered = state.buttons.hovered_button_id == "DRAG"
         if is_moving or is_hovered:
             hover_color = _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
             _draw_filled_rounded_rect(
-                drag_x + 1, drag_y + 1, drag_size - 2, drag_h - 2, max(2.0, radius - 1), hover_color
+                drag_x + 1, drag_y + 1, drag_size - 2, drag_h - 2, max(2.0, radius - 1), hover_color, mvp=mvp
             )
         icon_color = (
             _alpha_mul(colors["text"], master_alpha) if is_moving else _alpha_mul(colors["text"], master_alpha * 0.7)
         )
-        _paint_grip_icon(drag_x, drag_y, drag_h, icon_color, ui_scale)
+        _paint_grip_icon(drag_x, drag_y, drag_h, icon_color, ui_scale, mvp=mvp)
         state.buttons.rects["DRAG"] = (drag_x, drag_y, drag_size, drag_h)
 
     if not visible_button_ids:
@@ -912,7 +960,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
                 radii = (0.0, radius, radius, 0.0)
             else:
                 radii = (0.0, 0.0, 0.0, 0.0)
-            _draw_filled_rounded_rect_varying(button_x, button_y, button_size, button_size, radii, bg_color)
+            _draw_filled_rounded_rect_varying(button_x, button_y, button_size, button_size, radii, bg_color, mvp=mvp)
             _draw_rounded_rect_border_varying_sides(
                 button_x,
                 button_y,
@@ -922,6 +970,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
                 border_color,
                 0.5,
                 skip_left=button_index > 0,
+                mvp=mvp,
             )
 
     for button_id, _pref_attr in _MINIMAP_BUTTONS:
@@ -929,8 +978,8 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
             continue
         button_x, button_y, button_size = rects[button_id]
         if button_id == "LIST" or not is_combined:
-            _draw_filled_rounded_rect(button_x, button_y, button_size, button_size, radius, bg_color)
-            _draw_rounded_rect_border(button_x, button_y, button_size, button_size, radius, border_color, 0.5)
+            _draw_filled_rounded_rect(button_x, button_y, button_size, button_size, radius, bg_color, mvp=mvp)
+            _draw_rounded_rect_border(button_x, button_y, button_size, button_size, radius, border_color, 0.5, mvp=mvp)
         is_hovered = state.buttons.hovered_button_id == button_id
         icon_color = _alpha_mul(colors["text"], master_alpha)
         if is_hovered:
@@ -955,19 +1004,31 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
                     hover_x = button_x
                     hover_width = button_size
                 _draw_filled_rounded_rect_varying(
-                    hover_x, button_y + 1, hover_width, button_size - 2, hover_radii, hover_color
+                    hover_x, button_y + 1, hover_width, button_size - 2, hover_radii, hover_color, mvp=mvp
                 )
             else:
                 _draw_filled_rounded_rect(
-                    button_x + 1, button_y + 1, button_size - 2, button_size - 2, max(2.0, radius - 1), hover_color
+                    button_x + 1,
+                    button_y + 1,
+                    button_size - 2,
+                    button_size - 2,
+                    max(2.0, radius - 1),
+                    hover_color,
+                    mvp=mvp,
                 )
             # icon_color = _alpha_mul(colors["text"], master_alpha)
         if button_id == "LIST":
             _paint_list_toggle_icon(
-                button_x, button_y, button_size, icon_color, ui_scale, active=bool(settings and settings.show_type_list)
+                button_x,
+                button_y,
+                button_size,
+                icon_color,
+                ui_scale,
+                active=bool(settings and settings.show_type_list),
+                mvp=mvp,
             )
         else:
-            _BUTTON_ICONS[button_id](button_x, button_y, button_size, icon_color, ui_scale)
+            _BUTTON_ICONS[button_id](button_x, button_y, button_size, icon_color, ui_scale, mvp=mvp)
         state.buttons.rects[button_id] = (button_x, button_y, button_size, button_size)
 
 
@@ -1223,7 +1284,12 @@ def draw_minimap() -> None:
         original_blend = None
     gpu.state.blend_set("ALPHA")
 
-    bg_color, panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha)
+    # Base MVP for the frame's chrome. The top-level matrix is invariant
+    # across these draws (every push restores), so thread it down instead
+    # of recomposing it per rect.
+    base_mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+
+    bg_color, panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha, mvp=base_mvp)
 
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]
@@ -1245,6 +1311,7 @@ def draw_minimap() -> None:
         master_alpha,
         ui_scale,
         visible,
+        mvp=base_mvp,
     )
 
     content_draw.draw_content_batches(
@@ -1279,6 +1346,7 @@ def draw_minimap() -> None:
         scissor_was_active,
         state,
         visible=visible,
+        mvp=base_mvp,
     )
 
     _draw_minimap_scrollbars(
@@ -1296,9 +1364,12 @@ def draw_minimap() -> None:
         colors,
         ui_scale,
         master_alpha,
+        mvp=base_mvp,
     )
 
-    _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count)
+    _draw_minimap_buttons(
+        map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count, mvp=base_mvp
+    )
 
     _draw_node_count(settings, content_count, state, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
 
@@ -1320,7 +1391,7 @@ def draw_minimap() -> None:
     # Interactive node-type list zone (drawn unclipped, on top of map content)
     try:
         gpu.state.blend_set("ALPHA")
-        _draw_type_list(settings, state, map_x, map_y, map_h, padding, colors, master_alpha, ui_scale)
+        _draw_type_list(settings, state, map_x, map_y, map_h, padding, colors, master_alpha, ui_scale, mvp=base_mvp)
 
         _draw_moving_border(
             map_x,
@@ -1333,13 +1404,16 @@ def draw_minimap() -> None:
             ui_scale,
             state.view.moving,
             state.view.snapped,
+            mvp=base_mvp,
         )
 
-        _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state)
+        _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state, mvp=base_mvp)
 
         if state.view.snapped and (snap_sides := _snap_sides_for(settings.current_position)):
             snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-            _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, {side: snap_color for side in snap_sides})
+            _draw_edge_pills(
+                map_x, map_y, map_w, map_h, ui_scale, {side: snap_color for side in snap_sides}, mvp=base_mvp
+            )
 
     finally:
         try:

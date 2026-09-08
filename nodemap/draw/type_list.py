@@ -2,9 +2,10 @@
 
 import math
 import time
+from functools import partial
+from typing import Any
 
 import blf
-import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
@@ -86,6 +87,7 @@ def _draw_scrollbar_thumb(
     horizontal: bool = False,
     active: bool = False,
     pressed: bool = False,
+    mvp: Any = None,
 ) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
     """Draw a scrollbar thumb pill and return `(thumb_rect, track_rect)`.
 
@@ -112,10 +114,10 @@ def _draw_scrollbar_thumb(
     offset = int((track_len - thumb_len) * min(max(pos_frac, 0.0), 1.0))
 
     if horizontal:
-        _draw_pill(x + offset, y, thumb_len, thick, color)
+        _draw_pill(x + offset, y, thumb_len, thick, color, mvp=mvp)
         return (x + offset, y, thumb_len, thick), (x, y, track_len, thick)
 
-    _draw_pill(x, y + offset, thick, thumb_len, color)
+    _draw_pill(x, y + offset, thick, thumb_len, color, mvp=mvp)
     return (x, y + offset, thick, thumb_len), (x, y, thick, track_len)
 
 
@@ -134,6 +136,7 @@ def _draw_minimap_scrollbars(
     colors,
     ui_scale,
     master_alpha,
+    mvp: Any = None,
 ):
     """Draw horizontal/vertical minimap scrollbar thumbs when zoomed in."""
     inner_l = map_x + padding
@@ -180,6 +183,7 @@ def _draw_minimap_scrollbars(
             master_alpha,
             ui_scale,
             horizontal=True,
+            mvp=mvp,
         )
 
     if visible_h < bbox_h:
@@ -193,6 +197,7 @@ def _draw_minimap_scrollbars(
             colors,
             master_alpha,
             ui_scale,
+            mvp=mvp,
         )
 
 
@@ -326,17 +331,20 @@ def _type_list_cache_key(
 def _build_type_list_cache(
     state: MinimapState,
     settings,
-    node_tree,
     key: tuple,
     colors: dict,
     master_alpha: float,
     ui_scale: float,
 ) -> None:
-    """Build cached entries, row layout, entry map, and baked glyph batch."""
+    """Build cached entries, row layout, entry map, and baked glyph batch.
+
+    Per-node display metadata (label / tree name / selection) is read from the
+    compile-time ``type_node_meta`` table, never from live node proxies: a node
+    deleted while the minimap is open would otherwise leave a dangling proxy in
+    this cache that crashes Blender at the C level on the next draw.
+    """
     tree_data = state.tree_data() or {}
     type_stats = tree_data.get("type_stats") or {}
-
-    state.cache.list_nodes_by_name = {n.name: n for n in node_tree.nodes} if node_tree else {}
 
     font_id = TYPE_LIST_FONT_ID
     font_size = int(settings.type_list_font_size * ui_scale)
@@ -629,7 +637,21 @@ def _header_type_color(
     return type_colors.get(label, colors["node_backdrop"])
 
 
-def _type_header_text(label: str, count: int, children: dict, nodes_by_name: dict) -> str:
+def _header_is_fully_active(
+    label: str,
+    full_count: int,
+    selected_count: int,
+    type_active: str | None,
+) -> bool:
+    """Return True when a header row should render in its active state.
+
+    A header is active only for itself (a one-node type lists no child rows)
+    or when every child of the type is selected and one of them is active.
+    """
+    return label == type_active and selected_count >= full_count
+
+
+def _type_header_text(label: str, count: int, children: dict, meta_by_name: dict) -> str:
     """Return header text, appending the lone node's label or group tree name."""
     if count != 1:
         return label
@@ -638,58 +660,36 @@ def _type_header_text(label: str, count: int, children: dict, nodes_by_name: dic
     if not names:
         return label
 
-    node = (nodes_by_name or {}).get(names[0])
-    if node is None:
+    meta = (meta_by_name or {}).get(names[0])
+    if meta is None:
         return label
 
-    try:
-        node_label = getattr(node, "label", "")
-    except Exception:
-        node_label = ""
-
+    node_label, tree_name = meta[0], meta[1]
     if node_label:
         return f"{label} ({node_label})"
-
-    if getattr(node, "type", "") != "GROUP":
-        return label
-
-    try:
-        tree = getattr(node, "node_tree", None)
-        tree_name = getattr(tree, "name", "") if tree is not None else ""
-    except Exception:
-        tree_name = ""
-
-    if not tree_name:
-        return label
-
-    return f"{label} ({tree_name})"
+    if tree_name:
+        return f"{label} ({tree_name})"
+    return label
 
 
-def _child_label_text(node_name: str, node) -> str:
+def _child_label_text(node_name: str, meta_by_name: dict) -> str:
     """Return child row text: `name (label)` or group tree-name fallback."""
-    try:
-        label = getattr(node, "label", "")
-    except Exception:
-        label = ""
+    meta = (meta_by_name or {}).get(node_name)
+    if meta is None:
+        return node_name
 
+    label, tree_name = meta[0], meta[1]
     if label:
         return f"{node_name} ({label})"
-
-    try:
-        tree = getattr(node, "node_tree", None)
-    except Exception:
-        tree = None
-
-    if tree is not None and getattr(tree, "name", ""):
-        return tree.name
-
+    if tree_name:
+        return tree_name
     return node_name
 
 
-def _draw_expand_guide_line(x: float, top: float, height: float, ui_scale: float, color) -> None:
+def _draw_expand_guide_line(x: float, top: float, height: float, ui_scale: float, color, mvp: Any = None) -> None:
     """Draw a vertical guide under the expand icon, spanning child rows."""
     t = max(1.0, 1.0 * ui_scale)
-    _draw_filled_rounded_rect(x - t / 2, top - height, t, height, t / 2, color)
+    _draw_filled_rounded_rect(x - t / 2, top - height, t, height, t / 2, color, mvp=mvp)
 
 
 def _draw_text_with_match(
@@ -834,18 +834,12 @@ def _clear_list_interaction(state: MinimapState) -> None:
     state.list.visible_row_index_map = {}
 
 
-def _resolve_child_state(nodes_by_name, node_name, active_node):
-    """Return `(node, is_active, is_selected)` for a child row."""
-    try:
-        node = nodes_by_name.get(node_name) if nodes_by_name else None
-        is_active = bool(active_node and node == active_node)
-        is_selected = bool(node and node.select)
-    except Exception:
-        node = None
-        is_active = False
-        is_selected = False
-
-    return node, is_active, is_selected
+def _resolve_child_state(meta_by_name, node_name):
+    """Return `(is_active, is_selected)` for a child row from compile-time meta."""
+    meta = (meta_by_name or {}).get(node_name)
+    if meta is None:
+        return False, False
+    return bool(meta[3]), bool(meta[2])
 
 
 def _compute_zone_geometry(
@@ -863,6 +857,7 @@ def _compute_zone_geometry(
     colors: dict,
     master_alpha: float,
     ui_scale: float,
+    mvp: Any = None,
 ) -> dict:
     """Compute list zone metrics and draw the zone background."""
     font_size = layout["font_size"]
@@ -915,6 +910,7 @@ def _compute_zone_geometry(
         zone_h,
         zone_radius,
         _alpha_mul(colors["background"], master_alpha),
+        mvp=mvp,
     )
 
     _draw_rounded_rect_border(
@@ -925,6 +921,7 @@ def _compute_zone_geometry(
         zone_radius,
         _alpha_mul(colors["background_border"], master_alpha),
         0.5,
+        mvp=mvp,
     )
 
     view_top = search_bottom - row_pad_v + 1
@@ -1068,6 +1065,7 @@ def _draw_list_fills(
     visible_rows: list,
     entry_map: dict,
     header_has_visible: set,
+    mvp: Any = None,
 ) -> None:
     """Draw search pill, zebra bands, row fills, guides, and hit rects."""
     pill_x = geo["pill_x"]
@@ -1102,9 +1100,10 @@ def _draw_list_fills(
     search_draw_h = geo["search_draw_h"]
     header_slot_bottom = geo["header_slot_bottom"]
 
-    fill = _draw_filled_rounded_rect
-    border = _draw_rounded_rect_border
-    guide = _draw_expand_guide_line
+    # Bind the frame MVP once instead of recomposing it per row rect.
+    fill = partial(_draw_filled_rounded_rect, mvp=mvp)
+    border = partial(_draw_rounded_rect_border, mvp=mvp)
+    guide = partial(_draw_expand_guide_line, mvp=mvp)
     header_color = _header_type_color
 
     radius = 4.0 * ui_scale
@@ -1157,7 +1156,6 @@ def _draw_list_fills(
         _slot_bottom,
         row_idx,
         draw_y,
-        _node,
         _child_active,
         _child_selected,
     ) in visible_rows:
@@ -1175,18 +1173,19 @@ def _draw_list_fills(
         slot_bottom,
         _row_idx,
         draw_y,
-        _node,
         _child_active,
         _child_selected,
     ) in visible_rows:
         if kind != _ROW_HEADER:
             continue
 
-        is_active = label == type_active
+        full_count = entry_map.get(label, _DEFAULT_ENTRY)[2]
+        selected_count = type_selected_counts.get(label, 0)
+        is_active = _header_is_fully_active(label, full_count, selected_count, type_active)
 
         if is_active:
             fill(pill_x, draw_y, pill_w, row_draw_h, radius, active_fill_color)
-        elif type_selected_counts.get(label, 0) > 0:
+        elif selected_count > 0:
             fill(pill_x, draw_y, pill_w, row_draw_h, radius, selection_fill_color)
 
         if hovered == label:
@@ -1197,7 +1196,7 @@ def _draw_list_fills(
 
         header_rects.append((pill_x, slot_bottom, pill_w, row_h, label))
 
-        if entry_map.get(label, _DEFAULT_ENTRY)[2] > 1:
+        if full_count > 1:
             toggle_rects[label] = (content_x, slot_bottom, swatch + swatch_gap, row_h)
 
     state.list.row_rects = header_rects
@@ -1213,7 +1212,6 @@ def _draw_list_fills(
         slot_bottom,
         _row_idx,
         draw_y,
-        _node,
         child_active,
         child_selected,
     ) in visible_rows:
@@ -1272,10 +1270,11 @@ def _draw_list_text(
     master_alpha: float,
     ui_scale: float,
     entries,
-    nodes_by_name: dict,
+    meta_by_name: dict,
     geo: dict,
     visible_rows: list,
     entry_map: dict,
+    mvp: Any = None,
 ) -> None:
     """Draw glyph batch, row labels, counts, and search UI text."""
     _draw_list_glyph_batch(
@@ -1378,6 +1377,7 @@ def _draw_list_text(
                 search_draw_h,
                 0.0,
                 _alpha_mul(geo["active_border_color"], master_alpha),
+                mvp=mvp,
             )
 
         search_text = search_query if search_query else "Filter"
@@ -1420,7 +1420,6 @@ def _draw_list_text(
         _slot_bottom,
         _row_idx,
         draw_y,
-        node,
         child_active,
         child_selected,
     ) in visible_rows:
@@ -1428,9 +1427,10 @@ def _draw_list_text(
 
         if kind == _ROW_HEADER:
             count_text, count_width, full_count = entry_map.get(label, _DEFAULT_ENTRY)
+            selected_count = type_selected_counts.get(label, 0)
 
-            is_active = label == type_active
-            is_sel = type_selected_counts.get(label, 0) > 0
+            is_active = _header_is_fully_active(label, full_count, selected_count, type_active)
+            is_sel = selected_count > 0
 
             if is_active:
                 label_color = active_color
@@ -1439,7 +1439,7 @@ def _draw_list_text(
             else:
                 label_color = text_color
 
-            header_text = _type_header_text(label, full_count, children, nodes_by_name)
+            header_text = _type_header_text(label, full_count, children, meta_by_name)
 
             blf.clipping(font_id, header_clip_left, clip_top, header_clip_right, clip_bottom)
             _draw_text_with_match(
@@ -1468,7 +1468,7 @@ def _draw_list_text(
 
             blf.clipping(font_id, child_clip_left, clip_top, child_clip_right, clip_bottom)
 
-            label_text = _child_label_text(node_name, node)
+            label_text = _child_label_text(node_name, meta_by_name)
 
             _draw_text_with_match(
                 font_id,
@@ -1494,6 +1494,7 @@ def _draw_list_scrollbar(
     master_alpha: float,
     ui_scale: float,
     geo: dict,
+    mvp: Any = None,
 ) -> None:
     """Draw the vertical list scrollbar thumb when content overflows."""
     state.list.scrollbar_thumb = None
@@ -1520,6 +1521,7 @@ def _draw_list_scrollbar(
             track_h,
             SCROLLBAR_THICKNESS_HOVER / 2.0,
             hover_fill_color,
+            mvp=mvp,
         )
 
     _bar_thickness, bar_offset = _get_scrollbar_style(ui_scale)
@@ -1538,6 +1540,7 @@ def _draw_list_scrollbar(
         master_alpha,
         ui_scale,
         active=active,
+        mvp=mvp,
     )
 
     state.list.scrollbar_thumb = thumb_rect
@@ -1559,6 +1562,7 @@ def _draw_type_list(
     colors: dict,
     master_alpha: float,
     ui_scale: float,
+    mvp: Any = None,
 ) -> None:
     """Draw the interactive node-type list zone along the minimap's left edge."""
     state.list.row_rects = []
@@ -1579,15 +1583,12 @@ def _draw_type_list(
         _clear_list_interaction(state)
         return
 
-    node_tree = bpy.context.space_data.edit_tree if bpy.context.space_data else None
-
     key = _type_list_cache_key(state, settings, colors, master_alpha, ui_scale)
 
     if key != state.cache.list_key or not state.cache.list_layout:
         _build_type_list_cache(
             state,
             settings,
-            node_tree,
             key,
             colors,
             master_alpha,
@@ -1600,7 +1601,7 @@ def _draw_type_list(
     if expanded is None:
         expanded = state.list.expanded
 
-    nodes_by_name = state.cache.list_nodes_by_name or {}
+    meta_by_name = tree_data.get("type_node_meta") or {}
     layout = state.cache.list_layout or {}
 
     font_size = layout.get("font_size", int(settings.type_list_font_size * ui_scale))
@@ -1654,6 +1655,7 @@ def _draw_type_list(
         colors,
         master_alpha,
         ui_scale,
+        mvp=mvp,
     )
 
     saved_scissor = None
@@ -1668,8 +1670,6 @@ def _draw_type_list(
         gpu.state.scissor_set(*geo["view_scissor"])
         gpu.state.scissor_test_set(True)
         gpu.state.blend_set("ALPHA")
-
-        active_node = node_tree.nodes.active if node_tree else None
 
         view_top = geo["view_top"]
         view_bottom = geo["view_bottom"]
@@ -1693,13 +1693,11 @@ def _draw_type_list(
             draw_y = round(slot_bottom + row_gap_half)
 
             if kind == _ROW_CHILD:
-                node, child_active, child_selected = resolve_child(
-                    nodes_by_name,
+                child_active, child_selected = resolve_child(
+                    meta_by_name,
                     node_name,
-                    active_node,
                 )
             else:
-                node = None
                 child_active = False
                 child_selected = False
 
@@ -1711,7 +1709,6 @@ def _draw_type_list(
                     slot_bottom,
                     row_idx,
                     draw_y,
-                    node,
                     child_active,
                     child_selected,
                 )
@@ -1739,6 +1736,7 @@ def _draw_type_list(
             visible_rows,
             entry_map,
             header_has_visible,
+            mvp=mvp,
         )
 
         _draw_list_text(
@@ -1748,10 +1746,11 @@ def _draw_type_list(
             master_alpha,
             ui_scale,
             entries,
-            nodes_by_name,
+            meta_by_name,
             geo,
             visible_rows,
             entry_map,
+            mvp=mvp,
         )
 
     finally:
@@ -1767,4 +1766,4 @@ def _draw_type_list(
         except Exception:
             pass
 
-    _draw_list_scrollbar(state, colors, master_alpha, ui_scale, geo)
+    _draw_list_scrollbar(state, colors, master_alpha, ui_scale, geo, mvp=mvp)

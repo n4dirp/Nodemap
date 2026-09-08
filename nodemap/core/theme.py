@@ -1,5 +1,6 @@
 """Provide theme and color utilities for the minimap."""
 
+from functools import lru_cache
 from typing import Any
 
 import bpy
@@ -26,6 +27,8 @@ _COLOR_TAG_TO_THEME_ATTR: dict[str, str] = {
 }
 
 
+# Bounded: opacity-driven alpha values would grow an unbounded cache without limit.
+@lru_cache(maxsize=512)
 def _srgb_to_linear(color: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     """Convert an sRGB color tuple to linear color space."""
 

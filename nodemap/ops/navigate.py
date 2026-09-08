@@ -406,7 +406,7 @@ class NODEMAP_OT_frame_view(Operator):
 
     bl_idname = "nodemap.frame_view"
     bl_label = "Frame View"
-    bl_description = "Focus the minimap view on the current editor viewport.\nShortcut: Shift+Home"
+    bl_description = "Focus the minimap view on the current editor viewport.\nShortcut: End"
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
@@ -679,8 +679,14 @@ class NODEMAP_OT_navigate(Operator):
                 return self._handle_wheel(context, event)
 
             case "HOME":
+                if event.value == "PRESS" and in_minimap and not event.shift:
+                    self._dispatch_frame_action(context, settings, "ALL")
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
+            case "END":
                 if event.value == "PRESS" and in_minimap:
-                    self._dispatch_frame_action(context, settings, "VIEW" if event.shift else "ALL")
+                    self._dispatch_frame_action(context, settings, "VIEW")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -1515,7 +1521,7 @@ class NODEMAP_OT_navigate(Operator):
     def _dispatch_frame_action(self, context: Context, settings, button_id: str) -> None:
         """Run a frame action directly, or eased via animation when smooth pan applies.
 
-        Shared by the minimap button release and the Home / Numpad shortcuts.
+        Shared by the minimap button release and the Home / End / Numpad shortcuts.
         """
         state = self._state
         if not state:

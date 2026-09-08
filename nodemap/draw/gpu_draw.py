@@ -860,13 +860,15 @@ def _mvp() -> Any:
     return gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
 
 
-def _translated_mvp(tx: float, ty: float) -> Any:
+def _translated_mvp(tx: float, ty: float, mvp: Any = None) -> Any:
     """Return the ModelViewProjectionMatrix translated by ``(tx, ty)``.
 
     Cached quad batches are centred at the origin; an explicit translation
     matrix positions a quad at screen ``(tx, ty)`` (the rectangle centre).
+    Pass the frame's base *mvp* to skip recomputing it per rect.
     """
-    return _mvp() @ Matrix.Translation((tx, ty, 0.0))
+    base = mvp if mvp is not None else _mvp()
+    return base @ Matrix.Translation((tx, ty, 0.0))
 
 
 def _draw_text_with_shadow(
@@ -886,7 +888,7 @@ def _draw_text_with_shadow(
         blf.disable(font_id, blf.SHADOW)
 
 
-def _draw_filled_rounded_rect(x, y, width, height, radius, color):
+def _draw_filled_rounded_rect(x, y, width, height, radius, color, mvp: Any = None):
     if width <= 0 or height <= 0:
         return
     radius = max(0, min(radius, width / 2, height / 2))
@@ -896,7 +898,7 @@ def _draw_filled_rounded_rect(x, y, width, height, radius, color):
     batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radius", radius)
@@ -930,7 +932,7 @@ def _draw_filled_quad(
     batch.draw(shader)
 
 
-def _draw_filled_rounded_rect_varying(x, y, width, height, radii, color):
+def _draw_filled_rounded_rect_varying(x, y, width, height, radii, color, mvp: Any = None):
     if width <= 0 or height <= 0:
         return
     max_r = min(width / 2, height / 2)
@@ -941,7 +943,7 @@ def _draw_filled_rounded_rect_varying(x, y, width, height, radii, color):
     batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radii", radii)
@@ -960,6 +962,7 @@ def _draw_filled_rounded_rect_with_hole(
     inner_h,
     inner_radius,
     color,
+    mvp: Any = None,
 ):
     if map_w <= 0 or map_h <= 0 or inner_w <= 0 or inner_h <= 0:
         return
@@ -988,7 +991,7 @@ def _draw_filled_rounded_rect_with_hole(
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
     shader.bind()
-    shader.uniform_float("ModelViewProjectionMatrix", _mvp())
+    shader.uniform_float("ModelViewProjectionMatrix", mvp if mvp is not None else _mvp())
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("outerData", (half_w, half_h, outer_radius, inner_radius))
     shader.uniform_float("innerOffset", (inner_off_x, inner_off_y))
@@ -996,7 +999,9 @@ def _draw_filled_rounded_rect_with_hole(
     batch.draw(shader)
 
 
-def _draw_filled_rounded_rect_clipped(x, y, width, height, radius, color, clip_x, clip_y, clip_w, clip_h, clip_radius):
+def _draw_filled_rounded_rect_clipped(
+    x, y, width, height, radius, color, clip_x, clip_y, clip_w, clip_h, clip_radius, mvp: Any = None
+):
     """Draw a rounded rect fill intersected with a rounded clip region."""
     if width <= 0 or height <= 0 or clip_w <= 0 or clip_h <= 0:
         return
@@ -1030,14 +1035,14 @@ def _draw_filled_rounded_rect_clipped(x, y, width, height, radius, color, clip_x
     batch = batch_for_shader(shader, "TRIS", {"pos": vertices, "uv": uvs}, indices=((0, 1, 2), (2, 3, 0)))
 
     shader.bind()
-    shader.uniform_float("ModelViewProjectionMatrix", _mvp())
+    shader.uniform_float("ModelViewProjectionMatrix", mvp if mvp is not None else _mvp())
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("sizeData", (half_w, half_h, radius, clip_radius))
     shader.uniform_float("clipData", (off_x, off_y, clip_half_w, clip_half_h))
     batch.draw(shader)
 
 
-def _draw_rounded_rect_border(x, y, width, height, radius, color, line_width=1.0):
+def _draw_rounded_rect_border(x, y, width, height, radius, color, line_width=1.0, mvp: Any = None):
     if width <= 0 or height <= 0:
         return
     radius = max(0, min(radius, width / 2, height / 2))
@@ -1047,7 +1052,7 @@ def _draw_rounded_rect_border(x, y, width, height, radius, color, line_width=1.0
     batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radius", radius)
@@ -1056,7 +1061,7 @@ def _draw_rounded_rect_border(x, y, width, height, radius, color, line_width=1.0
 
 
 def _draw_rounded_rect_border_varying_sides(
-    x, y, width, height, radii, color, line_width=1.0, skip_left=False, skip_right=False
+    x, y, width, height, radii, color, line_width=1.0, skip_left=False, skip_right=False, mvp: Any = None
 ):
     if width <= 0 or height <= 0:
         return
@@ -1068,7 +1073,7 @@ def _draw_rounded_rect_border_varying_sides(
     batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
 
     shader.bind()
-    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radii", radii)
@@ -1079,7 +1084,7 @@ def _draw_rounded_rect_border_varying_sides(
     batch.draw(shader)
 
 
-def _draw_pill(x, y, width, height, color):
+def _draw_pill(x, y, width, height, color, mvp: Any = None):
     if width <= 0 or height <= 0:
         return
 
@@ -1089,7 +1094,7 @@ def _draw_pill(x, y, width, height, color):
     batch = _get_cached_quad_batch(shader, width, height, pad_uv=True)
 
     shader.bind()
-    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h))
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
     shader.uniform_float("color", _srgb_to_linear(color))
     shader.uniform_float("halfSize", (half_w, half_h))
     batch.draw(shader)

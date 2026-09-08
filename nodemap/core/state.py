@@ -172,7 +172,6 @@ class RenderCache:
     list_children: dict = field(default_factory=dict)
     list_filtered_children: dict = field(default_factory=dict)
     list_effective_expanded: set = field(default_factory=set)
-    list_nodes_by_name: dict = field(default_factory=dict)
     list_swatches_batch: Any = None
     batch_key: Any = None
     batch_scale: float = 1.0
@@ -204,7 +203,6 @@ class RenderCache:
         "list_layout",
         "list_children",
         "list_filtered_children",
-        "list_nodes_by_name",
         "list_swatches_batch",
     )
 

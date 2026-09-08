@@ -134,6 +134,34 @@ def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, mas
     return None
 
 
+def _node_display_meta(node, active_node) -> tuple[str, str, bool, bool]:
+    """Return ``(label, tree_name, selected, is_active)`` display metadata for a node.
+
+    Precomputed at compile time so the type list never holds live node proxies
+    across frames: reading a property off a deleted node is a use-after-free
+    that crashes Blender at the C level. ``label`` is the custom label,
+    ``tree_name`` is the linked tree name (group nodes only), and the bools
+    mirror the node's selection/active state at compile time.
+    """
+    try:
+        label = node.label or ""
+    except (AttributeError, ReferenceError):
+        label = ""
+    tree_name = ""
+    try:
+        tree = getattr(node, "node_tree", None)
+        if tree is not None:
+            tree_name = getattr(tree, "name", "") or ""
+    except (AttributeError, ReferenceError):
+        tree_name = ""
+    try:
+        selected = bool(node.select)
+    except (AttributeError, ReferenceError):
+        selected = False
+    is_active = bool(active_node is not None and node == active_node)
+    return label, tree_name, selected, is_active
+
+
 def _classify_nodes(
     node_tree, ui_scale: float, settings
 ) -> tuple[dict[int, dict], tuple[float, float, float, float], tuple[float, float], list]:
@@ -263,6 +291,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
     type_node_colors: dict[str, dict[str, tuple[float, float, float, float]]] = {}
     type_selected_counts: dict[str, int] = {}
     type_active_label: str | None = None
+    type_node_meta: dict[str, tuple[str, str, bool, bool]] = {}
 
     # Pre-compute theme colors by color_tag (avoids per-node _theme_rgba call)
     color_tag_cache: dict[str, tuple[float, float, float, float]] = {}
@@ -287,6 +316,8 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
         node_w, node_h = node_data[node_ptr]["dims"]
         top_x, top_y = node_data[node_ptr]["loc"]
         ty = top_y - node_h
+
+        type_node_meta[node.name] = _node_display_meta(node, active_node)
 
         info: dict = {
             "ptr": node_ptr,
@@ -514,6 +545,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
         "type_node_colors": type_node_colors,
         "type_selected_counts": type_selected_counts,
         "type_active_label": type_active_label,
+        "type_node_meta": type_node_meta,
     }
 
 
@@ -569,6 +601,7 @@ def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, mas
     tree_data["type_search"] = built["type_search"]
     tree_data["type_selected_counts"] = built["type_selected_counts"]
     tree_data["type_active_label"] = built["type_active_label"]
+    tree_data["type_node_meta"] = built["type_node_meta"]
     # Position-refresh support (see _apply_move_updates)
     tree_data["out_pos"] = out_pos
     tree_data["in_pos"] = in_pos
