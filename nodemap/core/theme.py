@@ -132,11 +132,11 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
     settings = get_addon_preferences().settings
 
-    theme_bg = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
+    theme_background = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
     if settings.use_custom_background:
-        bg = tuple(settings.background_color)
+        background = tuple(settings.background_color)
     else:
-        bg = theme_bg
+        background = theme_background
 
     text_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
     label_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
@@ -150,9 +150,9 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         viewport_fill = selected
 
     result = {
-        "bg": bg,
-        "bg_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
-        "node": _theme_rgba("node_editor.node_backdrop", (0.4, 0.4, 0.4, 1.0)),
+        "background": background,
+        "background_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
+        "node_backdrop": _theme_rgba("node_editor.node_backdrop", (0.4, 0.4, 0.4, 1.0)),
         "node_selected": _theme_rgba("node_editor.node_selected", (0.28, 0.45, 0.7, 1.0)),
         "node_active": _theme_rgba("node_editor.node_active", (1.0, 1.0, 1.0, 1.0)),
         "node_border": _theme_rgba("node_editor.node_outline", (1.0, 1.0, 1.0, 0.149)),

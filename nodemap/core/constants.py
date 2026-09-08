@@ -52,14 +52,14 @@ LIST_SWATCH: float = 10.0
 LIST_SWATCH_GAP: float = 5.0
 LIST_COUNT_GAP: float = 8.0
 SCROLLBAR_HIT_PAD: float = 6.0
-TYPE_LIST_ANIM_DURATION: float = 0.06
+TYPE_LIST_ANIM_DURATION: float = 0.08
 EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
 
 # Scrollbar appearance
-SCROLLBAR_THICKNESS: float = 4.0
-SCROLLBAR_THICKNESS_HOVER: float = 7.0
+SCROLLBAR_THICKNESS: float = 3.0
+SCROLLBAR_THICKNESS_HOVER: float = 6.0
 SCROLLBAR_INSET: float = 2.0
-SCROLLBAR_MIN_THUMB: float = 14.0
+SCROLLBAR_MIN_THUMB: float = 12.0
 SCROLLBAR_ALPHA: float = 0.65
 TYPE_LIST_ANIM_AWAIT_TIMEOUT: float = 1.0
 TYPE_LIST_MIN_LABEL_W: float = 32.0
@@ -70,7 +70,7 @@ TYPE_LIST_MIN_LABEL_W: float = 32.0
 FONT_SIZE: int = 11
 BUTTON_SIZE: int = 20
 BUTTON_MARGIN: int = 0
-BUTTON_HOVER_ALPHA: float = 0.015
+BUTTON_HOVER_ALPHA: float = 0.02
 
 # ---------------------------------------------------------------------------
 # Batch building

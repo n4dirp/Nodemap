@@ -427,7 +427,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     noodle_curving: IntProperty(
         name="Noodle Curving",
         description="Curving of the noodle",
-        default=5,
+        default=0,
         min=0,
         max=10,
         update=_update_invalidate_batches,

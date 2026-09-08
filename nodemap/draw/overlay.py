@@ -57,7 +57,6 @@ from .gpu_draw import (
     _draw_filled_rounded_rect_clipped,
     _draw_filled_rounded_rect_varying,
     _draw_filled_rounded_rect_with_hole,
-    _draw_pill,
     _draw_rounded_rect_border,
     _draw_rounded_rect_border_varying_sides,
     _draw_text_with_shadow,
@@ -263,10 +262,10 @@ def _draw_background(
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
 
-    bg_color = _alpha_mul(colors["bg"], master_alpha)
+    bg_color = _alpha_mul(colors["background"], master_alpha)
     panel_roundness = colors.get("panel_roundness", 4.0)
     shadow_offset = 1
-    border_color = _alpha_mul(colors["bg_border"], master_alpha)
+    border_color = _alpha_mul(colors["background_border"], master_alpha)
     border_width = 0.5
 
     _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color)
@@ -286,13 +285,14 @@ def _draw_background(
 
 def _draw_moving_border(map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, moving, snapped):
     if moving:
-        bg_color = _alpha_mul(colors["bg"], 0.3 * master_alpha)
+        bg_color = _alpha_mul(colors["background"], 0.3 * master_alpha)
         panel_roundness = colors.get("panel_roundness", 4.0)
         _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color)
-    if moving and not snapped:
-        border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-        border_width = 0.5 * ui_scale
-        _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
+
+        if not snapped:
+            border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+            border_width = 0.5 * ui_scale
+            _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width)
 
 
 def _draw_edge_pills(
@@ -310,15 +310,15 @@ def _draw_edge_pills(
     margin = 6 * ui_scale
     inset = 2.0 * ui_scale
     if (color := side_colors.get("top")) is not None:
-        _draw_rounded_rect_border(
+        _draw_filled_rounded_rect(
             map_x + margin, map_y + map_h - inset - thickness, map_w - 2 * margin, thickness, 0, color
         )
     if (color := side_colors.get("bottom")) is not None:
-        _draw_rounded_rect_border(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, 0, color)
+        _draw_filled_rounded_rect(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, 0, color)
     if (color := side_colors.get("left")) is not None:
-        _draw_rounded_rect_border(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, 0, color)
+        _draw_filled_rounded_rect(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, 0, color)
     if (color := side_colors.get("right")) is not None:
-        _draw_rounded_rect_border(
+        _draw_filled_rounded_rect(
             map_x + map_w - inset - thickness, map_y + margin, thickness, map_h - 2 * margin, 0, color
         )
 
@@ -363,13 +363,7 @@ def _draw_resize_handles(
         )
         # Clamp to zone vertical extent with small margin so pill stays inside.
         divider_color = color_warn if state.list.width_clamped else color_base
-        _draw_pill(
-            round(divider_x),
-            zone_y,
-            handle_thickness,
-            zone_height,
-            divider_color,
-        )
+        _draw_filled_rounded_rect(round(divider_x), zone_y, handle_thickness, zone_height, 0, divider_color)
         return
 
     width_side = None
@@ -520,11 +514,9 @@ def _draw_viewport_overlay(
 
     # Outline the viewport extent when it overlaps the minimap
     if hole_width > 0 and hole_height > 0:
-        outline_color = colors["viewport_fill"]
-        border_width = 0.5 * ui_scale
-        _draw_rounded_rect_border(
-            view_x, view_y, view_w, view_h, node_roundness, _alpha_mul(outline_color, master_alpha), border_width
-        )
+        outline_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        border_width = 1.5 * ui_scale
+        _draw_rounded_rect_border(view_x, view_y, view_w, view_h, node_roundness, outline_color, border_width)
 
 
 def _draw_node_count(
@@ -551,7 +543,7 @@ def _draw_node_count(
     text_x = round(map_x + map_w - text_w - padding)
     text_y = round(map_y + padding)
 
-    text_color = _alpha_mul(colors["text"], 0.85 * master_alpha)
+    text_color = _alpha_mul(colors["text"], master_alpha)
 
     _draw_text_with_shadow(font_id, info_text, text_x, text_y, text_color, font_size, settings.show_text_shadow)
 
@@ -849,8 +841,8 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
         state, visible_button_ids, map_x, map_y, map_w, map_h, padding, ui_scale, settings, content_count
     )
     radius = colors["node_roundness"] * ui_scale
-    bg_color = _alpha_mul(colors["bg"], master_alpha)
-    border_color = _alpha_mul(colors["bg_border"], master_alpha)
+    bg_color = _alpha_mul(colors["background"], master_alpha)
+    border_color = _alpha_mul(colors["background_border"], master_alpha)
 
     # Move-grip drag handle is available whenever interactive mode is on, which
     # is the mode that enables repositioning the map.
@@ -926,7 +918,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
             _draw_filled_rounded_rect(button_x, button_y, button_size, button_size, radius, bg_color)
             _draw_rounded_rect_border(button_x, button_y, button_size, button_size, radius, border_color, 0.5)
         is_hovered = state.buttons.hovered_button_id == button_id
-        icon_color = _alpha_mul(colors["text"], master_alpha * 0.7)
+        icon_color = _alpha_mul(colors["text"], master_alpha)
         if is_hovered:
             hover_color = _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
             if is_combined and button_id != "LIST":
@@ -955,7 +947,7 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
                 _draw_filled_rounded_rect(
                     button_x + 1, button_y + 1, button_size - 2, button_size - 2, max(2.0, radius - 1), hover_color
                 )
-            icon_color = _alpha_mul(colors["text"], master_alpha)
+            # icon_color = _alpha_mul(colors["text"], master_alpha)
         if button_id == "LIST":
             _paint_list_toggle_icon(
                 button_x, button_y, button_size, icon_color, ui_scale, active=bool(settings and settings.show_type_list)
@@ -1202,7 +1194,7 @@ def draw_minimap() -> None:
         tree_center_y,
         ui_scale,
         master_alpha,
-        colors["node"],
+        colors["node_backdrop"],
         colors["frame_node"],
         show_borders,
         bool(settings.show_type_list),

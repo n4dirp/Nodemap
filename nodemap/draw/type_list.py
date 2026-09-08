@@ -304,7 +304,7 @@ def _type_list_cache_key(
 ) -> tuple:
     """Return the invalidation key for cached layout and swatch batch."""
     palette = tuple(
-        _theme_rgba(f"node_editor.{attr}", colors["node"])[:3] for attr in _COLOR_TAG_TO_THEME_ATTR.values()
+        _theme_rgba(f"node_editor.{attr}", colors["node_backdrop"])[:3] for attr in _COLOR_TAG_TO_THEME_ATTR.values()
     )
 
     tree_version = state.shared.tree_version if state.shared is not None else 0
@@ -317,7 +317,7 @@ def _type_list_cache_key(
         state.list.search_query,
         ui_scale,
         master_alpha,
-        tuple(colors["node"]),
+        tuple(colors["node_backdrop"]),
         tuple(colors["text"]),
         palette,
     )
@@ -450,8 +450,7 @@ def _bake_list_glyph_batch(
     icon_col_x = swatch + swatch_gap
     swatch_col_x = icon_col_x if show_type_colors else 0.0
 
-    text_color = _alpha_mul(colors["text"], 0.65 * master_alpha)
-    chevron_color = _srgb_to_linear(_alpha_mul(text_color, 0.5))
+    chevron_color = _srgb_to_linear(_alpha_mul(colors["text"], 0.6 * master_alpha))
 
     pos: list = []
     uv: list = []
@@ -555,7 +554,7 @@ def _bake_list_glyph_batch(
             if show_type_colors:
                 node_color = type_node_colors.get(label, {}).get(
                     node_name,
-                    type_colors.get(label, colors["node"]),
+                    type_colors.get(label, colors["node_backdrop"]),
                 )
 
                 _push_quad(
@@ -627,7 +626,7 @@ def _header_type_color(
         if first_color is not None:
             return first_color
 
-    return type_colors.get(label, colors["node"])
+    return type_colors.get(label, colors["node_backdrop"])
 
 
 def _type_header_text(label: str, count: int, children: dict, nodes_by_name: dict) -> str:
@@ -915,7 +914,7 @@ def _compute_zone_geometry(
         zone_w,
         zone_h,
         zone_radius,
-        _alpha_mul(colors["bg"], master_alpha),
+        _alpha_mul(colors["background"], master_alpha),
     )
 
     _draw_rounded_rect_border(
@@ -924,7 +923,7 @@ def _compute_zone_geometry(
         zone_w,
         zone_h,
         zone_radius,
-        _alpha_mul(colors["bg_border"], master_alpha),
+        _alpha_mul(colors["background_border"], master_alpha),
         0.5,
     )
 
@@ -956,11 +955,11 @@ def _compute_zone_geometry(
 
     text_y_off = round((row_h - line_h) / 2)
 
-    text_color = _alpha_mul(colors["text"], 0.9 * master_alpha)
-    count_color = _alpha_mul(colors["text"], 0.3 * master_alpha)
-    selection_color = _alpha_mul(colors["node_selected"], 0.95 * master_alpha)
+    text_color = _alpha_mul(colors["text"], master_alpha)
+    count_color = _alpha_mul(colors["text"], 0.5 * master_alpha)
+    selection_color = _alpha_mul(colors["node_selected"], master_alpha)
     active_color = _alpha_mul(colors["indicator"], master_alpha)
-    match_color = _alpha_mul(colors["indicator"], 0.85 * master_alpha)
+    match_color = _alpha_mul(colors["indicator"], master_alpha)
 
     selection_fill_color = _alpha_mul(colors["viewport_fill"], 0.2 * master_alpha)
     active_fill_color = _alpha_mul(colors["viewport_fill"], 0.4 * master_alpha)
@@ -972,7 +971,7 @@ def _compute_zone_geometry(
     type_selected_counts = tree_data.get("type_selected_counts") or {}
     type_active = tree_data.get("type_active_label")
 
-    hover_color = _alpha_mul(colors["text"], 0.025 * master_alpha)
+    hover_color = _alpha_mul(colors["text"], 0.03 * master_alpha)
 
     pill_x = zone_x + 2 * ui_scale
     pill_w = zone_w - 4 * ui_scale
@@ -1144,7 +1143,7 @@ def _draw_list_fills(
             pill_w,
             search_draw_h,
             radius,
-            _alpha_mul(colors["bg_border"], master_alpha),
+            _alpha_mul(colors["background_border"], master_alpha),
             0.5,
         )
 

@@ -267,7 +267,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
     # Pre-compute theme colors by color_tag (avoids per-node _theme_rgba call)
     color_tag_cache: dict[str, tuple[float, float, float, float]] = {}
     for tag, theme_attr in _COLOR_TAG_TO_THEME_ATTR.items():
-        color_tag_cache[tag] = _theme_rgba(f"node_editor.{theme_attr}", colors["node"])
+        color_tag_cache[tag] = _theme_rgba(f"node_editor.{theme_attr}", colors["node_backdrop"])
 
     node_infos: list[dict] = []
     default_socket_color = (*colors["wire"][:3], master_alpha)
@@ -307,13 +307,13 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                         float(custom_color[0]),
                         float(custom_color[1]),
                         float(custom_color[2]),
-                        colors["node"][3],
+                        colors["node_backdrop"][3],
                     )
                 else:
                     tag = getattr(node, "color_tag", "NONE")
-                    frame_color = color_tag_cache.get(tag, colors.get("frame_node", colors["node"]))
+                    frame_color = color_tag_cache.get(tag, colors.get("frame_node", colors["node_backdrop"]))
             else:
-                frame_color = colors.get("frame_node", colors["node"])
+                frame_color = colors.get("frame_node", colors["node_backdrop"])
             info["fill_color"] = _srgb_to_linear((frame_color[0], frame_color[1], frame_color[2], frame_alpha))
 
             border_color = frame_color
@@ -344,13 +344,13 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                         float(custom_color[0]),
                         float(custom_color[1]),
                         float(custom_color[2]),
-                        colors["node"][3],
+                        colors["node_backdrop"][3],
                     )
                 else:
                     tag = getattr(node, "color_tag", "NONE")
-                    node_color = color_tag_cache.get(tag, colors["node"])
+                    node_color = color_tag_cache.get(tag, colors["node_backdrop"])
             else:
-                node_color = colors["node"]
+                node_color = colors["node_backdrop"]
             if show_type_list:
                 label = node.bl_label or node.type.replace("_", " ").title()
                 if label not in type_counts:
@@ -366,7 +366,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                     type_active_label = label
 
             if node.mute:
-                bg_color = colors["bg"]
+                bg_color = colors["background"]
                 info["fill_color"] = _srgb_to_linear(
                     (
                         node_color[0] * 0.15 + bg_color[0] * 0.85,
