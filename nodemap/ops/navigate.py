@@ -713,6 +713,19 @@ class NODEMAP_OT_navigate(Operator):
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
+            case "LEFT_ARROW" | "RIGHT_ARROW":
+                if (
+                    event.value == "PRESS"
+                    and in_minimap
+                    and not (event.ctrl or event.shift or event.alt)
+                    and settings is not None
+                    and settings.show_type_list
+                    and state.list.list_width > 0
+                    and selection.handle_list_expand(self, context, state, settings, expand=event.type == "RIGHT_ARROW")
+                ):
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
             case "TIMER":
                 if self._anim.drag_active:
                     self._anim.apply_smooth_drag(context)
@@ -1658,12 +1671,7 @@ class NODEMAP_OT_navigate(Operator):
 
         state.interaction.pressed = True
         if self._anim._animations_enabled(context):
-            self._anim.anim_target = [float(pan_x), float(pan_y)]
-            self._anim.anim_applied = [0.0, 0.0]
-            self._anim.anim_progress = 0.0
-            self._anim.anim_acc = [0.0, 0.0]
-            self._anim.anim_active = True
-            self._anim.create_timer(context)
+            self._anim.start_center_animation(context, float(pan_x), float(pan_y), visible)
         else:
             try:
                 with self._override_ctx(context):

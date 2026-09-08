@@ -556,6 +556,97 @@ def handle_list_arrow(
     return True
 
 
+def handle_list_expand(
+    op: NODEMAP_OT_navigate,
+    context: Context,
+    state: MinimapState,
+    settings,
+    expand: bool,
+) -> bool:
+    """Collapse or expand the active type-list group and select it.
+
+    *expand* is True for the right arrow (expand / drill in) and False for
+    the left arrow (collapse). The active group resolves from the arrow
+    cursor, then the active node's group, then the hovered row — matching
+    :func:`handle_list_arrow`. Expanding selects the group's first child,
+    collapsing selects the group header so the active node stays visible.
+    Return True when the key was handled, False when the list is empty or
+    no active group resolves, so the caller lets the key pass through.
+    """
+    rows = _full_list_rows(state, settings)
+    if not rows:
+        return False
+
+    index_of: dict[tuple, int] = {}
+    for row_index, (kind, label, _node_name) in enumerate(rows):
+        if kind == _ROW_HEADER:
+            index_of.setdefault(("header", label), row_index)
+
+    label = None
+    arrow_key = state.list.arrow_key
+    if arrow_key is not None and index_of.get(("header", arrow_key[1])) is not None:
+        label = arrow_key[1]
+    if label is None:
+        node_tree = op._space.edit_tree if op._space else None
+        active_node = node_tree.nodes.active if node_tree else None
+        if active_node is not None:
+            tree_data = state.tree_data() or {}
+            type_nodes = tree_data.get("type_nodes") or {}
+            for type_label, names in type_nodes.items():
+                if active_node.name in names:
+                    if index_of.get(("header", type_label)) is not None:
+                        label = type_label
+                    break
+    if label is None:
+        child_hover = state.list.hovered_list_row
+        if child_hover is not None and index_of.get(("header", child_hover[0])) is not None:
+            label = child_hover[0]
+        if label is None and state.list.hovered_type_label is not None:
+            if index_of.get(("header", state.list.hovered_type_label)) is not None:
+                label = state.list.hovered_type_label
+    if label is None:
+        return False
+
+    expanded = state.list.expanded
+    if expand:
+        changed = label not in expanded
+        expanded.add(label)
+    else:
+        changed = label in expanded
+        expanded.discard(label)
+    if changed:
+        state.cache.list_key = None
+    state.request_immediate_compile()
+    if expand:
+        first_child = None
+        for kind, child_label, child_name in _full_list_rows(state, settings):
+            if kind != _ROW_HEADER and child_label == label:
+                first_child = child_name
+                break
+        if first_child is None:
+            select_type_nodes(op, context, label)
+            target_key: tuple = ("header", label)
+            state.list.hovered_type_label = label
+            state.list.hovered_list_row = None
+            state.interaction.hovered_node_id = None
+        else:
+            select_single_node(op, context, first_child)
+            target_key = ("child", label, first_child)
+            state.list.hovered_type_label = None
+            state.list.hovered_list_row = (label, first_child)
+            state.interaction.hovered_node_id = first_child
+    else:
+        select_type_nodes(op, context, label)
+        target_key = ("header", label)
+        state.list.hovered_type_label = label
+        state.list.hovered_list_row = None
+        state.interaction.hovered_node_id = None
+    state.list.arrow_key = target_key
+    op._list_last_row_index = state.list.visible_row_index_map.get(target_key, op._list_last_row_index)
+    op._redraw_ui()
+    return True
+
+
 def focus_list_on_active_node(op: NODEMAP_OT_navigate, context: Context) -> None:
     """Expand and scroll the type list to reveal the active node's row.
 

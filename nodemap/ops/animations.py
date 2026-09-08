@@ -12,7 +12,14 @@ from .. import __package__ as base_package
 from ..core.constants import PAN_ANIM_FPS, PAN_ANIM_INTERVAL
 from ..core.helpers import get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
-from ..geo.transforms import _clamp_pan_to_viewport, _get_visible_rect
+from ..geo.transforms import (
+    _clamp_pan_to_viewport,
+    _get_visible_rect,
+    _interp_rect,
+    _minimap_view_from_world_rect,
+    _minimap_world_rect,
+    _smooth_view_fac,
+)
 
 if TYPE_CHECKING:
     from bpy.types import Context, Region, SpaceNodeEditor
@@ -61,6 +68,7 @@ class AnimationController:
         "anim_applied",
         "anim_progress",
         "anim_acc",
+        "anim_total",
         "drag_target",
         "drag_active",
         "_last_drag_tick",
@@ -70,10 +78,12 @@ class AnimationController:
         "frame_anim_target_zoom",
         "frame_anim_target_pan",
         "frame_anim_progress",
+        "frame_anim_total",
         "editor_anim_active",
         "editor_anim_progress",
         "editor_anim_start_rect",
         "editor_anim_target_rect",
+        "editor_anim_total",
     )
 
     def __init__(self, op: NODEMAP_OT_navigate) -> None:
@@ -87,6 +97,7 @@ class AnimationController:
         self.anim_applied: list[float] = [0.0, 0.0]
         self.anim_progress: float = 0.0
         self.anim_acc: list[float] = [0.0, 0.0]
+        self.anim_total: float = 1.0
         self.drag_target: list[float] = [0.0, 0.0]
         self.drag_active: bool = False
         self._last_drag_tick: float = 0.0
@@ -96,10 +107,12 @@ class AnimationController:
         self.frame_anim_target_zoom: float = 1.0
         self.frame_anim_target_pan: list[float] = [0.0, 0.0]
         self.frame_anim_progress: float = 0.0
+        self.frame_anim_total: float = 1.0
         self.editor_anim_active: bool = False
         self.editor_anim_progress: float = 0.0
         self.editor_anim_start_rect: list[float] = [0.0, 0.0, 0.0, 0.0]
         self.editor_anim_target_rect: list[float] = [0.0, 0.0, 0.0, 0.0]
+        self.editor_anim_total: float = 1.0
 
     def reset(self) -> None:
         """Reset all animation state to defaults."""
@@ -112,6 +125,7 @@ class AnimationController:
         self.anim_applied = [0.0, 0.0]
         self.anim_progress = 0.0
         self.anim_acc = [0.0, 0.0]
+        self.anim_total = 1.0
         self.drag_target = [0.0, 0.0]
         self.drag_active = False
         self._last_drag_tick = 0.0
@@ -121,10 +135,12 @@ class AnimationController:
         self.frame_anim_target_zoom = 1.0
         self.frame_anim_target_pan = [0.0, 0.0]
         self.frame_anim_progress = 0.0
+        self.frame_anim_total = 1.0
         self.editor_anim_active = False
         self.editor_anim_progress = 0.0
         self.editor_anim_start_rect = [0.0, 0.0, 0.0, 0.0]
         self.editor_anim_target_rect = [0.0, 0.0, 0.0, 0.0]
+        self.editor_anim_total = 1.0
 
     def any_active(self) -> bool:
         """Return True when any animation is currently running."""
@@ -157,10 +173,24 @@ class AnimationController:
         """Return the animation duration in frames for the current pan speed."""
         return _PAN_SPEED_FRAMES[self._settings(context).pan_speed]
 
+    def _total_frames(self, context: Context, fac: float) -> float:
+        """Return the animation duration in frames for magnitude factor *fac*.
+
+        Match Blender's ``view2d_smooth_view`` duration scaling
+        (``smooth_viewtx * fac``): far view changes take the full pan-speed
+        budget while near changes take fewer frames, never below one frame.
+        """
+        base = self._animation_frames(context)
+        return max(min(base * fac, base), 1.0)
+
     @staticmethod
     def _ease(progress: float) -> float:
-        """Ease-out cubic interpolation for *progress* in [0, 1]."""
-        return 1.0 - (1.0 - progress) ** 3
+        """Ease-in-out (smoothstep) interpolation for *progress* in [0, 1].
+
+        Match the timer step of Blender's ``view2d_smooth_view``
+        (``3t^2 - 2t^3``); all view animations share it.
+        """
+        return progress * progress * (3.0 - 2.0 * progress)
 
     def _take_pan(self, vx: float, vy: float) -> tuple[int, int]:
         """Accumulate *vx/vy* in the shared pan buffer and return the integer part."""
@@ -287,11 +317,33 @@ class AnimationController:
         if not op._dragging:
             self.drag_active = False
 
+    def start_center_animation(
+        self, context: Context, pan_x: float, pan_y: float, visible: tuple[float, float, float, float]
+    ) -> None:
+        """Begin a pan-only center animation toward the given editor pixel delta."""
+        from .navigate import _view_zoom_factors
+
+        op = self._op
+        view_zoom_x, view_zoom_y = _view_zoom_factors(op._space, op._region, visible)
+        target_rect = (
+            visible[0] + pan_x / view_zoom_x,
+            visible[1] + pan_y / view_zoom_y,
+            visible[2] + pan_x / view_zoom_x,
+            visible[3] + pan_y / view_zoom_y,
+        )
+        self.anim_target = [pan_x, pan_y]
+        self.anim_applied = [0.0, 0.0]
+        self.anim_progress = 0.0
+        self.anim_acc = [0.0, 0.0]
+        self.anim_total = self._total_frames(context, _smooth_view_fac(visible, target_rect))
+        self.anim_active = True
+        self.create_timer(context)
+
     def apply_center_animation(self, context: Context) -> None:
         """Ease the view toward the center-animation target."""
         if not self.anim_active:
             return
-        self.anim_progress += 1 / self._animation_frames(context)
+        self.anim_progress += 1 / self.anim_total
         if self.anim_progress >= 1.0:
             self._finish_center_animation(context)
             return
@@ -325,6 +377,9 @@ class AnimationController:
         self.frame_anim_start_pan = [state.view.pan[0], state.view.pan[1]]
         self.frame_anim_target_zoom = target_zoom
         self.frame_anim_target_pan = [target_pan[0], target_pan[1]]
+        start_world = _minimap_world_rect(state, self.frame_anim_start_zoom, self.frame_anim_start_pan)
+        target_world = _minimap_world_rect(state, target_zoom, self.frame_anim_target_pan)
+        self.frame_anim_total = self._total_frames(context, _smooth_view_fac(start_world, target_world))
         self.frame_anim_active = True
         self.create_timer(context)
 
@@ -338,21 +393,19 @@ class AnimationController:
             self.frame_anim_active = False
             self.destroy_timer(context)
             return
-        progress = self.frame_anim_progress + 1 / self._animation_frames(context)
+        progress = self.frame_anim_progress + 1 / self.frame_anim_total
         self.frame_anim_progress = progress
         if progress >= 1.0:
             self._finish_frame_animation(context)
             op._redraw_ui()
             return
         eased = self._ease(progress)
-        state.view.user_zoom = (
-            self.frame_anim_start_zoom + (self.frame_anim_target_zoom - self.frame_anim_start_zoom) * eased
-        )
-        state.view.anchor_zoom = state.view.user_zoom
-        state.view.pan = (
-            self.frame_anim_start_pan[0] + (self.frame_anim_target_pan[0] - self.frame_anim_start_pan[0]) * eased,
-            self.frame_anim_start_pan[1] + (self.frame_anim_target_pan[1] - self.frame_anim_start_pan[1]) * eased,
-        )
+        start_world = _minimap_world_rect(state, self.frame_anim_start_zoom, self.frame_anim_start_pan)
+        target_world = _minimap_world_rect(state, self.frame_anim_target_zoom, self.frame_anim_target_pan)
+        zoom, pan = _minimap_view_from_world_rect(state, _interp_rect(start_world, target_world, eased))
+        state.view.user_zoom = zoom
+        state.view.anchor_zoom = zoom
+        state.view.pan = pan
         _clamp_pan_to_viewport(op._space, op._region, state)
         op._redraw_ui()
 
@@ -377,6 +430,7 @@ class AnimationController:
         self.editor_anim_progress = 0.0
         self.editor_anim_start_rect = [visible[0], visible[1], visible[2], visible[3]]
         self.editor_anim_target_rect = target_rect
+        self.editor_anim_total = self._total_frames(context, _smooth_view_fac(visible, tuple(target_rect)))
         self.editor_anim_active = True
         self.create_timer(context)
 
@@ -389,7 +443,7 @@ class AnimationController:
             self.editor_anim_active = False
             self.destroy_timer(context)
             return
-        progress = self.editor_anim_progress + 1 / self._animation_frames(context)
+        progress = self.editor_anim_progress + 1 / self.editor_anim_total
         if progress >= 1.0:
             self._correct_editor_view(context, self.editor_anim_target_rect)
             self.editor_anim_active = False

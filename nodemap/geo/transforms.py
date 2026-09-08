@@ -249,6 +249,79 @@ def _compute_map_transform(
     return map_anchor_x, map_anchor_y, scale, tree_center_x, tree_center_y
 
 
+def _smooth_view_fac(rect_a: tuple[float, float, float, float], rect_b: tuple[float, float, float, float]) -> float:
+    """Return the view-animation magnitude factor between two rects in [0, 1].
+
+    Port ``smooth_view_rect_to_fac``
+    (``source/blender/editors/interface/view2d/view2d_ops.cc``): the factor
+    grows with the per-axis translation normalized to the view scale and
+    with the per-axis scale difference, so small view changes animate in a
+    fraction of the duration while large ones take the full duration.
+    """
+    fac_max = 0.0
+    for axis in range(2):
+        size_a = max(rect_a[axis + 2] - rect_a[axis], 1e-6)
+        size_b = max(rect_b[axis + 2] - rect_b[axis], 1e-6)
+        center_a = (rect_a[axis] + rect_a[axis + 2]) / 2.0
+        center_b = (rect_b[axis] + rect_b[axis + 2]) / 2.0
+        fac_max = max(fac_max, abs(center_a - center_b) / min(size_a, size_b))
+        if fac_max >= 1.0:
+            break
+        fac_max = max(fac_max, (1.0 - min(size_a, size_b) / max(size_a, size_b)) * 2.0)
+        if fac_max >= 1.0:
+            break
+    return min(fac_max, 1.0)
+
+
+def _interp_rect(
+    rect_a: tuple[float, float, float, float] | list[float],
+    rect_b: tuple[float, float, float, float] | list[float],
+    fac: float,
+) -> list[float]:
+    """Return the bounds of *rect_a* interpolated toward *rect_b* by *fac*.
+
+    Minimap analog of ``BLI_rctf_interp``: linear interpolation of all four
+    bounds; the caller passes the eased progress as *fac*.
+    """
+    ifac = 1.0 - fac
+    return [a * ifac + b * fac for a, b in zip(rect_a, rect_b)]
+
+
+def _minimap_world_rect(
+    minimap_state: MinimapState, zoom: float, pan: tuple[float, float] | list[float]
+) -> tuple[float, float, float, float]:
+    """Return the tree-space rect visible in the minimap for *zoom* and *pan*.
+
+    Minimap analog of the View2D ``cur`` rect animated by Blender's
+    ``view2d_smooth_view``: the world rectangle filling the map content area
+    for the given view, derived from the shared base geometry.
+    """
+    inner_l, inner_b, inner_w, inner_h, _bw, _bh, base_scale, tree_cx, tree_cy = _compute_base_map_geom(minimap_state)
+    scale = base_scale * max(zoom, 1e-6)
+    world_cx = tree_cx - pan[0] / scale
+    world_cy = tree_cy - pan[1] / scale
+    half_w = (inner_w / 2.0) / scale
+    half_h = (inner_h / 2.0) / scale
+    return (world_cx - half_w, world_cy - half_h, world_cx + half_w, world_cy + half_h)
+
+
+def _minimap_view_from_world_rect(
+    minimap_state: MinimapState, rect: tuple[float, float, float, float] | list[float]
+) -> tuple[float, tuple[float, float]]:
+    """Return the ``(zoom, pan)`` view showing *rect* in the minimap.
+
+    Inverse of :func:`_minimap_world_rect`; interpolating rects and mapping
+    back couples pan and zoom exactly like Blender's rect animation.
+    """
+    _il, _ib, inner_w, _ih, _bw, _bh, base_scale, tree_cx, tree_cy = _compute_base_map_geom(minimap_state)
+    world_w = max(rect[2] - rect[0], 1e-6)
+    scale = inner_w / world_w
+    zoom = scale / max(base_scale, 1e-6)
+    world_cx = (rect[0] + rect[2]) / 2.0
+    world_cy = (rect[1] + rect[3]) / 2.0
+    return zoom, ((tree_cx - world_cx) * scale, (tree_cy - world_cy) * scale)
+
+
 def _get_minimap_transform(
     minimap_state: MinimapState | None = None,
     space: Any = None,
