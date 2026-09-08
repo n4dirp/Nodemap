@@ -6,6 +6,7 @@ from typing import Any
 import bpy
 
 from .. import __package__ as base_package
+from ..core.constants import MAX_FRAME_ZOOM, MIN_FRAME_ZOOM
 from ..core.helpers import _get_ui_scale, get_addon_preferences
 from ..core.state import MinimapState, _state
 
@@ -126,7 +127,7 @@ def _preserve_view_for_list_width(
         # Clamp like elsewhere (0.1..20) and keep at least 1 for
         # frame_all style (don't magnify small trees).
         # Use the same cap as _compute_frame_to_bounds_targets(fill=False).
-        new_zoom = max(0.1, min(new_zoom, 20.0))
+        new_zoom = max(MIN_FRAME_ZOOM, min(new_zoom, MAX_FRAME_ZOOM))
         if new_zoom > 1.0:
             new_zoom = 1.0
         new_scale = new_base * new_zoom
@@ -141,7 +142,7 @@ def _preserve_view_for_list_width(
         scale_ratio = new_inner_w / max(old_inner_w, 1.0)
         new_scale = old_scale * scale_ratio
         new_zoom = new_scale / new_base
-        new_zoom = max(0.1, min(new_zoom, 20.0))
+        new_zoom = max(MIN_FRAME_ZOOM, min(new_zoom, MAX_FRAME_ZOOM))
         # Re-derive scale after clamp.
         new_scale = new_base * new_zoom
         # Preserve world center proportionally: pan scales with scale.

@@ -686,6 +686,17 @@ def _ensure_minimap_batches(
     ):
         return
 
+    reasons = []
+    if key != minimap_state.cache.batch_key:
+        reasons.append("batch_key mismatch")
+    if not wires_fresh:
+        reasons.append("wires stale")
+    if bake_scale <= 0.0 or abs(scale - bake_scale) > SCALE_REBUILD_REL * max(bake_scale, 1e-6):
+        reasons.append(f"scale {bake_scale:.4f} -> {scale:.4f}")
+    if abs(map_anchor_x - anchor_x) > BATCH_DRIFT_PX or abs(map_anchor_y - anchor_y) > BATCH_DRIFT_PX:
+        reasons.append(f"drift ({map_anchor_x - anchor_x:.1f}, {map_anchor_y - anchor_y:.1f}) px")
+    logger.debug("BATCH_BUILD triggered: %s", ", ".join(reasons) if reasons else "initial")
+
     origin_x, origin_y = origin
     # Sticky bake scale: adopt the live scale only when the drift budget is
     # exceeded, so fill and wire generations always share one bake scale
@@ -865,6 +876,12 @@ def _ensure_minimap_batches(
     # in lockstep; no separate wire tolerance (a larger tolerance would
     # desync wire/node scale between rebuilds).
     if wire_key != minimap_state.cache.wire_key or minimap_state.cache.wire_scale != bake_scale:
+        logger.debug(
+            "WIRE_BATCH rebuild: tree_version=%d, curvature=%d, thickness=%.3f",
+            shared.tree_version,
+            int(wire_curvature),
+            wire_thickness,
+        )
         _rebuild_wire_marker_batches(
             minimap_state,
             tree_data,

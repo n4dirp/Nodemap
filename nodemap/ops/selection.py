@@ -226,6 +226,7 @@ def apply_list_range(
             if node:
                 if not select_node_via_operator(op, context, node, extend=True, deselect_all=False):
                     node.select = True
+    state.list.arrow_key = target_key
     op._redraw_ui()
 
 
@@ -399,6 +400,159 @@ def _scroll_list_to_row(
     if new_scroll == scroll:
         return False
     state.list.scroll = new_scroll
+    return True
+
+
+def _full_list_rows(state: MinimapState, settings) -> list[tuple]:
+    """Return all type-list rows as ``(kind, label, node_name)`` in display order.
+
+    Mirrors the row build the draw pass uses, but without viewport culling so
+    keyboard navigation can reach rows above and below the scrolled view.
+    """
+    tree_data = state.tree_data() or {}
+    type_nodes = tree_data.get("type_nodes") or {}
+    type_stats = tree_data.get("type_stats") or {}
+    search_texts = tree_data.get("type_search") or None
+    visible, effective_expanded, filtered_children = filter_type_list(
+        type_stats,
+        type_nodes,
+        state.list.expanded,
+        state.list.search_query,
+        search_texts=search_texts,
+    )
+    effective_expanded = effective_expanded or set()
+    filtered_children = filtered_children or {}
+
+    if not state.list.search_query.strip():
+        if settings.type_list_sort == "NAME":
+            visible.sort(key=lambda label_count: label_count[0].lower())
+        else:
+            visible.sort(key=lambda label_count: (-label_count[1], label_count[0]))
+
+    entries: list[tuple[str, str, float, int]] = []
+    for entry_label, display_count in visible:
+        full_count = type_stats.get(entry_label, display_count)
+        entries.append((entry_label, str(display_count), 0.0, full_count))
+
+    row_h = state.list.row_height
+    rows = _iter_type_list_layout(entries, filtered_children, effective_expanded, row_h)
+    return [(kind, label, node_name) for kind, label, node_name, _local_y in rows]
+
+
+def _scroll_list_one_row(
+    state: MinimapState,
+    row_count: int,
+    row_index: int,
+    row_h: float,
+    settings,
+) -> bool:
+    """Scroll the type list by a single row toward *row_index*.
+
+    Unlike :func:`_scroll_list_to_row` (which aligns the row to the viewport
+    edge and can jump a whole page), this nudges the scroll exactly one row
+    when the target sits outside the view, so arrow-key navigation pans
+    smoothly. Return True when the scroll changed.
+    """
+    zone_rect = state.list.list_zone_rect
+    if zone_rect is None:
+        return False
+    ui_scale = _get_ui_scale()
+    search_h = (BUTTON_SIZE - 1) * ui_scale if settings.show_search_bar else 0.0
+    row_pad_v = ui_scale
+    view_h = max(zone_rect[3] - search_h - 2 * row_pad_v - 1, row_h)
+    scroll_max = max(0.0, row_count * row_h - view_h)
+
+    scroll = min(max(state.list.scroll, 0.0), scroll_max)
+    row_top = row_index * row_h
+    row_bottom = (row_index + 1) * row_h
+    if row_bottom > scroll + view_h:
+        new_scroll = min(scroll + row_h, scroll_max)
+    elif row_top < scroll:
+        new_scroll = max(scroll - row_h, 0.0)
+    else:
+        return False
+    if new_scroll == scroll:
+        return False
+    state.list.scroll = new_scroll
+    return True
+
+
+def handle_list_arrow(
+    op: NODEMAP_OT_navigate,
+    context: Context,
+    state: MinimapState,
+    settings,
+    direction: int,
+) -> bool:
+    """Move the type-list selection one row along *direction* and select it.
+
+    *direction* is -1 for up and +1 for down. The move starts from the last
+    arrow-selected row, falling back to the active node's row, then to the
+    hovered row, then to the list edge — mouse hover alone never redirects
+    the walk. The target row is nudged into view one row at a time, hovered
+    (so the minimap highlights it like a mouse hover), and selected with
+    everything else deselected. Return True when the key was handled, False
+    when the list is empty so the caller lets the key pass through to the
+    Node Editor.
+    """
+    rows = _full_list_rows(state, settings)
+    if not rows:
+        return False
+
+    index_of: dict[tuple, int] = {}
+    for row_index, (kind, label, node_name) in enumerate(rows):
+        if kind == _ROW_HEADER:
+            index_of.setdefault(("header", label), row_index)
+        else:
+            index_of.setdefault(("child", label, node_name), row_index)
+
+    start = None
+    arrow_key = state.list.arrow_key
+    if arrow_key is not None:
+        start = index_of.get(tuple(arrow_key))
+    if start is None:
+        node_tree = op._space.edit_tree if op._space else None
+        active_node = node_tree.nodes.active if node_tree else None
+        if active_node is not None:
+            tree_data = state.tree_data() or {}
+            type_nodes = tree_data.get("type_nodes") or {}
+            for type_label, names in type_nodes.items():
+                if active_node.name in names:
+                    start = index_of.get(("child", type_label, active_node.name))
+                    if start is None:
+                        start = index_of.get(("header", type_label))
+                    break
+    if start is None:
+        child_hover = state.list.hovered_list_row
+        if child_hover is not None:
+            start = index_of.get(("child", child_hover[0], child_hover[1]))
+        if start is None and state.list.hovered_type_label is not None:
+            start = index_of.get(("header", state.list.hovered_type_label))
+    if start is None:
+        start = -1 if direction > 0 else len(rows)
+
+    target = min(max(start + direction, 0), len(rows) - 1)
+    kind, label, node_name = rows[target]
+    if kind == _ROW_HEADER:
+        target_key: tuple = ("header", label)
+    else:
+        target_key = ("child", label, node_name)
+
+    state.request_immediate_compile()
+    if kind == _ROW_HEADER:
+        state.list.hovered_type_label = label
+        state.list.hovered_list_row = None
+        state.interaction.hovered_node_id = None
+        select_type_nodes(op, context, label)
+    else:
+        state.list.hovered_type_label = None
+        state.list.hovered_list_row = (label, node_name)
+        state.interaction.hovered_node_id = node_name
+        select_single_node(op, context, node_name)
+    _scroll_list_one_row(state, len(rows), target, state.list.row_height, settings)
+    state.list.arrow_key = target_key
+    op._list_last_row_index = state.list.visible_row_index_map.get(target_key, op._list_last_row_index)
+    op._redraw_ui()
     return True
 
 

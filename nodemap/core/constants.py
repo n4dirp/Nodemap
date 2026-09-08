@@ -32,8 +32,13 @@ BORDER_POSITIONS: frozenset[str] = frozenset({"TOP_BORDER", "BOTTOM_BORDER", "LE
 # ---------------------------------------------------------------------------
 # Framing / zoom
 # ---------------------------------------------------------------------------
+MIN_FRAME_ZOOM: float = 0.1
 MAX_FRAME_ZOOM: float = 20.0
 EDITOR_FIT_MARGIN: float = 0.15
+
+# Wheel zoom steps the view by this factor per notch.
+WHEEL_ZOOM_IN: float = 1.15
+WHEEL_ZOOM_OUT: float = 0.85
 
 # ---------------------------------------------------------------------------
 # Node labels
@@ -65,6 +70,20 @@ TYPE_LIST_ANIM_AWAIT_TIMEOUT: float = 1.0
 TYPE_LIST_MIN_LABEL_W: float = 32.0
 
 # ---------------------------------------------------------------------------
+# Animations
+# ---------------------------------------------------------------------------
+# Smooth-drag, inertia, and frame/editor animations tick at this rate; the
+# pan-speed preference then spreads them over a whole number of frames.
+PAN_ANIM_FPS: float = 60.0
+PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
+
+# Inertia only kicks in when a released drag ends above this velocity; the
+# release halves the remaining velocity, and a view that has come to a stop
+# under SMOOTH_DAMP_STILL sits still instead of wobbling.
+INERTIA_MIN_SPEED: float = 2.0
+SMOOTH_DAMP_STILL: float = 0.15
+
+# ---------------------------------------------------------------------------
 # Minimap chrome (header buttons, font)
 # ---------------------------------------------------------------------------
 FONT_SIZE: int = 11
@@ -77,7 +96,7 @@ BUTTON_HOVER_ALPHA: float = 0.02
 # ---------------------------------------------------------------------------
 MIN_SOCKET_SCALE: float = 0.15
 SCALE_REBUILD_REL: float = 0.015
-BATCH_DRIFT_PX: float = 256.0
+BATCH_DRIFT_PX: float = 384.0
 CULL_MARGIN_PX: float = BATCH_DRIFT_PX + 32.0
 # While the user is actively zooming, defer scale-bucket rebuilds and keep
 # scaling the existing batches via the content matrix; rebuild once the scale
@@ -96,3 +115,4 @@ SOCKET_PILL_SIZE_MULTIPLIER: float = 2.0
 # Node rendering
 # ---------------------------------------------------------------------------
 NODE_ROUNDNESS_DEFAULT: float = 2.0
+MUTE_ALPHA: float = 0.35

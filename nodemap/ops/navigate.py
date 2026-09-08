@@ -11,8 +11,14 @@ from .. import __package__ as base_package
 from ..core.constants import (
     DOCK_DWELL_MS,
     HANDLE_THICKNESS,
+    INERTIA_MIN_SPEED,
+    MAX_FRAME_ZOOM,
+    MIN_FRAME_ZOOM,
     SCROLLBAR_HIT_PAD,
+    SMOOTH_DAMP_STILL,
     TYPE_LIST_FONT_ID,
+    WHEEL_ZOOM_IN,
+    WHEEL_ZOOM_OUT,
 )
 from ..core.helpers import (
     _expand_bounds_margin,
@@ -95,9 +101,14 @@ _SEARCH_NUMPAD_KEYS: dict[str, str] = {
     "NUMPAD_7": "7",
     "NUMPAD_8": "8",
     "NUMPAD_9": "9",
+    "NUMPAD_PERIOD": ".",
+    "NUMPAD_SLASH": "/",
+    "NUMPAD_ASTERIX": "*",
+    "NUMPAD_MINUS": "-",
+    "NUMPAD_PLUS": "+",
 }
 
-_SEARCH_ACCEPTED: set[str] = set(" .,_;/:'-[]=`\\")
+_SEARCH_ACCEPTED: set[str] = set(" .,_;/:'-[]=`\\*+")
 
 
 def _search_caret_at_x(query: str, click_x: int, text_start_x: float, font_size: int) -> int:
@@ -120,7 +131,8 @@ def _event_char(event: Event) -> str | None:
     """Return the printable character for *event*, or None when not one.
 
     Blender reports character keys through ``event.type``: a single
-    uppercase letter, a named digit (``ZERO``...``NINE``), or a named
+    uppercase letter, a named digit (``ZERO``...``NINE``), a numpad key
+    (``NUMPAD_0``...``NUMPAD_9``, ``NUMPAD_SLASH``, ...), or a named
     symbol key (``SPACE``, ``PERIOD``, ...). There is no ``event.char``
     attribute in Blender 5.2.
     """
@@ -649,7 +661,7 @@ class NODEMAP_OT_navigate(Operator):
                         self._anim.smooth_velocity[0] *= 0.5
                         self._anim.smooth_velocity[1] *= 0.5
                         speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
-                        if speed > 2.0:
+                        if speed > INERTIA_MIN_SPEED:
                             self._anim.inertia_active = True
                             self._anim.inertia_mode = "PAN"
                             self._anim.create_timer(context)
@@ -683,6 +695,21 @@ class NODEMAP_OT_navigate(Operator):
                     settings.show_type_list = not settings.show_type_list
                     start_list_width_animation(state, settings)
                     self._redraw_ui()
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
+            case "UP_ARROW" | "DOWN_ARROW":
+                if (
+                    event.value == "PRESS"
+                    and in_minimap
+                    and not (event.ctrl or event.shift or event.alt)
+                    and settings is not None
+                    and settings.show_type_list
+                    and state.list.list_width > 0
+                    and selection.handle_list_arrow(
+                        self, context, state, settings, -1 if event.type == "UP_ARROW" else 1
+                    )
+                ):
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -917,7 +944,7 @@ class NODEMAP_OT_navigate(Operator):
                     self._anim.drag_active = False
                 if self._anim._animations_enabled(context):
                     speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
-                    if speed > 2.0:
+                    if speed > INERTIA_MIN_SPEED:
                         self._anim.inertia_active = True
                         self._anim.inertia_mode = "VIEW"
                         if not self._anim.smooth_timer:
@@ -1027,6 +1054,7 @@ class NODEMAP_OT_navigate(Operator):
                         selection.select_single_node(self, context, node_name)
                         key = ("child", label, node_name)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
+                        state.list.arrow_key = key
                 else:
                     row_label = _list_row_at(self._mouse_x, self._mouse_y, state)
                     if row_label:
@@ -1049,6 +1077,7 @@ class NODEMAP_OT_navigate(Operator):
                                 selection.select_type_nodes(self, context, row_label)
                                 key = ("header", row_label)
                                 self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
+                                state.list.arrow_key = key
                 return {"RUNNING_MODAL"}
             if addon:
                 resize_handle = self._get_handle_at(context, event)
@@ -1121,7 +1150,7 @@ class NODEMAP_OT_navigate(Operator):
                     self._anim.drag_active = False
                 if self._anim._animations_enabled(context):
                     speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
-                    if speed > 2.0:
+                    if speed > INERTIA_MIN_SPEED:
                         self._anim.inertia_active = True
                         self._anim.inertia_mode = "VIEW"
                         if not self._anim.smooth_timer:
@@ -1180,6 +1209,7 @@ class NODEMAP_OT_navigate(Operator):
                         selection.select_single_node(self, context, node_name)
                         key = ("child", child_label, node_name)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
+                        state.list.arrow_key = key
                     if not (event.shift or event.ctrl):
                         if not self._anim.view_selected_animated(context):
                             try:
@@ -1213,6 +1243,7 @@ class NODEMAP_OT_navigate(Operator):
                         selection.select_type_nodes(self, context, row_label)
                         key = ("header", row_label)
                         self._list_last_row_index = state.list.visible_row_index_map.get(key, -1)
+                        state.list.arrow_key = key
                     if not (event.shift or event.ctrl):
                         if not self._anim.view_selected_animated(context):
                             try:
@@ -1334,8 +1365,8 @@ class NODEMAP_OT_navigate(Operator):
             dx = self._mouse_x - self._mmb_drag_start[0]
             dy = self._mouse_y - self._mmb_drag_start[1]
             if abs(dx) <= 1 and abs(dy) <= 1:
-                self._anim.smooth_velocity[0] *= 0.15
-                self._anim.smooth_velocity[1] *= 0.15
+                self._anim.smooth_velocity[0] *= SMOOTH_DAMP_STILL
+                self._anim.smooth_velocity[1] *= SMOOTH_DAMP_STILL
             else:
                 self._anim.smooth_velocity[0] = self._anim.smooth_velocity[0] * 0.6 + dx * 0.4
                 self._anim.smooth_velocity[1] = self._anim.smooth_velocity[1] * 0.6 + dy * 0.4
@@ -1407,7 +1438,7 @@ class NODEMAP_OT_navigate(Operator):
                 except RuntimeError:
                     pass
             else:
-                zoom_delta = 1.15 if event.type == "WHEELUPMOUSE" else 0.85
+                zoom_delta = WHEEL_ZOOM_IN if event.type == "WHEELUPMOUSE" else WHEEL_ZOOM_OUT
                 effective_zoom = state.view.user_zoom
 
                 is_constrained = False
@@ -1423,7 +1454,7 @@ class NODEMAP_OT_navigate(Operator):
                     except RuntimeError:
                         pass
                 else:
-                    new_zoom = max(0.1, min(effective_zoom * zoom_delta, 20.0))
+                    new_zoom = max(MIN_FRAME_ZOOM, min(effective_zoom * zoom_delta, MAX_FRAME_ZOOM))
 
                     transform = _get_minimap_transform(state)
                     tree_coord = _tree_from_region(self._mouse_x, self._mouse_y, transform)
@@ -1948,7 +1979,7 @@ class NODEMAP_OT_navigate(Operator):
 
 
 class NODEMAP_OT_open_preferences(Operator):
-    bl_idname = "nodemap.open_pref"
+    bl_idname = "nodemap.open_preferences"
     bl_label = "Open Preferences"
     bl_description = "Open the add-on preferences panel"
 
@@ -1956,21 +1987,6 @@ class NODEMAP_OT_open_preferences(Operator):
         bpy.ops.screen.userpref_show()
         context.preferences.active_section = "ADDONS"
         context.window_manager.addon_search = "Nodemap"
-        try:
-            import addon_utils
-
-            module = __package__
-            mod = addon_utils.addons_fake_modules.get(module)
-
-            if mod is not None:
-                bl_info = addon_utils.module_bl_info(mod)
-
-                if not bl_info["show_expanded"]:
-                    bpy.ops.preferences.addon_expand(module=module)
-
-        except RuntimeError as e:
-            self.report({"WARNING"}, f"Could not expand addon: {e}")
-
         return {"FINISHED"}
 
 

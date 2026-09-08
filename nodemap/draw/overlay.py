@@ -162,6 +162,20 @@ def _compute_minimap_rect(
         map_x, map_y = clamp_free_rect(
             map_x, map_y, map_w, map_h, (safe_x_min, safe_y_min, safe_x_max, safe_y_max), x_margin, y_margin, margin
         )
+        # Enforce edge margins on the origin (clamp_free_rect collapses when
+        # the map is wider than the safe area, pushing the origin outside the
+        # left/bottom margin), then clamp dimensions to the remaining space.
+        map_x = round(max(map_x, float(safe_x_min) + x_margin))
+        map_w = round(min(map_w, float(safe_x_max) - map_x - x_margin))
+        map_y = round(max(map_y, float(safe_y_min) + margin))
+        map_h = round(min(map_h, float(safe_y_max) - map_y - y_margin))
+
+        min_dim_width = MIN_MAP_WIDTH * ui_scale
+        min_dim_height = MIN_MAP_HEIGHT * ui_scale
+        if map_w < min_dim_width or map_h < min_dim_height:
+            state.view.rect = (0.0, 0.0, 0.0, 0.0)
+            return None
+
         return map_x, map_y, map_w, map_h, padding, y_margin
 
     # General edge-aware clamp into safe bounds so a docked minimap never
@@ -967,7 +981,7 @@ def draw_minimap() -> None:
     if _early_exit(context, space, state):
         show_overlays = space.overlay.show_overlays if space else "?"
         enabled = state.enabled
-        logger.debug("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
+        logger.trace("draw_minimap: early exit (type=%s overlays=%s enabled=%s)", space.type, show_overlays, enabled)
         return
 
     settings = get_addon_preferences(context).settings
@@ -1022,20 +1036,20 @@ def draw_minimap() -> None:
     state.view.raw_tree_bounds = raw_bounds
     state.view.snapshot_selected_bounds = selected_bounds
 
-    logger.trace(
-        "SETTINGS %d nodes | show_wires=%d show_node_labels=%d compact_labels=%d"
-        " show_node_colors=%d socket_indicators=%d wire_color=%d frame_labels=%d"
-        " show_reroutes=%d",
-        current_fingerprint[0],
-        settings.show_wires,
-        settings.show_node_labels,
-        settings.compact_node_labels,
-        settings.show_node_colors,
-        settings.show_socket_indicators,
-        settings.show_wire_color,
-        settings.show_frame_labels,
-        getattr(settings, "show_reroutes", True),
-    )
+    # logger.trace(
+    #     "SETTINGS %d nodes | show_wires=%d show_node_labels=%d compact_labels=%d"
+    #     " show_node_colors=%d socket_indicators=%d wire_color=%d frame_labels=%d"
+    #     " show_reroutes=%d",
+    #     current_fingerprint[0],
+    #     settings.show_wires,
+    #     settings.show_node_labels,
+    #     settings.compact_node_labels,
+    #     settings.show_node_colors,
+    #     settings.show_socket_indicators,
+    #     settings.show_wire_color,
+    #     settings.show_frame_labels,
+    #     getattr(settings, "show_reroutes", True),
+    # )
 
     ui_scale = _get_ui_scale()
     colors = _get_node_editor_theme_colors()

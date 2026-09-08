@@ -119,6 +119,7 @@ class ListState:
     list_zone_rect: Rect | None = None
     visible_row_keys: list[tuple] = field(default_factory=list)
     visible_row_index_map: dict[tuple, int] = field(default_factory=dict)
+    arrow_key: tuple | None = None
     anim_active: bool = False
     anim_from: float = 0.0
     anim_target: float = -1.0

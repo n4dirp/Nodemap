@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 from .. import __package__ as base_package
+from ..core.constants import PAN_ANIM_FPS, PAN_ANIM_INTERVAL
 from ..core.helpers import get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
 from ..geo.transforms import _clamp_pan_to_viewport, _get_visible_rect
@@ -23,6 +24,22 @@ logger = logging.getLogger(base_package)
 
 # Animation duration in frames for each pan-speed preference.
 _PAN_SPEED_FRAMES: dict[str, float] = {"FAST": 8.0, "MEDIUM": 16.0}
+
+# Smooth-drag spring feel. Inertia decays the released view velocity each tick
+# until it falls below the stop speed. The drag follow fraction and per-tick
+# move cap grow with the remaining target magnitude; dt is clamped to one
+# sane frame so a heavy redraw does not stretch the lag.
+_INERTIA_DECAY: float = 0.92
+_INERTIA_STOP_SPEED: float = 0.5
+_DRAG_MAX_FRAME_DT: float = 0.25
+_DRAG_FOLLOW_SCALE: float = 200.0
+_DRAG_FOLLOW_BASE: float = 0.4
+_DRAG_FOLLOW_GAIN: float = 0.4
+_DRAG_FOLLOW_MAX: float = 0.95
+_DRAG_MOVE_BASE: float = 240.0
+_DRAG_MOVE_GAIN: float = 0.35
+_DRAG_MOVE_MAX: float = 3000.0
+_ANIM_FINISH_EPS: float = 0.5
 
 
 class AnimationController:
@@ -122,7 +139,7 @@ class AnimationController:
     def create_timer(self, context: Context) -> None:
         if self.smooth_timer:
             return
-        self.smooth_timer = context.window_manager.event_timer_add(1 / 60, window=context.window)
+        self.smooth_timer = context.window_manager.event_timer_add(PAN_ANIM_INTERVAL, window=context.window)
 
     def destroy_timer(self, context: Context) -> None:
         if self.smooth_timer:
@@ -170,7 +187,7 @@ class AnimationController:
         """Snap the view to the center-animation target and stop."""
         remaining_x = self.anim_target[0] - self.anim_applied[0]
         remaining_y = self.anim_target[1] - self.anim_applied[1]
-        if abs(remaining_x) >= 0.5 or abs(remaining_y) >= 0.5:
+        if abs(remaining_x) >= _ANIM_FINISH_EPS or abs(remaining_y) >= _ANIM_FINISH_EPS:
             self._pan_editor(context, int(remaining_x), int(remaining_y))
         self.anim_active = False
         self.destroy_timer(context)
@@ -209,11 +226,11 @@ class AnimationController:
     def apply_inertia(self, context: Context) -> None:
         """Decay inertia and apply pan deltas."""
         op = self._op
-        decay = 0.92
+        decay = _INERTIA_DECAY
         self.smooth_velocity[0] *= decay
         self.smooth_velocity[1] *= decay
         speed = max(abs(self.smooth_velocity[0]), abs(self.smooth_velocity[1]))
-        if speed < 0.5:
+        if speed < _INERTIA_STOP_SPEED:
             self.inertia_active = False
             self.inertia_mode = None
             self.destroy_timer(context)
@@ -225,11 +242,13 @@ class AnimationController:
                 if dx != 0 or dy != 0:
                     state.view.pan = (state.view.pan[0] + dx, state.view.pan[1] + dy)
                     _clamp_pan_to_viewport(op._space, op._region, state)
+                    # State changed directly (no view2d operator): redraw now.
+                    op._redraw_ui()
         elif self.inertia_mode == "VIEW":
             if dx != 0 or dy != 0:
+                # view2d.pan tags the region redraw itself; no explicit call needed.
                 self._pan_editor(context, dx, dy)
                 _clamp_pan_to_viewport(op._space, op._region, op._state)
-        op._redraw_ui()
 
     def apply_smooth_drag(self, context: Context) -> None:
         """Chase the drag target with a spring-like follow.
@@ -243,17 +262,17 @@ class AnimationController:
         if not self.drag_active:
             return
         now = time.monotonic()
-        dt = now - self._last_drag_tick if self._last_drag_tick > 0.0 else (1.0 / 60.0)
-        if dt <= 0.0 or dt > 0.25:
-            dt = 1.0 / 60.0
+        dt = now - self._last_drag_tick if self._last_drag_tick > 0.0 else PAN_ANIM_INTERVAL
+        if dt <= 0.0 or dt > _DRAG_MAX_FRAME_DT:
+            dt = PAN_ANIM_INTERVAL
         self._last_drag_tick = now
-        ticks = max(dt * 60.0, 1.0)
+        ticks = max(dt * PAN_ANIM_FPS, 1.0)
 
         magnitude = (self.drag_target[0] ** 2 + self.drag_target[1] ** 2) ** 0.5
-        raw = magnitude / 200.0
-        follow = min(0.4 + raw * 0.4, 0.95)
+        raw = magnitude / _DRAG_FOLLOW_SCALE
+        follow = min(_DRAG_FOLLOW_BASE + raw * _DRAG_FOLLOW_GAIN, _DRAG_FOLLOW_MAX)
         follow = 1.0 - (1.0 - follow) ** ticks
-        max_move = min(240.0 + magnitude * 0.35, 3000.0) * ticks
+        max_move = min(_DRAG_MOVE_BASE + magnitude * _DRAG_MOVE_GAIN, _DRAG_MOVE_MAX) * ticks
         dx = self.drag_target[0] * follow
         dy = self.drag_target[1] * follow
         dx = max(min(dx, max_move), -max_move)
@@ -262,15 +281,14 @@ class AnimationController:
         self.drag_target[1] -= dy
         pan_x, pan_y = self._take_pan(dx, dy)
         if pan_x != 0 or pan_y != 0:
+            # view2d.pan tags the region redraw itself; no explicit call needed.
             self._pan_editor(context, pan_x, pan_y)
             _clamp_pan_to_viewport(op._space, op._region, op._state)
         if not op._dragging:
             self.drag_active = False
-        op._redraw_ui()
 
     def apply_center_animation(self, context: Context) -> None:
         """Ease the view toward the center-animation target."""
-        op = self._op
         if not self.anim_active:
             return
         self.anim_progress += 1 / self._animation_frames(context)
@@ -291,8 +309,8 @@ class AnimationController:
         self.anim_acc[0] -= dx
         self.anim_acc[1] -= dy
         if dx != 0 or dy != 0:
+            # view2d.pan tags the region redraw itself; no explicit call needed.
             self._pan_editor(context, dx, dy)
-        op._redraw_ui()
 
     def start_frame_animation(self, context: Context, target_zoom: float, target_pan: list[float]) -> None:
         """Begin a zoom+pan animation toward the given target."""
@@ -377,7 +395,6 @@ class AnimationController:
             self.editor_anim_active = False
             self.editor_anim_progress = 0.0
             self.destroy_timer(context)
-            op._redraw_ui()
             return
         self.editor_anim_progress = progress
         eased = self._ease(progress)
@@ -385,8 +402,9 @@ class AnimationController:
             start + (target - start) * eased
             for start, target in zip(self.editor_anim_start_rect, self.editor_anim_target_rect)
         ]
+        # _correct_editor_view drives view2d operators that tag the region
+        # redraw themselves; no explicit redraw needed here.
         self._correct_editor_view(context, desired)
-        op._redraw_ui()
 
     def _animations_enabled(self, context: Context) -> bool:
         """Return True when animations are allowed by preferences and accessibility."""

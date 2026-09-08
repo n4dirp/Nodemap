@@ -6,7 +6,7 @@ import time
 import bpy
 
 from .. import __package__ as base_package
-from ..core.constants import NODE_ROUNDNESS_DEFAULT
+from ..core.constants import MUTE_ALPHA, NODE_ROUNDNESS_DEFAULT
 from ..core.helpers import (
     _get_node_dims,
     _get_node_initials,
@@ -22,11 +22,6 @@ from ..core.theme import (
 from ..ui.preferences import TRACE_LEVEL
 
 logger = logging.getLogger(base_package)
-
-# Minimum interval between live position-only refreshes during drags (seconds).
-# Skipped frames fall through to the debounced compile, which flushes the
-# final position once movement settles.
-_MOVE_REFRESH_MIN_INTERVAL = 0.016
 
 
 def _socket_y(body_top: float, body_bot: float, visible_count: int, socket_index: int) -> float:
@@ -94,6 +89,8 @@ def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, mas
     old_fingerprint = shared.fingerprint
     unchanged = old_fingerprint == current_fingerprint
     trace = logger.isEnabledFor(TRACE_LEVEL)
+    if not unchanged:
+        logger.debug("FINGERPRINT changed: %s -> %s", old_fingerprint, current_fingerprint)
     if unchanged and not shared.pending_settle_flush:
         shared.pending_timer = None
         shared.pending_timer_deadline = 0.0
@@ -110,6 +107,7 @@ def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, mas
         shared.tree_version += 1
         applied = True
         path = "settle_bump"
+        logger.debug("SETTLE settle_bump: fingerprint unchanged, bumped version=%d", shared.tree_version)
     elif _is_move_only_diff(old_fingerprint, current_fingerprint) and shared.tree_data:
         applied = _apply_move_updates(shared, node_tree)
         if applied:
@@ -118,9 +116,11 @@ def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, mas
             # the patched positions without a full recompile.
             shared.tree_version += 1
             path = "move_patch"
+            logger.debug("SETTLE move_patch: position-only diff, version=%d", shared.tree_version)
     if not applied:
         _compile_tree_data(shared, node_tree, colors, settings, master_alpha, ui_scale)
         shared.fingerprint = current_fingerprint
+        logger.debug("SETTLE compile: full recompile, version=%d", shared.tree_version)
     shared.pending_timer = None
     shared.pending_timer_deadline = 0.0
     shared.pending_fingerprint = None
@@ -385,7 +385,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
             if not node.select:
                 border_alpha *= 0.6
             if node.mute:
-                border_alpha = 0.35 * master_alpha
+                border_alpha = MUTE_ALPHA * master_alpha
             info["border_color"] = _srgb_to_linear(_alpha_mul(border_color, border_alpha))
             info["node_r_base"] = NODE_ROUNDNESS_DEFAULT * 2
             info["name"] = node.name
@@ -397,7 +397,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                 info["group_marker_col"] = marker_color
 
         # Labels (tree-space positions computed in build)
-        text_alpha = 0.35 if node.mute else 1.0
+        text_alpha = MUTE_ALPHA if node.mute else 1.0
         if is_frame:
             frame_label = node.label
             if frame_label and show_frame_labels:
@@ -637,7 +637,7 @@ def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, mas
                             initials = _get_node_initials(label)
                             label_text = initials if initials else label
                         if label_text:
-                            mute_alpha = 0.35 if getattr(node, "mute", False) else 1.0
+                            mute_alpha = MUTE_ALPHA if getattr(node, "mute", False) else 1.0
                             text_color = _alpha_mul(colors["label"], mute_alpha * master_alpha)
                             reroute_labels_raw.append(
                                 {
@@ -683,7 +683,7 @@ def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, mas
     # Wire opacity influences the highlight at 50% so dimmed wires dim their
     # highlight too (wire_opacity 0.0 → 50% of full, 1.0 → full).
     tree_data["wire_highlight_color"] = (
-        _alpha_mul(colors["node_active"], master_alpha * (0.5 / +0.5 * wire_opacity_mult))
+        _alpha_mul(colors["node_active"], master_alpha * (0.5 + 0.5 * wire_opacity_mult))
         if show_wire_highlight
         else None
     )

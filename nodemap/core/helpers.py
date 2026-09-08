@@ -12,6 +12,7 @@ from .. import __package__ as base_package
 from .constants import (
     EMPTY_FINGERPRINT,
     LABEL_MARGIN_PX,
+    PAN_ANIM_INTERVAL,
     TYPE_LIST_ANIM_DURATION,
     TYPE_LIST_FONT_SIZE,
     TYPE_LIST_MAX_WIDTH_PCT,
@@ -51,6 +52,7 @@ def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
                     continue
             if mode == "ALL" or area.type == mode:
                 area.tag_redraw()
+                logger.debug("redraw_ui: %s area=%d", area.type if mode == "ALL" else mode, area.as_pointer())
 
 
 def _get_ui_scale() -> float:
@@ -323,7 +325,7 @@ def _schedule_list_anim_redraw(minimap_state) -> None:
     if minimap_state.list.anim_timer is not None:
         return
     try:
-        bpy.app.timers.register(lambda: _list_anim_tick(minimap_state), first_interval=1 / 60)
+        bpy.app.timers.register(lambda: _list_anim_tick(minimap_state), first_interval=PAN_ANIM_INTERVAL)
         minimap_state.list.anim_timer = True
     except (RuntimeError, ValueError):
         pass
