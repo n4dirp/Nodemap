@@ -52,21 +52,23 @@ from .animations import AnimationController
 logger = logging.getLogger(base_package)
 
 # Printable characters accepted while typing a type-list search query.
+# Key names match Blender's event enum (see rna_wm.cc): SEMI_COLON,
+# ACCENT_GRAVE, LEFT_BRACKET, RIGHT_BRACKET, EQUAL.
 _SEARCH_SPECIAL_KEYS: dict[str, str] = {
     "SPACE": " ",
     "PERIOD": ".",
     "COMMA": ",",
     "SLASH": "/",
-    "SEMICOLON": ";",
+    "SEMI_COLON": ";",
     "QUOTE": "'",
     "UNDERSCORE": "_",
     "MINUS": "-",
     "COLON": ":",
     "BACKSLASH": "\\",
-    "BRACKETLEFT": "[",
-    "BRACKETRIGHT": "]",
-    "EQUALS": "=",
-    "GRAVEACCENT": "`",
+    "LEFT_BRACKET": "[",
+    "RIGHT_BRACKET": "]",
+    "EQUAL": "=",
+    "ACCENT_GRAVE": "`",
 }
 
 _SEARCH_DIGIT_KEYS: dict[str, str] = {
@@ -135,8 +137,8 @@ def _event_char(event: Event) -> str | None:
 
 
 # Mouse and frame-callback events that never get captured by the search box.
-# While the box is focused these keep the rest of the minimap interactive
-# instead of freezing the modal on the text field.
+# While the box is focused these reach the mouse handlers, where the first
+# press outside the search zone only blurs and is swallowed.
 _SEARCH_PASSTHROUGH: set[str] = {
     "LEFTMOUSE",
     "RIGHTMOUSE",
@@ -155,8 +157,8 @@ def _is_search_keyboard_event(event: Event) -> bool:
     """Return True when *event* should be captured by the focused search box.
 
     Keyboard events are captured while the box is focused so they never reach
-    the Node Editor; mouse events pass through so the minimap (and the blur
-    logic on pointer leave in the mouse handlers) keeps working.
+    the Node Editor; mouse events reach the normal handlers, where the first
+    press outside the search zone blurs and is swallowed.
     """
     return event.type not in _SEARCH_PASSTHROUGH
 
@@ -244,6 +246,26 @@ def _in_rect(region_x: int, region_y: int, rect: tuple[float, float, float, floa
     """Return True when the cursor falls inside the ``(x, y, w, h)`` rect."""
     rect_x, rect_y, rect_w, rect_h = rect
     return rect_x <= region_x <= rect_x + rect_w and rect_y <= region_y <= rect_y + rect_h
+
+
+def _over_search_zone(region_x: int, region_y: int, state: MinimapState) -> bool:
+    """Return True when the cursor is over the search box zone.
+
+    The clear button lives inside the search pill, so a single
+    ``search_rect`` hit test covers the box, the text, and the button.
+    """
+    search_rect = state.list.search_rect
+    return bool(search_rect and _in_list_zone(region_x, region_y, state) and _in_rect(region_x, region_y, search_rect))
+
+
+def _clear_search_stale_hover(state: MinimapState) -> None:
+    """Clear outside hover state so no highlight lingers under the I-beam."""
+    state.list.hovered_type_label = None
+    state.list.hovered_list_row = None
+    state.interaction.hovered_node_id = None
+    state.buttons.hovered_button_id = None
+    state.list.hovered_scrollbar = False
+    state.interaction.hovered_handle = None
 
 
 def _list_scrollbar_hit(region_x: int, region_y: int, state: MinimapState) -> bool:
@@ -426,6 +448,7 @@ class NODEMAP_OT_navigate(Operator):
     _list_scroll_grab: float = 0.0
     _list_search_pressed: bool = False
     _list_search_clear_pressed: bool = False
+    _search_blur_consumed: bool = False
     _list_mmb_dragging: bool = False
     _list_mmb_drag_start: tuple[int, int] | None = None
     _list_last_row_index: int = -1
@@ -444,6 +467,38 @@ class NODEMAP_OT_navigate(Operator):
         area_ptr = self._area.as_pointer() if self._area else None
         redraw_ui("NODE_EDITOR", area_ptr)
 
+    def _blur_search(self, context: Context, state: MinimapState) -> None:
+        """Blur the search box without arming any click guard.
+
+        Shared by keyboard blurs (Enter, Esc) which have no matching button
+        release to swallow. Clears stale outside hover and restores the
+        default cursor so no I-beam lingers after focus is lost.
+        """
+        state.list.search_focused = False
+        state.list.search_cursor = 0
+        _clear_search_stale_hover(state)
+        if context.window:
+            context.window.cursor_modal_set("DEFAULT")
+        self._last_cursor = ""
+        self._redraw_ui()
+
+    def _blur_search_consume(self, context: Context, state: MinimapState) -> None:
+        """Blur the search box and swallow the current outside click.
+
+        Arms the release guard so the matching button release is consumed
+        too.
+        """
+        self._blur_search(context, state)
+        self._search_blur_consumed = True
+        self._redraw_ui()
+
+    def _consume_search_blur_press(self, context: Context, state: MinimapState) -> bool:
+        """Blur on an outside press and swallow it. Return True when consumed."""
+        if state.list.search_focused and not _over_search_zone(self._mouse_x, self._mouse_y, state):
+            self._blur_search_consume(context, state)
+            return True
+        return False
+
     def modal(self, context: Context, event: Event) -> set[str]:
         if not context.window:
             return {"CANCELLED"}
@@ -460,6 +515,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._moving
             or self._drag_start is not None
             or self._list_scroll_pressed
+            or self._search_blur_consumed
             or self._anim.anim_active
             or self._anim.inertia_active
             or self._anim.drag_active
@@ -505,11 +561,29 @@ class NODEMAP_OT_navigate(Operator):
         in_minimap = _is_in_minimap(self._mouse_x, self._mouse_y, state)
 
         # Type-list search: while focused, swallow keyboard events so keystrokes
-        # never leak into the Node Editor (rename, tab, etc.). Mouse events keep
-        # flowing to the normal handlers, which blur the box when the pointer
-        # leaves the list zone, so the rest of the minimap stays interactive.
+        # never leak into the Node Editor (rename, tab, etc.). Mouse events
+        # reach the normal handlers, where the first press outside the search
+        # zone only blurs and is swallowed.
         if state.list.search_focused and _is_search_keyboard_event(event):
             return self._handle_list_search(context, event)
+
+        # Second Esc over the minimap clears the filter text. The first Esc
+        # (handled above) only blurs and arms this; repeats of a held key are
+        # swallowed without clearing so clearing takes a distinct press.
+        if (
+            event.type == "ESC"
+            and event.value == "PRESS"
+            and not state.list.search_focused
+            and state.list.search_esc_armed
+            and state.list.search_query
+            and in_minimap
+        ):
+            if not event.is_repeat:
+                state.list.search_query = ""
+                state.list.search_cursor = 0
+                state.list.search_esc_armed = False
+                self._redraw_ui()
+            return {"RUNNING_MODAL"}
 
         # Ctrl+F over the minimap: reveal the type list (if hidden) and focus
         # its filter field. Ignored when the filter bar is hidden so the key
@@ -527,6 +601,8 @@ class NODEMAP_OT_navigate(Operator):
                 start_list_width_animation(state, settings)
             state.list.search_focused = True
             state.list.search_cursor = len(state.list.search_query)
+            state.list.search_esc_armed = False
+            _clear_search_stale_hover(state)
             # Entering text-input mode: show the I-beam so the pointer
             # indicates typing, like clicking the filter field.
             context.window.cursor_modal_set("TEXT")
@@ -543,6 +619,8 @@ class NODEMAP_OT_navigate(Operator):
 
             case "MIDDLEMOUSE":
                 if event.value == "PRESS" and in_minimap:
+                    if self._consume_search_blur_press(context, state):
+                        return {"RUNNING_MODAL"}
                     state.interaction.pressed = True
                     self._anim.cancel_smooth(context)
                     if _in_list_zone(self._mouse_x, self._mouse_y, state):
@@ -551,6 +629,9 @@ class NODEMAP_OT_navigate(Operator):
                     else:
                         self._mmb_dragging = True
                         self._mmb_drag_start = (self._mouse_x, self._mouse_y)
+                    return {"RUNNING_MODAL"}
+                if event.value == "RELEASE" and self._search_blur_consumed:
+                    self._search_blur_consumed = False
                     return {"RUNNING_MODAL"}
                 if event.value == "RELEASE" and self._list_mmb_dragging:
                     state.interaction.pressed = False
@@ -643,8 +724,9 @@ class NODEMAP_OT_navigate(Operator):
         Typed characters (letters, digits, and a few common separators) are
         inserted at the caret; Left/Right/Home/End move the caret, Backspace
         deletes before it and Delete after it. Enter blurs (keeping the
-        filter), and Esc clears the query and blurs. Every other event is
-        swallowed so it never reaches the Node Editor.
+        filter); the first Esc blurs (keeping the filter) and arms clearing,
+        so a second Esc over the minimap clears the query. Every other event
+        is swallowed so it never reaches the Node Editor.
         """
         state = self._state
         if event.value != "PRESS":
@@ -655,13 +737,13 @@ class NODEMAP_OT_navigate(Operator):
         key = event.type
 
         if key == "ESC":
-            state.list.search_query = ""
-            state.list.search_cursor = 0
-            state.list.search_focused = False
+            self._blur_search(context, state)
+            state.list.search_esc_armed = bool(state.list.search_query)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
-        if key == "RETURN":
-            state.list.search_focused = False
+        if key in ("RET", "NUMPAD_ENTER"):
+            self._blur_search(context, state)
+            state.list.search_esc_armed = False
             self._redraw_ui()
             return {"RUNNING_MODAL"}
         if key == "LEFT_ARROW":
@@ -707,6 +789,9 @@ class NODEMAP_OT_navigate(Operator):
         state, addon, settings, in_minimap = self._minimap_event_context(context)
         # --- Release ---
         if event.value == "RELEASE":
+            if self._search_blur_consumed:
+                self._search_blur_consumed = False
+                return {"RUNNING_MODAL"}
             if self._moving:
                 self._moving = False
                 self._move_start_mouse = None
@@ -745,6 +830,7 @@ class NODEMAP_OT_navigate(Operator):
                     state.list.search_query = ""
                     state.list.search_cursor = 0
                     state.list.search_focused = False
+                    state.list.search_esc_armed = False
                     state.list.search_clear_rect = None
                     state.list.search_clear_hovered = False
                     self._redraw_ui()
@@ -770,6 +856,11 @@ class NODEMAP_OT_navigate(Operator):
                     else:
                         state.list.search_cursor = len(state.list.search_query)
                         state.list.search_focused = True
+                        state.list.search_esc_armed = False
+                        _clear_search_stale_hover(state)
+                        if context.window:
+                            context.window.cursor_modal_set("TEXT")
+                        self._last_cursor = "TEXT"
                     self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._armed_button:
@@ -857,21 +948,11 @@ class NODEMAP_OT_navigate(Operator):
             self._drag_start = None
             return {"PASS_THROUGH"}
         # --- Press ---
-        # While the search box is focused, clicking anywhere outside it blurs
-        # the box first so the rest of the minimap/list acts on the click
-        # ("click blurs then acts") instead of mutating rows while still
-        # capturing text. Clicking the box itself keeps focus (handled below).
-        if state.list.search_focused:
-            search_rect = state.list.search_rect
-            over_box = bool(
-                search_rect
-                and _in_list_zone(self._mouse_x, self._mouse_y, state)
-                and _in_rect(self._mouse_x, self._mouse_y, search_rect)
-            )
-            if not over_box:
-                state.list.search_focused = False
-                state.list.search_cursor = 0
-                self._redraw_ui()
+        # While the search box is focused, the first click outside the search
+        # zone only blurs and is swallowed, so it never arms buttons, rows,
+        # drags, or resizes. Clicking the box itself keeps focus (below).
+        if self._consume_search_blur_press(context, state):
+            return {"RUNNING_MODAL"}
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
             self._anim.cancel_smooth(context)
@@ -999,6 +1080,9 @@ class NODEMAP_OT_navigate(Operator):
         state, addon, settings, in_minimap = self._minimap_event_context(context)
         # --- Release ---
         if event.value == "RELEASE":
+            if self._search_blur_consumed:
+                self._search_blur_consumed = False
+                return {"RUNNING_MODAL"}
             if self._list_width_dragging:
                 self._list_width_dragging = False
                 state.list.dragging_width = None
@@ -1059,20 +1143,10 @@ class NODEMAP_OT_navigate(Operator):
             self._drag_start = None
             return {"PASS_THROUGH"}
         # --- Press ---
-        # Same "click blurs then acts" rule as the left button: a right-click
-        # anywhere outside the focused search box drops focus so the row action
-        # below selects/expands the clicked item without still capturing text.
-        if state.list.search_focused:
-            search_rect = state.list.search_rect
-            over_box = bool(
-                search_rect
-                and _in_list_zone(self._mouse_x, self._mouse_y, state)
-                and _in_rect(self._mouse_x, self._mouse_y, search_rect)
-            )
-            if not over_box:
-                state.list.search_focused = False
-                state.list.search_cursor = 0
-                self._redraw_ui()
+        # Same blur-then-swallow rule as the left button: the first right-click
+        # outside the focused search box only blurs instead of selecting rows.
+        if self._consume_search_blur_press(context, state):
+            return {"RUNNING_MODAL"}
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
             self._anim.cancel_smooth(context)
@@ -1200,46 +1274,52 @@ class NODEMAP_OT_navigate(Operator):
         if not self._dragging and not self._mmb_dragging and not self._drag_start:
             self._update_cursor(context, event)
         if not self._dragging and not self._mmb_dragging and not self._resize_handle and not self._list_width_dragging:
-            in_list = _in_list_zone(self._mouse_x, self._mouse_y, state)
             # Clear (X) button hover feedback; shown only while a query exists.
+            # It stays live while the search box is focused since the button is
+            # part of the search zone.
             clear_rect = state.list.search_clear_rect
             over_clear = bool(clear_rect and _in_rect(self._mouse_x, self._mouse_y, clear_rect))
             if state.list.search_clear_hovered != over_clear:
                 state.list.search_clear_hovered = over_clear
                 self._redraw_ui()
-            # The scrollbar gutter suppresses row hovers so the bar can
-            # be approached without flashing the rows underneath.
-            over_bar = (
-                in_list
-                and _list_scrollbar_hit(self._mouse_x, self._mouse_y, state)
-                and state.interaction.hovered_handle != ResizeHandle.LIST
-            )
-            if state.list.hovered_scrollbar != over_bar:
-                state.list.hovered_scrollbar = over_bar
-                self._redraw_ui()
-            row_label = None if over_bar else (_list_row_at(self._mouse_x, self._mouse_y, state) if in_list else None)
-            child_hover = None
-            if not over_bar and in_list:
-                child_hover = _list_child_at(self._mouse_x, self._mouse_y, state)
-            if state.list.hovered_type_label != row_label:
-                state.list.hovered_type_label = row_label
-                self._redraw_ui()
-            if state.list.hovered_list_row != child_hover:
-                state.list.hovered_list_row = child_hover
-                self._redraw_ui()
-            new_hovered = None
-            if in_list and child_hover is not None:
-                # Hovering a single child row highlights only that node's
-                # border on the minimap (not the whole type group).
-                new_hovered = child_hover[1]
-            if state.interaction.hovered_node_id != new_hovered:
-                state.interaction.hovered_node_id = new_hovered
-                self._redraw_ui()
-            old_btn = state.buttons.hovered_button_id
-            new_btn = _frame_button_at(self._mouse_x, self._mouse_y, state) if in_minimap and not in_list else None
-            if old_btn != new_btn:
-                state.buttons.hovered_button_id = new_btn
-                self._redraw_ui()
+            if not state.list.search_focused:
+                in_list = _in_list_zone(self._mouse_x, self._mouse_y, state)
+                # The scrollbar gutter suppresses row hovers so the bar can
+                # be approached without flashing the rows underneath.
+                over_bar = (
+                    in_list
+                    and _list_scrollbar_hit(self._mouse_x, self._mouse_y, state)
+                    and state.interaction.hovered_handle != ResizeHandle.LIST
+                )
+                if state.list.hovered_scrollbar != over_bar:
+                    state.list.hovered_scrollbar = over_bar
+                    self._redraw_ui()
+                if over_bar or not in_list:
+                    row_label = None
+                else:
+                    row_label = _list_row_at(self._mouse_x, self._mouse_y, state)
+                child_hover = None
+                if not over_bar and in_list:
+                    child_hover = _list_child_at(self._mouse_x, self._mouse_y, state)
+                if state.list.hovered_type_label != row_label:
+                    state.list.hovered_type_label = row_label
+                    self._redraw_ui()
+                if state.list.hovered_list_row != child_hover:
+                    state.list.hovered_list_row = child_hover
+                    self._redraw_ui()
+                new_hovered = None
+                if in_list and child_hover is not None:
+                    # Hovering a single child row highlights only that node's
+                    # border on the minimap (not the whole type group).
+                    new_hovered = child_hover[1]
+                if state.interaction.hovered_node_id != new_hovered:
+                    state.interaction.hovered_node_id = new_hovered
+                    self._redraw_ui()
+                old_btn = state.buttons.hovered_button_id
+                new_btn = _frame_button_at(self._mouse_x, self._mouse_y, state) if in_minimap and not in_list else None
+                if old_btn != new_btn:
+                    state.buttons.hovered_button_id = new_btn
+                    self._redraw_ui()
         if self._list_mmb_dragging and self._list_mmb_drag_start:
             dy = self._mouse_y - self._list_mmb_drag_start[1]
             if abs(dy) > 0:
@@ -1295,7 +1375,13 @@ class NODEMAP_OT_navigate(Operator):
         state, addon, settings, in_minimap = self._minimap_event_context(context)
         if in_minimap and (event.ctrl or event.shift):
             return {"PASS_THROUGH"}
+        if state.list.search_focused and not _over_search_zone(self._mouse_x, self._mouse_y, state):
+            self._blur_search_consume(context, state)
+            self._search_blur_consumed = False
+            return {"RUNNING_MODAL"}
         if in_minimap and _in_list_zone(self._mouse_x, self._mouse_y, state):
+            if state.list.search_focused:
+                return {"RUNNING_MODAL"}
             direction = -1 if event.type == "WHEELUPMOUSE" else 1
             state.list.scroll = min(
                 max(state.list.scroll + direction * state.list.row_height * 3, 0.0), state.list.scroll_max
@@ -1608,6 +1694,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_scroll_grab = 0.0
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
+        self._search_blur_consumed = False
         state = self._state
         if state:
             state.buttons.hovered_button_id = None
@@ -1617,6 +1704,7 @@ class NODEMAP_OT_navigate(Operator):
             state.list.scrollbar_dragging = False
             state.list.search_cursor = 0
             state.list.search_focused = False
+            state.list.search_esc_armed = False
             if state.interaction.pressed:
                 state.interaction.pressed = False
         self._redraw_ui()
@@ -1803,6 +1891,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_scroll_grab = 0.0
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
+        self._search_blur_consumed = False
         self._list_last_row_index = -1
         self._list_width_dragging = False
         self._list_width_start_x = 0
@@ -1839,6 +1928,7 @@ class NODEMAP_OT_navigate(Operator):
             self._state.interaction.hovered_node_id = None
             self._state.list.hovered_scrollbar = False
             self._state.list.scrollbar_dragging = False
+            self._state.list.search_esc_armed = False
         self._list_row_pressed = None
         self._list_child_pressed = None
         self._list_toggle_pressed = None
@@ -1846,6 +1936,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_scroll_grab = 0.0
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
+        self._search_blur_consumed = False
         self._list_last_row_index = -1
         self._list_width_dragging = False
         self._moving = False
