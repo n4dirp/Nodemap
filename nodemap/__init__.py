@@ -17,6 +17,7 @@ from bpy.types import SpaceNodeEditor
 
 from .core.icons import _load_icons, _unload_icons
 from .core.state import _cleanup_shared_tree_caches, _ensure_area_states, _minimap_window_operators, _registration_state
+from .core.theme import _srgb_to_linear
 from .draw.overlay import draw_minimap
 from .ops.navigate import classes as operator_classes
 from .ui.panels import classes as panel_classes
@@ -77,12 +78,10 @@ def register():
     )
 
     bpy.types.NODE_HT_header.append(draw_minimap_header_button)
-    logger.debug("Register complete, calling _ensure_area_states()")
+
     _ensure_area_states()
-    logger.debug("_ensure_area_states() done")
 
     _registration_state["done"] = True
-    logger.debug("Registration fully complete (_registration_done=True)")
 
     _register_keymaps()
 
@@ -117,6 +116,7 @@ def unregister():
 
     _minimap_window_operators.clear()
     _cleanup_shared_tree_caches()
+    _srgb_to_linear.cache_clear()
     _registration_state["done"] = False
 
     _unload_icons()
