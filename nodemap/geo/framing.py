@@ -47,7 +47,7 @@ def _compute_frame_all_targets(
     bounds = _expand_bounds_margin(bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding)
     minimap_state.view.tree_bounds = bounds
 
-    follow = get_addon_preferences().settings.follow_view
+    follow = get_addon_preferences().settings.use_follow_view
 
     if not follow:
         return 1.0, 0.0, 0.0
@@ -82,7 +82,7 @@ def frame_all(
 ) -> None:
     """Adjust minimap zoom/pan to frame the entire node tree.
 
-    When ``follow_view`` is enabled the editor viewport is included in the
+    When ``use_follow_view`` is enabled the editor viewport is included in the
     frame so that clamping cannot clip nodes afterward.
     """
     targets = _compute_frame_all_targets(space, region, area_ptr)

@@ -550,7 +550,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         unit="TIME_ABSOLUTE",
     )
 
-    interactive: BoolProperty(
+    use_interactive: BoolProperty(
         name="Interactive",
         description="Enable mouse and keyboard interaction with the minimap",
         default=True,
@@ -567,7 +567,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default="NODE_EDITOR",
     )
 
-    follow_view: BoolProperty(
+    use_follow_view: BoolProperty(
         name="Follow View",
         description="Keep the editor viewport inside the minimap by adjusting the minimap pan automatically",
         default=False,
@@ -578,6 +578,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         name="Frame View Fill",
         description="Zoom in to the viewport while keeping it fully visible, instead of capping zoom at 1x",
         default=True,
+    )
+
+    use_auto_zoom: BoolProperty(
+        name="Auto Zoom",
+        description="Automatically adjust the minimap zoom when node tree bounds change",
+        default=True,
+        update=_update_invalidate_batches,
     )
 
     left_click_action: EnumProperty(
@@ -682,7 +689,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "show_reroutes", text="Reroutes")
         col.prop(settings, "show_node_count", text="Total Count")
         sub = col.row()
-        sub.active = settings.interactive
+        sub.active = settings.use_interactive
         sub.prop(settings, "show_type_list", text="Type List")
         col.prop(settings, "show_wires", text="Wires")
 
@@ -694,10 +701,10 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             col.prop(settings, "show_frame_labels", text="Frame Labels")
 
         col = row.column(heading="Buttons")
-        col.active = settings.interactive
+        col.active = settings.use_interactive
         col.prop(settings, "show_frame_all_button", text="Frame All")
         col.prop(settings, "show_frame_view_button", text="Frame View")
-        if not settings.follow_view:
+        if not settings.use_follow_view:
             col.prop(settings, "show_frame_selected_button", text="Frame Selected")
         col.prop(settings, "show_list_toggle_button", text="List Toggle")
         col.prop(settings, "show_move_button", text="Move Handle")
@@ -771,16 +778,22 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.separator(type="LINE")
         group = layout.column()
         group.label(text="Navigation")
-        row = group.row()
-        row.prop(settings, "interactive", text="Interactive Map")
-        row.prop(settings, "follow_view", text="Follow View")
-        sub = row.row()
-        sub.active = settings.interactive and not context.preferences.view.use_reduce_motion
+        split = group.split(factor=0.4)
+        split.label(text="")
+        row = split.row()
+        row.use_property_split = False
+        col = row.column()
+        col.prop(settings, "use_interactive", text="Interactive Map")
+        sub = col.row()
+        sub.active = settings.use_interactive and not context.preferences.view.use_reduce_motion
         sub.prop(settings, "use_animations", text="Animations")
+        col = row.column()
+        col.prop(settings, "use_follow_view", text="Follow View")
+        col.prop(settings, "use_auto_zoom", text="Auto Zoom")
 
         group.separator()
         interaction_column = group.column()
-        interaction_column.active = settings.interactive
+        interaction_column.active = settings.use_interactive
         interaction_column.prop(settings, "left_click_action", text="Left Click")
         interaction_column.prop(settings, "right_click_action", text="Right Click")
         interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)

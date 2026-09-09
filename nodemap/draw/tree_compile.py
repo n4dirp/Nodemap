@@ -254,7 +254,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
     show_frame_labels = settings.show_frame_labels
     show_node_colors = settings.show_node_colors
     compact_labels = settings.compact_node_labels
-    show_type_list = settings.show_type_list and settings.interactive
+    show_type_list = settings.show_type_list and settings.use_interactive
 
     def _search_text(node) -> str:
         """Build the searchable text for a node: name, custom label, and tree name.

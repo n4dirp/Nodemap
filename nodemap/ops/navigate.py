@@ -376,6 +376,43 @@ class NODEMAP_OT_restore_keymap(Operator):
         return {"FINISHED"}
 
 
+def _try_animated_frame(context: Context, button_id: str) -> bool:
+    """Run a frame action eased via the navigate modal. Return True when handled.
+
+    Route standalone frame operators through the same animated dispatch the
+    minimap buttons use. Return False when no animation applies so the caller
+    falls back to the instant frame function.
+    """
+    window = context.window
+    area = context.area
+    if window is None or area is None or area.type != "NODE_EDITOR":
+        return False
+    op = _minimap_window_operators.get(window.as_pointer())
+    if op is None or getattr(op, "_anim", None) is None:
+        return False
+    if not op._anim._animations_enabled(context):
+        return False
+    addon = get_addon_preferences(context)
+    settings = addon.settings if addon else None
+    if settings is None:
+        return False
+    space = area.spaces.active
+    if space is None or getattr(space, "type", None) != "NODE_EDITOR":
+        return False
+    region = context.region
+    if region is None or getattr(region, "type", None) != "WINDOW" or not hasattr(region, "view2d"):
+        region = next((r for r in area.regions if r.type == "WINDOW"), None)
+    if region is None:
+        return False
+    op._area = area
+    op._region = region
+    op._space = space
+    op._state = _state(area.as_pointer())
+    op._dispatch_frame_action(context, settings, button_id)
+    op._redraw_ui()
+    return True
+
+
 class NODEMAP_OT_frame_all(Operator):
     """Reset the minimap view to show all nodes."""
 
@@ -385,6 +422,8 @@ class NODEMAP_OT_frame_all(Operator):
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
+        if _try_animated_frame(context, "ALL"):
+            return {"FINISHED"}
         frame_all()
         return {"FINISHED"}
 
@@ -398,6 +437,8 @@ class NODEMAP_OT_frame_selected(Operator):
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
+        if _try_animated_frame(context, "SELECTED"):
+            return {"FINISHED"}
         frame_selected()
         return {"FINISHED"}
 
@@ -411,6 +452,8 @@ class NODEMAP_OT_frame_view(Operator):
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
+        if _try_animated_frame(context, "VIEW"):
+            return {"FINISHED"}
         frame_view()
         return {"FINISHED"}
 
@@ -567,7 +610,7 @@ class NODEMAP_OT_navigate(Operator):
 
         addon = get_addon_preferences(context)
         settings = addon.settings if addon else None
-        if addon and not settings.interactive:
+        if addon and not settings.use_interactive:
             return {"PASS_THROUGH"}
 
         state = self._state
@@ -1411,7 +1454,7 @@ class NODEMAP_OT_navigate(Operator):
             _clamp_pan_to_viewport(self._space, self._region, state)
             rejected_x = dx - (state.view.pan[0] - pan_before[0])
             rejected_y = dy - (state.view.pan[1] - pan_before[1])
-            if (rejected_x != 0 or rejected_y != 0) and settings and settings.follow_view:
+            if (rejected_x != 0 or rejected_y != 0) and settings and settings.use_follow_view:
                 state.view.pan = (pan_before[0] + dx, pan_before[1] + dy)
                 self._redirect_to_view2d(context, -dx, -dy)
             elif rejected_x != 0 or rejected_y != 0:
@@ -1478,7 +1521,7 @@ class NODEMAP_OT_navigate(Operator):
                 effective_zoom = state.view.user_zoom
 
                 is_constrained = False
-                if addon and addon.settings.follow_view:
+                if addon and addon.settings.use_follow_view:
                     if effective_zoom < state.view.anchor_zoom - 0.001:
                         is_constrained = True
 

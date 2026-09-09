@@ -12,11 +12,13 @@
 - More flexible minimap positioning, with additional dock positions, a new Floating mode, and drag-and-snap support for editor borders and corners.
 - Group markers displayed beneath group nodes
 - Smooth animations for frame actions
+- Auto Zoom option to keep the minimap zoom stable when the node layout changes
 
 ### Changed
 - Type list selections now apply on click instead of on release
 - Frame Selected now automatically adjusts the zoom to fit multiple nodes or a frame
 - Improved performance when working with large node graphs, and when multiple minimaps show the same node tree
+- Frame menu buttons animate like the minimap buttons when animations are on
 - Added per-tree minimap views, restoring the previous pan and zoom when returning to a node tree
 - All extension options are now available in the addon preferences
 

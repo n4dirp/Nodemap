@@ -29,5 +29,5 @@ settings.viewport_overlay_color = (0.05, 0.05, 0.05, 0.25)
 settings.use_custom_background = False
 settings.show_node_colors = False
 settings.show_wire_color = False
-settings.interactive = True
-settings.follow_view = False
+settings.use_interactive = True
+settings.use_follow_view = False

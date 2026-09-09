@@ -70,7 +70,7 @@ def _preserve_view_for_list_width(
     # world-rect preservation would fight that dynamic. Skip automatic
     # compensation there and let _get_minimap_transform / _clamp_pan_to_viewport
     # handle it.
-    if get_addon_preferences().settings.follow_view:
+    if get_addon_preferences().settings.use_follow_view:
         return
 
     bbox_w = max(bounds[2] - bounds[0], 1.0)
@@ -168,7 +168,7 @@ def _preserve_view_for_map_resize(
 
     Scale pan by the base-scale ratio between the old and new content rects,
     keeping the world point at the content-rect center fixed. Zoom is left
-    untouched. No-op when follow_view is active, sizes are equal within 0.5px,
+    untouched. No-op when use_follow_view is active, sizes are equal within 0.5px,
     or geometry is degenerate.
     """
     if abs(new_w - old_w) < 0.5 and abs(new_h - old_h) < 0.5:
@@ -183,7 +183,7 @@ def _preserve_view_for_map_resize(
 
     # Follow-view mode recomputes zoom/clamp every draw; compensating here
     # would fight that dynamic. Skip, like _preserve_view_for_list_width.
-    if get_addon_preferences().settings.follow_view:
+    if get_addon_preferences().settings.use_follow_view:
         return
 
     bbox_w = max(bounds[2] - bounds[0], 1.0)
@@ -337,8 +337,8 @@ def _get_minimap_transform(
     base_geom = _compute_base_map_geom(minimap_state)
     inner_l, inner_b, inner_w, inner_h, _bw, _bh, base_scale, _tree_center_x, _tree_center_y = base_geom
 
-    # Dynamic Auto-Zoom if follow_view is active
-    if get_addon_preferences().settings.follow_view:
+    # Dynamic Auto-Zoom if use_follow_view is active
+    if get_addon_preferences().settings.use_follow_view:
         if space is None:
             space = bpy.context.space_data
         if region is None:
@@ -377,9 +377,9 @@ def _clamp_pan_to_viewport(
 ) -> None:
     """Clamp *minimap_state.view.pan* so the editor viewport stays inside the minimap (follow mode).
 
-    No-op when the ``follow_view`` preference is off.
+    No-op when the ``use_follow_view`` preference is off.
     """
-    if not get_addon_preferences().settings.follow_view:
+    if not get_addon_preferences().settings.use_follow_view:
         return
 
     if visible is None:

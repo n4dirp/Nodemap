@@ -781,11 +781,11 @@ def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float, mv
 
 def _get_visible_minimap_buttons(settings) -> list[str]:
     """Return ids of enabled minimap buttons in draw order."""
-    if not settings.interactive:
+    if not settings.use_interactive:
         return []
     visible = [button_id for button_id, pref_attr in _MINIMAP_BUTTONS if getattr(settings, pref_attr, True)]
     # Frame Selected is meaningless with Follow View (the viewport drives framing).
-    if settings.follow_view:
+    if settings.use_follow_view:
         visible = [button_id for button_id in visible if button_id != "SELECTED"]
     return visible
 
@@ -914,7 +914,7 @@ def _draw_minimap_buttons(
     border_width = 0.5 * ui_scale
     # Move-grip drag handle is available whenever interactive mode is on, which
     # is the mode that enables repositioning the map.
-    if "DRAG" in rects and settings.interactive:
+    if "DRAG" in rects and settings.use_interactive:
         drag_x, drag_y, drag_size = rects["DRAG"]
         drag_h = BUTTON_SIZE * ui_scale
         _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color, mvp=mvp)
@@ -1101,7 +1101,7 @@ def draw_minimap() -> None:
         window_ptr = win.as_pointer() if win else 0
         has_modal = window_ptr in _minimap_window_operators if win else False
 
-        if settings.interactive:
+        if settings.use_interactive:
             if win and not has_modal:
                 logger.debug("draw_minimap: invoking nodemap.navigate for window %d", window_ptr)
                 try:
@@ -1175,7 +1175,13 @@ def draw_minimap() -> None:
     # tree bounds so the map scale/pivot does not creep live during a drag
     # (a grab also flips the active/selection slots), keeping auto-bounds,
     # nodes, and wires uniform on the settle frame instead.
-    if not bounds_frozen:
+    # When auto-zoom is disabled, keep the frozen framing so moving, adding,
+    # or removing nodes never changes the map scale; explicit frame actions
+    # still reframe. Initialize once so the first draw has valid bounds.
+    use_auto_zoom = getattr(settings, "use_auto_zoom", True)
+    current_bounds = state.view.tree_bounds
+    bounds_uninitialized = (current_bounds[2] - current_bounds[0] <= 0) or (current_bounds[3] - current_bounds[1] <= 0)
+    if not bounds_frozen and (use_auto_zoom or bounds_uninitialized):
         bounds = _expand_bounds_margin(raw_bounds, ui_scale, map_h, padding)
         state.view.tree_bounds = bounds
 

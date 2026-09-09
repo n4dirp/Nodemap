@@ -282,7 +282,7 @@ def _get_type_list_width(
     padding instead. Called before the map transform so node framing can
     reserve the zone.
     """
-    if not settings or not settings.show_type_list or not settings.interactive:
+    if not settings or not settings.show_type_list or not settings.use_interactive:
         return 0.0
     tree_data = minimap_state.tree_data()
     type_stats = tree_data.get("type_stats") if tree_data else None

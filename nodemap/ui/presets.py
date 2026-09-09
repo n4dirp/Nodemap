@@ -80,9 +80,10 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.left_click_action",
         "settings.right_click_action",
         "settings.frame_view_fill",
+        "settings.use_auto_zoom",
         # Options.
-        "settings.interactive",
-        "settings.follow_view",
+        "settings.use_interactive",
+        "settings.use_follow_view",
         "settings.highlight_selected_wires",
         "settings.use_animations",
         "settings.show_by_default",
