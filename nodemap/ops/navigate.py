@@ -278,6 +278,7 @@ def _clear_search_stale_hover(state: MinimapState) -> None:
     state.buttons.hovered_button_id = None
     state.list.hovered_scrollbar = False
     state.interaction.hovered_handle = None
+    state.buttons.pressed_button_id = None
 
 
 def _list_scrollbar_hit(region_x: int, region_y: int, state: MinimapState) -> bool:
@@ -846,6 +847,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._snap_dwell = 0.0
                 state.view.moving = False
                 state.view.snapped = False
+                state.buttons.pressed_button_id = None
                 state.cache.invalidate_batches_only()
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
@@ -910,7 +912,13 @@ class NODEMAP_OT_navigate(Operator):
                     self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._armed_button:
+                # Clear the pressed fill and the hover that may now be stale: a
+                # toggled button (e.g. the list) moves away from the cursor, so
+                # the cached hover would linger until the next mouse move.
+                state.buttons.pressed_button_id = None
+                state.buttons.hovered_button_id = None
                 self._activate_armed_button(context, settings)
+                self._redraw_ui()
                 return {"RUNNING_MODAL"}
             if self._list_child_pressed:
                 # The selection already ran on press; just consume the release
@@ -1009,6 +1017,8 @@ class NODEMAP_OT_navigate(Operator):
             armed_button_id = _frame_button_at(self._mouse_x, self._mouse_y, state)
             if armed_button_id:
                 self._armed_button = armed_button_id
+                state.buttons.pressed_button_id = armed_button_id
+                self._redraw_ui()
                 return {"RUNNING_MODAL"}
             # List/map divider — same style as outer resize borders, percent width.
             ui_scale = _get_ui_scale()
@@ -1367,6 +1377,13 @@ class NODEMAP_OT_navigate(Operator):
                     self._redraw_ui()
                 old_btn = state.buttons.hovered_button_id
                 new_btn = _frame_button_at(self._mouse_x, self._mouse_y, state) if in_minimap and not in_list else None
+                # The list toggle slides horizontally while the type-list zone
+                # width animates, so a hit-test during that window can land on the
+                # button's transient position and leave a stale highlight once it
+                # has moved away from the cursor. Drop only the LIST hover here;
+                # the other buttons keep their normal hover.
+                if new_btn == "LIST" and (state.list.anim_active or state.list.dragging_width is not None):
+                    new_btn = None
                 if old_btn != new_btn:
                     state.buttons.hovered_button_id = new_btn
                     self._redraw_ui()
@@ -1743,6 +1760,7 @@ class NODEMAP_OT_navigate(Operator):
         state = self._state
         if state:
             state.buttons.hovered_button_id = None
+            state.buttons.pressed_button_id = None
             state.list.hovered_type_label = None
             state.interaction.hovered_node_id = None
             state.list.hovered_scrollbar = False
@@ -1836,6 +1854,7 @@ class NODEMAP_OT_navigate(Operator):
             settings.offset_y = offset_y
         state.view.moving = True
         state.view.snapped = False
+        state.buttons.pressed_button_id = "DRAG"
         self._redraw_ui()
 
     def _apply_move_drag(self, context: Context, state: MinimapState, settings) -> None:
@@ -1968,6 +1987,7 @@ class NODEMAP_OT_navigate(Operator):
             self._state.interaction.hovered_handle = None
             self._state.interaction.resize_active = None
             self._state.buttons.hovered_button_id = None
+            self._state.buttons.pressed_button_id = None
             self._state.list.hovered_type_label = None
             self._state.list.hovered_list_row = None
             self._state.interaction.hovered_node_id = None

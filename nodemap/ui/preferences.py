@@ -46,7 +46,7 @@ def _update_logger_from_prefs():
 
     level_map = {"INFO": logging.INFO, "DEBUG": logging.DEBUG, "TRACE": TRACE_LEVEL}
     handler = logging.StreamHandler()
-    handler.setFormatter(AddonLogFormatter(with_level=True))
+    handler.setFormatter(AddonLogFormatter(with_level=False))
 
     logger.addHandler(handler)
     logger.setLevel(level_map[level])
@@ -110,7 +110,7 @@ class AddonLogFormatter(logging.Formatter):
         rel_time = record.created - self.start_time
         minutes, seconds = divmod(rel_time, 60)
         timestamp = f"{int(minutes):02d}:{seconds:06.3f}"
-        package_short_name = base_package
+        package_short_name = base_package.rsplit(".", 1)[-1]
 
         if self.with_level:
             return f"{timestamp}  {package_short_name:<16} | {record.levelname.title()}: {record.getMessage()}"
@@ -208,7 +208,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_width: IntProperty(
         name="Size X",
         description="Minimap width in pixels",
-        default=400,
+        default=512,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -217,7 +217,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_height: IntProperty(
         name="Size Y",
         description="Minimap height in pixels",
-        default=100,
+        default=124,
         min=MIN_MAP_HEIGHT,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -264,7 +264,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     background_color: FloatVectorProperty(
         name="Background Color",
         description="Custom background color for the minimap overlay",
-        default=(0.25, 0.25, 0.25, 1.0),
+        default=(0.157, 0.157, 0.157, 1.0),
         size=4,
         min=0.0,
         max=1.0,
@@ -517,7 +517,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     type_list_font_size: IntProperty(
         name="Type List Font Size",
         description="Font size for the node-type list entries (pixels)",
-        default=10,
+        default=11,
         min=8,
         max=20,
         update=_update_invalidate_all,
@@ -603,16 +603,6 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
     )
 
-    pan_speed: EnumProperty(
-        name="Pan Speed",
-        description="Animation speed for click-to-pan",
-        items=[
-            ("FAST", "Fast", "Quick snap (0.2s)"),
-            ("MEDIUM", "Medium", "Balanced (0.4s)"),
-        ],
-        default="FAST",
-    )
-
 
 class NODEMAP_AddonPreferences(AddonPreferences):
     """Store add-on preferences for the Nodes Minimap."""
@@ -691,39 +681,40 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "show_socket_indicators", text="Node Sockets")
         col.prop(settings, "show_reroutes", text="Reroutes")
         col.prop(settings, "show_node_count", text="Total Count")
-        if settings.interactive:
-            col.prop(settings, "show_type_list", text="Type List")
+        sub = col.row()
+        sub.active = settings.interactive
+        sub.prop(settings, "show_type_list", text="Type List")
         col.prop(settings, "show_wires", text="Wires")
 
         col = row.column(heading="Labels")
         col.prop(settings, "show_node_labels", text="Node Labels")
         if settings.show_node_labels:
-            col.prop(settings, "compact_node_labels", text="Compact")
+            col.prop(settings, "compact_node_labels", text="Compact Node Labels")
         if settings.show_frames:
             col.prop(settings, "show_frame_labels", text="Frame Labels")
 
-        if settings.interactive:
-            col = row.column(heading="Buttons")
-            col.prop(settings, "show_frame_all_button", text="Frame All")
-            col.prop(settings, "show_frame_view_button", text="Frame View")
-            if not settings.follow_view:
-                col.prop(settings, "show_frame_selected_button", text="Frame Selected")
-            col.prop(settings, "show_list_toggle_button", text="List Toggle")
-            col.prop(settings, "show_move_button", text="Move Handle")
+        col = row.column(heading="Buttons")
+        col.active = settings.interactive
+        col.prop(settings, "show_frame_all_button", text="Frame All")
+        col.prop(settings, "show_frame_view_button", text="Frame View")
+        if not settings.follow_view:
+            col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+        col.prop(settings, "show_list_toggle_button", text="List Toggle")
+        col.prop(settings, "show_move_button", text="Move Handle")
 
-            group.separator()
-            group = group.column()
-            group.label(text="Type List")
-            col = group.column()
-            col.active = settings.show_type_list
-            row = col.row()
-            row.prop(settings, "type_list_sort", text="Sort", expand=True)
-            col.prop(settings, "type_list_font_size", text="Font Size")
-            row = col.row()
-            row.prop(settings, "show_search_bar", text="Filter Bar")
-            sub = row.row()
-            sub.active = settings.show_node_colors
-            sub.prop(settings, "show_type_colors", text="Type Colors")
+        group.separator()
+        group = group.column()
+        group.label(text="Type List")
+        col = group.column()
+        col.active = settings.show_type_list
+        row = col.row()
+        row.prop(settings, "type_list_sort", text="Sort", expand=True)
+        col.prop(settings, "type_list_font_size", text="Font Size")
+        row = col.row()
+        row.prop(settings, "show_search_bar", text="Filter Bar")
+        sub = row.row()
+        sub.active = settings.show_node_colors
+        sub.prop(settings, "show_type_colors", text="Type Colors")
 
         group.separator()
         group = group.column()
@@ -783,23 +774,16 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         row = group.row()
         row.prop(settings, "interactive", text="Interactive Map")
         row.prop(settings, "follow_view", text="Follow View")
+        sub = row.row()
+        sub.active = settings.interactive and not context.preferences.view.use_reduce_motion
+        sub.prop(settings, "use_animations", text="Animations")
 
-        if settings.interactive:
-            group.separator()
-            col = group.column(heading="Animations")
-            reduce_motion = context.preferences.view.use_reduce_motion
-            col.active = not reduce_motion
-            row = col.row(align=True, heading="")
-            row.prop(settings, "use_animations", text="")
-            sub = row.row(align=True)
-            sub.active = settings.use_animations
-            sub.row().prop(settings, "pan_speed", expand=True)
-
-            group.separator()
-            interaction_column = group.column()
-            interaction_column.prop(settings, "left_click_action", text="Left Click")
-            interaction_column.prop(settings, "right_click_action", text="Right Click")
-            interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
+        group.separator()
+        interaction_column = group.column()
+        interaction_column.active = settings.interactive
+        interaction_column.prop(settings, "left_click_action", text="Left Click")
+        interaction_column.prop(settings, "right_click_action", text="Right Click")
+        interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
 
         layout.separator()
         split = layout.split(factor=0.4)

@@ -68,14 +68,18 @@ SCROLLBAR_MIN_THUMB: float = 12.0
 SCROLLBAR_ALPHA: float = 0.65
 TYPE_LIST_ANIM_AWAIT_TIMEOUT: float = 1.0
 TYPE_LIST_MIN_LABEL_W: float = 32.0
+TYPE_LIST_ROW_HEIGHT_OFFSET: float = 8.0
 
 # ---------------------------------------------------------------------------
 # Animations
 # ---------------------------------------------------------------------------
 # Smooth-drag, inertia, and frame/editor animations tick at this rate; the
 # pan-speed preference then spreads them over a whole number of frames.
-PAN_ANIM_FPS: float = 60.0
+PAN_ANIM_FPS: float = 100.0
 PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
+
+# Fixed animation duration in frames for click-to-pan (fast snap).
+PAN_FRAMES: float = 8.0
 
 # Inertia only kicks in when a released drag ends above this velocity; the
 # release halves the remaining velocity, and a view that has come to a stop

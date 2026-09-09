@@ -75,6 +75,7 @@ class ButtonState:
 
     rects: dict[str, Rect] = field(default_factory=dict)
     hovered_button_id: str | None = None
+    pressed_button_id: str | None = None
     node_count_anchor: tuple[float, float] | None = None
 
 
@@ -142,6 +143,7 @@ class SharedTreeCache:
     tree_data: dict | None = None
     tree_version: int = 0
     position_version: int = 0
+    tree_ptr: int | None = None
     pending_timer: Any = None
     pending_timer_deadline: float = 0.0
     pending_fingerprint: Any = None
@@ -173,6 +175,7 @@ class RenderCache:
     list_filtered_children: dict = field(default_factory=dict)
     list_effective_expanded: set = field(default_factory=set)
     list_swatches_batch: Any = None
+    list_swatches_border_batch: Any = None
     batch_key: Any = None
     batch_scale: float = 1.0
     batch_anchor: Vec2 = (0.0, 0.0)
@@ -204,6 +207,7 @@ class RenderCache:
         "list_children",
         "list_filtered_children",
         "list_swatches_batch",
+        "list_swatches_border_batch",
     )
 
     def _reset_fields(self, field_names: tuple[str, ...]) -> None:
@@ -260,7 +264,7 @@ def _shared_tree_cache(tree_ptr: int) -> SharedTreeCache:
     """Return the shared compile cache for a node tree pointer, creating it if needed."""
     shared = _shared_tree_caches.get(tree_ptr)
     if shared is None:
-        shared = SharedTreeCache()
+        shared = SharedTreeCache(tree_ptr=tree_ptr)
         _shared_tree_caches[tree_ptr] = shared
     return shared
 

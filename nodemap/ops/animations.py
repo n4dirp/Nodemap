@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 from .. import __package__ as base_package
-from ..core.constants import PAN_ANIM_FPS, PAN_ANIM_INTERVAL
+from ..core.constants import PAN_ANIM_FPS, PAN_ANIM_INTERVAL, PAN_FRAMES
 from ..core.helpers import get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
 from ..geo.transforms import (
@@ -28,9 +28,6 @@ if TYPE_CHECKING:
     from .navigate import NODEMAP_OT_navigate
 
 logger = logging.getLogger(base_package)
-
-# Animation duration in frames for each pan-speed preference.
-_PAN_SPEED_FRAMES: dict[str, float] = {"FAST": 8.0, "MEDIUM": 16.0}
 
 # Smooth-drag spring feel. Inertia decays the released view velocity each tick
 # until it falls below the stop speed. The drag follow fraction and per-tick
@@ -169,10 +166,6 @@ class AnimationController:
         """Return the add-on settings for *context*."""
         return get_addon_preferences(context).settings
 
-    def _animation_frames(self, context: Context) -> float:
-        """Return the animation duration in frames for the current pan speed."""
-        return _PAN_SPEED_FRAMES[self._settings(context).pan_speed]
-
     def _total_frames(self, context: Context, fac: float) -> float:
         """Return the animation duration in frames for magnitude factor *fac*.
 
@@ -180,7 +173,7 @@ class AnimationController:
         (``smooth_viewtx * fac``): far view changes take the full pan-speed
         budget while near changes take fewer frames, never below one frame.
         """
-        base = self._animation_frames(context)
+        base = PAN_FRAMES
         return max(min(base * fac, base), 1.0)
 
     @staticmethod

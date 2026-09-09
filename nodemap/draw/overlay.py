@@ -273,15 +273,22 @@ def _teardown_scissor(saved_state: tuple[bool, bool, tuple[int, int, int, int]])
 
 
 def _draw_background(
-    map_x: float, map_y: float, map_w: float, map_h: float, colors: dict, master_alpha: float, mvp: Any = None
+    map_x: float,
+    map_y: float,
+    map_w: float,
+    map_h: float,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+    mvp: Any = None,
 ) -> tuple[tuple[float, float, float, float], float]:
     """Draw the minimap backdrop rounded rect and border."""
 
     bg_color = _alpha_mul(colors["background"], master_alpha)
-    panel_roundness = colors.get("panel_roundness", 4.0)
+    panel_roundness = colors["panel_roundness"]
     shadow_offset = 1
     border_color = _alpha_mul(colors["background_border"], master_alpha)
-    border_width = 0.5
+    border_width = 0.5 * ui_scale
 
     _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color, mvp=mvp)
     _draw_rounded_rect_border(
@@ -291,12 +298,12 @@ def _draw_background(
         map_h + shadow_offset * 2,
         panel_roundness,
         (0, 0, 0, 0.15 * master_alpha),
-        0.5,
+        border_width,
         mvp=mvp,
     )
     _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
 
-    return bg_color, panel_roundness
+    return panel_roundness
 
 
 def _draw_moving_border(
@@ -502,7 +509,7 @@ def _draw_viewport_overlay(
     view_right = min(view_x + view_w, map_x + map_w)
     view_top = min(view_y + view_h, map_y + map_h)
 
-    node_roundness = colors.get("node_roundness", 2.0) * ui_scale
+    node_roundness = colors["node_roundness"] * ui_scale
     hole_width = view_right - view_left
     hole_height = view_top - view_bottom
 
@@ -547,7 +554,6 @@ def _draw_viewport_overlay(
 def _draw_node_count(
     settings,
     node_count: int,
-    state: MinimapState,
     map_x: float,
     map_y: float,
     map_w: float,
@@ -905,24 +911,26 @@ def _draw_minimap_buttons(
     radius = colors["node_roundness"] * ui_scale
     bg_color = _alpha_mul(colors["background"], master_alpha)
     border_color = _alpha_mul(colors["background_border"], master_alpha)
-
+    border_width = 0.5 * ui_scale
     # Move-grip drag handle is available whenever interactive mode is on, which
     # is the mode that enables repositioning the map.
     if "DRAG" in rects and settings.interactive:
         drag_x, drag_y, drag_size = rects["DRAG"]
         drag_h = BUTTON_SIZE * ui_scale
         _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color, mvp=mvp)
-        _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, border_color, 0.5, mvp=mvp)
-        is_moving = state.view.moving
-        is_hovered = state.buttons.hovered_button_id == "DRAG"
-        if is_moving or is_hovered:
-            hover_color = _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
-            _draw_filled_rounded_rect(
-                drag_x + 1, drag_y + 1, drag_size - 2, drag_h - 2, max(2.0, radius - 1), hover_color, mvp=mvp
+        _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, border_color, border_width, mvp=mvp)
+        is_pressed = state.buttons.pressed_button_id == "DRAG"
+        is_hovered = (not is_pressed) and state.buttons.hovered_button_id == "DRAG"
+        if is_pressed or is_hovered:
+            drag_fill = (
+                _alpha_mul(colors["viewport_fill"], master_alpha)
+                if is_pressed
+                else _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
             )
-        icon_color = (
-            _alpha_mul(colors["text"], master_alpha) if is_moving else _alpha_mul(colors["text"], master_alpha * 0.7)
-        )
+            _draw_filled_rounded_rect(
+                drag_x + 1, drag_y + 1, drag_size - 2, drag_h - 2, max(2.0, radius - 1), drag_fill, mvp=mvp
+            )
+        icon_color = _alpha_mul(colors["text"], master_alpha)
         _paint_grip_icon(drag_x, drag_y, drag_h, icon_color, ui_scale, mvp=mvp)
         state.buttons.rects["DRAG"] = (drag_x, drag_y, drag_size, drag_h)
 
@@ -968,7 +976,7 @@ def _draw_minimap_buttons(
                 button_size,
                 radii,
                 border_color,
-                0.5,
+                border_width,
                 skip_left=button_index > 0,
                 mvp=mvp,
             )
@@ -979,11 +987,18 @@ def _draw_minimap_buttons(
         button_x, button_y, button_size = rects[button_id]
         if button_id == "LIST" or not is_combined:
             _draw_filled_rounded_rect(button_x, button_y, button_size, button_size, radius, bg_color, mvp=mvp)
-            _draw_rounded_rect_border(button_x, button_y, button_size, button_size, radius, border_color, 0.5, mvp=mvp)
-        is_hovered = state.buttons.hovered_button_id == button_id
+            _draw_rounded_rect_border(
+                button_x, button_y, button_size, button_size, radius, border_color, border_width, mvp=mvp
+            )
+        is_pressed = state.buttons.pressed_button_id == button_id
+        is_hovered = (not is_pressed) and state.buttons.hovered_button_id == button_id
         icon_color = _alpha_mul(colors["text"], master_alpha)
-        if is_hovered:
-            hover_color = _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
+        if is_pressed or is_hovered:
+            fill_color = (
+                _alpha_mul(colors["viewport_fill"], master_alpha)
+                if is_pressed
+                else _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
+            )
             if is_combined and button_id != "LIST":
                 # Per-corner radii (top-left, top-right, bottom-right, bottom-left):
                 # only the row's external corners round, inner corners stay square.
@@ -1004,7 +1019,7 @@ def _draw_minimap_buttons(
                     hover_x = button_x
                     hover_width = button_size
                 _draw_filled_rounded_rect_varying(
-                    hover_x, button_y + 1, hover_width, button_size - 2, hover_radii, hover_color, mvp=mvp
+                    hover_x, button_y + 1, hover_width, button_size - 2, hover_radii, fill_color, mvp=mvp
                 )
             else:
                 _draw_filled_rounded_rect(
@@ -1013,10 +1028,9 @@ def _draw_minimap_buttons(
                     button_size - 2,
                     button_size - 2,
                     max(2.0, radius - 1),
-                    hover_color,
+                    fill_color,
                     mvp=mvp,
                 )
-            # icon_color = _alpha_mul(colors["text"], master_alpha)
         if button_id == "LIST":
             _paint_list_toggle_icon(
                 button_x,
@@ -1030,6 +1044,36 @@ def _draw_minimap_buttons(
         else:
             _BUTTON_ICONS[button_id](button_x, button_y, button_size, icon_color, ui_scale, mvp=mvp)
         state.buttons.rects[button_id] = (button_x, button_y, button_size, button_size)
+
+
+def _redraw_pressed_move_grip(
+    state: MinimapState, colors: dict, master_alpha: float, ui_scale: float, mvp: Any = None
+) -> None:
+    """Redraw the move-grip button on top of the moving dark overlay.
+
+    While the map is being moved, `_draw_moving_border` lays a translucent black
+    rect over the whole map *after* the buttons are drawn, which would smother
+    the grip's pressed fill. Repainting the grip last keeps its viewport_fill
+    press state and icon visible while dragging.
+    """
+    if state.buttons.pressed_button_id != "DRAG":
+        return
+    rect = state.buttons.rects.get("DRAG")
+    if not rect:
+        return
+    drag_x, drag_y, drag_size, drag_h = rect
+    radius = colors["node_roundness"] * ui_scale
+    border_width = 0.5 * ui_scale
+    bg_color = _alpha_mul(colors["background"], master_alpha)
+    border_color = _alpha_mul(colors["background_border"], master_alpha)
+    _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color, mvp=mvp)
+    _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, border_color, border_width, mvp=mvp)
+    press_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+    _draw_filled_rounded_rect(
+        drag_x + 1, drag_y + 1, drag_size - 2, drag_h - 2, max(2.0, radius - 1), press_color, mvp=mvp
+    )
+    icon_color = _alpha_mul(colors["text"], master_alpha)
+    _paint_grip_icon(drag_x, drag_y, drag_h, icon_color, ui_scale, mvp=mvp)
 
 
 def draw_minimap() -> None:
@@ -1158,6 +1202,9 @@ def draw_minimap() -> None:
             state.list.scroll = 0.0
             state.list.search_query = ""
             state.list.search_cursor = 0
+            # Drop the cached list layout so the new tree rebuilds it from its
+            # own compiled data instead of reusing the previous tree's rows.
+            state.cache.list_key = None
             # Save view for tree being left.
             state.tree_views[state.last_tree_ptr] = (
                 state.view.user_zoom,
@@ -1289,7 +1336,7 @@ def draw_minimap() -> None:
     # of recomposing it per rect.
     base_mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
 
-    bg_color, panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha, mvp=base_mvp)
+    panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, mvp=base_mvp)
 
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]
@@ -1371,7 +1418,7 @@ def draw_minimap() -> None:
         map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count, mvp=base_mvp
     )
 
-    _draw_node_count(settings, content_count, state, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
+    _draw_node_count(settings, content_count, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
 
     # Persist current view for this tree so it can be restored when revisiting.
     try:
@@ -1408,6 +1455,10 @@ def draw_minimap() -> None:
         )
 
         _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state, mvp=base_mvp)
+
+        # Repaint the pressed move grip above the moving dark overlay so its
+        # viewport_fill press state is not smothered while the map is dragged.
+        _redraw_pressed_move_grip(state, colors, master_alpha, ui_scale, mvp=base_mvp)
 
         if state.view.snapped and (snap_sides := _snap_sides_for(settings.current_position)):
             snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)

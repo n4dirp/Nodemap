@@ -25,6 +25,7 @@ from ..core.constants import (
     TYPE_LIST_ANIM_AWAIT_TIMEOUT,
     TYPE_LIST_FONT_ID,
     TYPE_LIST_MIN_LABEL_W,
+    TYPE_LIST_ROW_HEIGHT_OFFSET,
 )
 from ..core.helpers import (
     _get_type_list_width,
@@ -51,6 +52,7 @@ from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_pill,
     _draw_rounded_rect_border,
+    _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
 
@@ -313,7 +315,9 @@ def _type_list_cache_key(
     )
 
     tree_version = state.shared.tree_version if state.shared is not None else 0
+    tree_id = state.shared.tree_ptr if state.shared is not None else None
     return (
+        tree_id,
         tree_version,
         settings.type_list_sort,
         settings.show_node_colors,
@@ -324,6 +328,7 @@ def _type_list_cache_key(
         master_alpha,
         tuple(colors["node_backdrop"]),
         tuple(colors["text"]),
+        tuple(colors["node_border"]),
         palette,
     )
 
@@ -385,7 +390,7 @@ def _build_type_list_cache(
         entry_map[label] = (count_text, count_width, full_count)
 
     _, line_h = blf.dimensions(font_id, "Ay")
-    row_h = line_h + 4 * ui_scale
+    row_h = line_h + TYPE_LIST_ROW_HEIGHT_OFFSET * ui_scale
 
     # Build the canonical row layout once.
     rows = tuple(
@@ -417,6 +422,7 @@ def _build_type_list_cache(
     }
 
     state.cache.list_swatches_batch = None
+    state.cache.list_swatches_border_batch = None
 
     _bake_list_glyph_batch(
         state,
@@ -459,6 +465,8 @@ def _bake_list_glyph_batch(
     swatch_col_x = icon_col_x if show_type_colors else 0.0
 
     chevron_color = _srgb_to_linear(_alpha_mul(colors["text"], 0.6 * master_alpha))
+    swatch_border_color = _srgb_to_linear(_alpha_mul(colors["node_border"], 0.5 * master_alpha))
+    swatch_border_w = 0.25 * ui_scale
 
     pos: list = []
     uv: list = []
@@ -466,6 +474,14 @@ def _bake_list_glyph_batch(
     radius: list = []
     vertex_color: list = []
     quads = 0
+
+    b_pos: list = []
+    b_uv: list = []
+    b_half_size: list = []
+    b_radius: list = []
+    b_vertex_color: list = []
+    b_line_width: list = []
+    b_quads = 0
 
     def _push_quad(x: float, y: float, w: float, h: float, r: float, color) -> None:
         nonlocal quads
@@ -482,6 +498,23 @@ def _bake_list_glyph_batch(
             vertex_color.append(_srgb_to_linear(color))
 
         quads += 1
+
+    def _push_border_quad(x: float, y: float, w: float, h: float, r: float, color) -> None:
+        nonlocal b_quads
+
+        half_w, half_h = w / 2, h / 2
+        corners = ((x, y), (x + w, y), (x + w, y + h), (x, y + h))
+        uvs = ((-half_w, -half_h), (half_w, -half_h), (half_w, half_h), (-half_w, half_h))
+
+        for (px, py), (ux, uy) in zip(corners, uvs):
+            b_pos.append((px, py, 0.0))
+            b_uv.append((ux, uy))
+            b_half_size.append((half_w, half_h))
+            b_radius.append(r)
+            b_vertex_color.append(color)
+            b_line_width.append(swatch_border_w)
+
+        b_quads += 1
 
     def _push_rotated_bar(matrix, arm: float, bar_thickness: float) -> None:
         nonlocal quads
@@ -549,13 +582,23 @@ def _bake_list_glyph_batch(
                     colors,
                 )
 
+                swatch_y = round(local_y - (row_h + swatch) / 2.0)
+
                 _push_quad(
                     x + icon_col_x,
-                    round(local_y - (row_h + swatch) / 2.0),
+                    swatch_y,
                     swatch,
                     swatch,
-                    swatch / 2.0,
+                    swatch / 3.0,
                     _alpha_mul(header_color, master_alpha),
+                )
+                _push_border_quad(
+                    x + icon_col_x,
+                    swatch_y,
+                    swatch,
+                    swatch,
+                    swatch / 3.0,
+                    swatch_border_color,
                 )
 
         else:
@@ -565,13 +608,23 @@ def _bake_list_glyph_batch(
                     type_colors.get(label, colors["node_backdrop"]),
                 )
 
+                swatch_y = local_y - (row_h + swatch) / 2.0
+
                 _push_quad(
                     x + icon_col_x + swatch_col_x,
-                    local_y - (row_h + swatch) / 2.0,
+                    swatch_y,
                     swatch,
                     swatch,
-                    swatch / 2.0,
+                    swatch / 3.0,
                     _alpha_mul(node_color, master_alpha),
+                )
+                _push_border_quad(
+                    x + icon_col_x + swatch_col_x,
+                    swatch_y,
+                    swatch,
+                    swatch,
+                    swatch / 3.0,
+                    swatch_border_color,
                 )
 
     if quads == 0:
@@ -593,24 +646,46 @@ def _bake_list_glyph_batch(
         indices=_create_quad_indices(quads),
     )
 
+    if b_quads:
+        state.cache.list_swatches_border_batch = batch_for_shader(
+            _get_batch_rect_border_shader(),
+            "TRIS",
+            {
+                "pos": b_pos,
+                "uv": b_uv,
+                "halfSize": b_half_size,
+                "radius": b_radius,
+                "color": b_vertex_color,
+                "lineWidth": b_line_width,
+            },
+            indices=_create_quad_indices(b_quads),
+        )
+
 
 def _draw_list_glyph_batch(state: MinimapState, zone_x: float, view_y: float) -> None:
     """Draw the baked swatch/chevron batch under a `(zone_x, view_y)` translate."""
     batch = state.cache.list_swatches_batch
-    if batch is None:
+    border_batch = state.cache.list_swatches_border_batch
+    if batch is None and border_batch is None:
         return
-
-    shader = _get_batch_rect_shader()
 
     gpu.matrix.push()
     try:
         gpu.matrix.translate((zone_x, view_y))
-        shader.bind()
-        shader.uniform_float(
-            "ModelViewProjectionMatrix",
-            gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix(),
-        )
-        batch.draw(shader)
+
+        mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+
+        if batch is not None:
+            shader = _get_batch_rect_shader()
+            shader.bind()
+            shader.uniform_float("ModelViewProjectionMatrix", mvp)
+            batch.draw(shader)
+
+        if border_batch is not None:
+            border_shader = _get_batch_rect_border_shader()
+            border_shader.bind()
+            border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
+            border_batch.draw(border_shader)
     finally:
         gpu.matrix.pop()
 
@@ -896,12 +971,12 @@ def _compute_zone_geometry(
     zone_y = round(map_y + map_h - zone_h - handle_pad)
     state.list.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
 
-    search_top = zone_y + zone_h - 1
+    search_top = zone_y + zone_h - 1 * ui_scale
     search_bottom = search_top - search_h
     search_draw_h = max(0.0, search_h - row_gap)
     search_pad_v = round((search_draw_h - line_h) / 2.0) + 1 if search_h > 0 else 0
 
-    zone_radius = colors.get("panel_roundness", 4.0) * 0.6
+    zone_radius = colors["node_roundness"] * ui_scale
 
     _draw_filled_rounded_rect(
         zone_x,
@@ -920,7 +995,7 @@ def _compute_zone_geometry(
         zone_h,
         zone_radius,
         _alpha_mul(colors["background_border"], master_alpha),
-        0.5,
+        0.5 * ui_scale,
         mvp=mvp,
     )
 
@@ -1106,10 +1181,10 @@ def _draw_list_fills(
     guide = partial(_draw_expand_guide_line, mvp=mvp)
     header_color = _header_type_color
 
-    radius = 4.0 * ui_scale
+    radius = colors["node_roundness"] * ui_scale
     active_border_w = 0.5 * ui_scale
 
-    band_color = (1.0, 1.0, 1.0, 0.002 * master_alpha)
+    band_color = (1.0, 1.0, 1.0, 0.003 * master_alpha)
 
     hovered = state.list.hovered_type_label
     hovered_child = state.list.hovered_list_row
@@ -1143,7 +1218,7 @@ def _draw_list_fills(
             search_draw_h,
             radius,
             _alpha_mul(colors["background_border"], master_alpha),
-            0.5,
+            0.5 * ui_scale,
         )
 
         gpu.state.scissor_set(*view_scissor)

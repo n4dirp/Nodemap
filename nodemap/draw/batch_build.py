@@ -633,7 +633,9 @@ def _ensure_minimap_batches(
         return
 
     query = minimap_state.list.search_query.strip()
+    tree_id = shared.tree_ptr
     key = (
+        tree_id,
         shared.position_version,
         round(ui_scale, 3),
         show_borders,
@@ -649,6 +651,7 @@ def _ensure_minimap_batches(
     # must gate the early return too — otherwise wires stay frozen at their
     # pre-drag positions until an unrelated rebuild trigger fires.
     wire_key = (
+        tree_id,
         shared.tree_version,
         round(ui_scale, 3),
         int(wire_curvature),

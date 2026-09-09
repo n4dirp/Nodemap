@@ -79,7 +79,6 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.scroll_wheel_mode",
         "settings.left_click_action",
         "settings.right_click_action",
-        "settings.pan_speed",
         "settings.frame_view_fill",
         # Options.
         "settings.interactive",
