@@ -751,7 +751,7 @@ class NODEMAP_OT_navigate(Operator):
             case "UP_ARROW" | "DOWN_ARROW":
                 if (
                     event.value == "PRESS"
-                    and in_minimap
+                    and _in_list_zone(self._mouse_x, self._mouse_y, state)
                     and not (event.ctrl or event.shift or event.alt)
                     and settings is not None
                     and settings.show_type_list
@@ -766,12 +766,26 @@ class NODEMAP_OT_navigate(Operator):
             case "LEFT_ARROW" | "RIGHT_ARROW":
                 if (
                     event.value == "PRESS"
-                    and in_minimap
+                    and _in_list_zone(self._mouse_x, self._mouse_y, state)
                     and not (event.ctrl or event.shift or event.alt)
                     and settings is not None
                     and settings.show_type_list
                     and state.list.list_width > 0
                     and selection.handle_list_expand(self, context, state, settings, expand=event.type == "RIGHT_ARROW")
+                ):
+                    return {"RUNNING_MODAL"}
+                return {"PASS_THROUGH"}
+
+            case "A":
+                if (
+                    event.value == "PRESS"
+                    and _in_list_zone(self._mouse_x, self._mouse_y, state)
+                    and event.shift
+                    and not (event.ctrl or event.alt)
+                    and settings is not None
+                    and settings.show_type_list
+                    and state.list.list_width > 0
+                    and selection.handle_list_toggle_all(self, context, state, settings)
                 ):
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}

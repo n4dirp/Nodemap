@@ -1406,7 +1406,6 @@ def _draw_list_text(
     icon_col_x = geo["icon_col_x"]
     count_right = geo["count_right"]
     row_h = geo["row_h"]
-    line_h = geo["line_h"]
     zone_y = geo["zone_y"]
     zone_h = geo["zone_h"]
     show_counts = geo["show_counts"]
@@ -1508,7 +1507,9 @@ def _draw_list_text(
         gpu.state.scissor_set(*view_scissor)
 
         if not entries and search_query:
-            no_match_y = (view_bottom + view_top - line_h) / 2 + 1
+            # Sit the message in the first row slot (scroll is always 0 with no
+            # rows), like a real row's text, so it stays at the top of the list.
+            no_match_y = round(view_top - row_h) + text_y_off
 
             blf.clipping(
                 font_id,
@@ -1561,7 +1562,9 @@ def _draw_list_text(
                 norm_query,
             )
 
-            if show_counts:
+            # Single-node groups already show the node's name in the header
+            # text, so their redundant count of 1 is omitted.
+            if show_counts and full_count > 1:
                 blf.clipping(font_id, header_clip_right, clip_top, count_clip_right, clip_bottom)
                 blf.position(font_id, count_right - count_width, text_y, 0)
                 blf.color(font_id, *count_color)

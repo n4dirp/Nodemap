@@ -32,6 +32,7 @@ from ..core.helpers import (
     clamp_free_rect,
     get_addon_preferences,
 )
+from ..core.list_filter import filter_matching_nodes
 from ..core.state import (
     _MINIMAP_BUTTONS,
     MinimapState,
@@ -556,17 +557,6 @@ def _draw_viewport_overlay(
     if hole_width > 0 and hole_height > 0:
         outline_color = _alpha_mul(colors["viewport_fill"], master_alpha)
         border_width = 0.5 * ui_scale
-        outline_thin = border_width / 2
-        _draw_rounded_rect_border(
-            view_x - outline_thin,
-            view_y - outline_thin,
-            view_w + outline_thin * 2,
-            view_h + outline_thin * 2,
-            node_roundness,
-            _alpha_mul(colors["background"], master_alpha),
-            border_width * 4,
-            mvp=mvp,
-        )
 
         _draw_rounded_rect_border(view_x, view_y, view_w, view_h, node_roundness, outline_color, border_width, mvp=mvp)
 
@@ -1425,7 +1415,20 @@ def draw_minimap() -> None:
 
     _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, mvp=base_mvp)
 
-    _draw_node_count(settings, content_count, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
+    # Match the node search highlight gate in _ensure_minimap_batches: the
+    # filter is active while the list is shown and the query is non-empty.
+    shown_count = content_count
+    if settings.show_type_list and state.list.search_query.strip():
+        tree_data = state.tree_data() or {}
+        shown_count = len(
+            filter_matching_nodes(
+                tree_data.get("type_stats") or {},
+                tree_data.get("type_nodes") or {},
+                state.list.search_query,
+                tree_data.get("type_search") or None,
+            )
+        )
+    _draw_node_count(settings, shown_count, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
 
     # Persist current view for this tree so it can be restored when revisiting.
     try:

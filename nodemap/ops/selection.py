@@ -372,10 +372,12 @@ def _scroll_list_to_row(
 ) -> bool:
     """Scroll the type list to reveal *row_index*; return True when it changed.
 
-    The row is aligned to the viewport top when it is below the current view
-    and to the bottom when it is above. A row already visible leaves the
-    scroll untouched. The scroll is clamped to *row_count*'s range; the next
-    draw pass re-clamps to the exact (possibly grown) scroll max.
+    The row is aligned to the nearest viewport edge: a row below the current
+    view lands flush with the bottom, a row above flush with the top, so a
+    row one past the edge scrolls the list by exactly one row. A row already
+    visible leaves the scroll untouched. The scroll is clamped to
+    *row_count*'s range; the next draw pass re-clamps to the exact (possibly
+    grown) scroll max.
     """
     zone_rect = state.list.list_zone_rect
     if zone_rect is None:
@@ -393,9 +395,9 @@ def _scroll_list_to_row(
         return False
 
     if row_bottom <= scroll:
-        new_scroll = row_bottom - view_h
-    else:
         new_scroll = row_top
+    else:
+        new_scroll = row_bottom - view_h
     new_scroll = min(max(new_scroll, 0.0), scroll_max)
     if new_scroll == scroll:
         return False
@@ -439,44 +441,6 @@ def _full_list_rows(state: MinimapState, settings) -> list[tuple]:
     return [(kind, label, node_name) for kind, label, node_name, _local_y in rows]
 
 
-def _scroll_list_one_row(
-    state: MinimapState,
-    row_count: int,
-    row_index: int,
-    row_h: float,
-    settings,
-) -> bool:
-    """Scroll the type list by a single row toward *row_index*.
-
-    Unlike :func:`_scroll_list_to_row` (which aligns the row to the viewport
-    edge and can jump a whole page), this nudges the scroll exactly one row
-    when the target sits outside the view, so arrow-key navigation pans
-    smoothly. Return True when the scroll changed.
-    """
-    zone_rect = state.list.list_zone_rect
-    if zone_rect is None:
-        return False
-    ui_scale = _get_ui_scale()
-    search_h = (BUTTON_SIZE - 1) * ui_scale if settings.show_search_bar else 0.0
-    row_pad_v = ui_scale
-    view_h = max(zone_rect[3] - search_h - 2 * row_pad_v - 1, row_h)
-    scroll_max = max(0.0, row_count * row_h - view_h)
-
-    scroll = min(max(state.list.scroll, 0.0), scroll_max)
-    row_top = row_index * row_h
-    row_bottom = (row_index + 1) * row_h
-    if row_bottom > scroll + view_h:
-        new_scroll = min(scroll + row_h, scroll_max)
-    elif row_top < scroll:
-        new_scroll = max(scroll - row_h, 0.0)
-    else:
-        return False
-    if new_scroll == scroll:
-        return False
-    state.list.scroll = new_scroll
-    return True
-
-
 def handle_list_arrow(
     op: NODEMAP_OT_navigate,
     context: Context,
@@ -489,11 +453,11 @@ def handle_list_arrow(
     *direction* is -1 for up and +1 for down. The move starts from the last
     arrow-selected row, falling back to the active node's row, then to the
     hovered row, then to the list edge — mouse hover alone never redirects
-    the walk. The target row is nudged into view one row at a time, hovered
-    (so the minimap highlights it like a mouse hover), and selected with
-    everything else deselected. Return True when the key was handled, False
-    when the list is empty so the caller lets the key pass through to the
-    Node Editor.
+    the walk. The target row is scrolled into view (aligned to the viewport
+    edge when it lies outside the visible area) and hovered (so the minimap
+    highlights it like a mouse hover), and selected with everything else
+    deselected. Return True when the key was handled, False when the list is
+    empty so the caller lets the key pass through to the Node Editor.
     """
     rows = _full_list_rows(state, settings)
     if not rows:
@@ -549,7 +513,7 @@ def handle_list_arrow(
         state.list.hovered_list_row = (label, node_name)
         state.interaction.hovered_node_id = node_name
         select_single_node(op, context, node_name)
-    _scroll_list_one_row(state, len(rows), target, state.list.row_height, settings)
+    _scroll_list_to_row(state, len(rows), target, state.list.row_height, settings)
     state.list.arrow_key = target_key
     op._list_last_row_index = state.list.visible_row_index_map.get(target_key, op._list_last_row_index)
     op._redraw_ui()
@@ -643,6 +607,46 @@ def handle_list_expand(
         state.interaction.hovered_node_id = None
     state.list.arrow_key = target_key
     op._list_last_row_index = state.list.visible_row_index_map.get(target_key, op._list_last_row_index)
+    op._redraw_ui()
+    return True
+
+
+def handle_list_toggle_all(
+    op: NODEMAP_OT_navigate,
+    context: Context,
+    state: MinimapState,
+    settings,
+) -> bool:
+    """Expand or collapse every expandable group in the type list.
+
+    Groups holding more than one node are targeted; when any of them is
+    currently expanded all are collapsed, otherwise all are expanded.
+    Return True when the key was handled, False when no group can be
+    expanded so the caller lets the key pass through to the Node Editor.
+    """
+    tree_data = state.tree_data() or {}
+    type_nodes = tree_data.get("type_nodes") or {}
+    type_stats = tree_data.get("type_stats") or {}
+    search_texts = tree_data.get("type_search") or None
+
+    visible, _effective_expanded, _filtered_children = filter_type_list(
+        type_stats,
+        type_nodes,
+        state.list.expanded,
+        state.list.search_query,
+        search_texts=search_texts,
+    )
+
+    expandable = {label for label, _display_count in visible if type_stats.get(label, 0) > 1}
+    if not expandable:
+        return False
+
+    if state.list.expanded & expandable:
+        state.list.expanded.difference_update(expandable)
+    else:
+        state.list.expanded.update(expandable)
+    state.cache.list_key = None
+    state.request_immediate_compile()
     op._redraw_ui()
     return True
 
