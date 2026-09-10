@@ -7,7 +7,6 @@ import bpy
 
 from .. import __package__ as base_package
 from ..core.constants import (
-    BUTTON_SIZE,
     MAX_FRAME_ZOOM,
     MIN_FRAME_ZOOM,
     TYPE_LIST_ASPECT_THRESHOLD,
@@ -36,8 +35,8 @@ def _list_placement(map_w: float, map_h: float, position: str = "AUTO") -> str:
 
 
 def _list_top_inset(list_width: float, ui_scale: float) -> float:
-    """Return the top inset reserved by the list strip plus the button row."""
-    return (TYPE_LIST_TOP_BUTTON_GAP + BUTTON_SIZE) * ui_scale + list_width
+    """Return the top inset reserved by the list strip."""
+    return TYPE_LIST_TOP_BUTTON_GAP * ui_scale + list_width
 
 
 def _get_map_content_rect_for_width(
@@ -58,8 +57,9 @@ def _get_map_content_rect_for_width(
     if placement is None:
         placement = minimap_state.list.list_placement
     if list_width > 0 and placement == "TOP":
-        # Top strip plus the button row beneath it; the map content fills
-        # the bottom and the left/right span the full inner width.
+        # Only the top strip is reserved; the button row beneath it overlaps
+        # the content, like the left placement. The left/right span the full
+        # inner width.
         top_inset = padding + _list_top_inset(list_width, ui_scale)
         return map_x + padding, map_y + padding, max(map_w - 2 * padding, 1.0), max(map_h - padding - top_inset, 1.0)
     left_inset = padding + list_width

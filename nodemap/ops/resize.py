@@ -13,8 +13,9 @@ from ..core.constants import (
     MAP_SNAP_TOLERANCE,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
-    TYPE_LIST_MAX_WIDTH_PCT,
     TYPE_LIST_MIN_WIDTH,
+    TYPE_LIST_RESERVE_LEFT,
+    TYPE_LIST_RESERVE_TOP,
 )
 from ..core.helpers import (
     _get_minimap_margins,
@@ -471,11 +472,13 @@ def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
         # grow, so the mouse delta is inverted relative to the left list.
         delta = op._list_width_start_y - op._mouse_y
         reference = rect[3]
+        reserve = TYPE_LIST_RESERVE_TOP
     else:
         delta = op._mouse_x - op._list_width_start_x
         reference = rect[2]
+        reserve = TYPE_LIST_RESERVE_LEFT
     min_w = TYPE_LIST_MIN_WIDTH * ui_scale
-    max_w = reference * TYPE_LIST_MAX_WIDTH_PCT
+    max_w = max(0.0, reference - reserve * ui_scale)
     start_w = op._list_width_start_px * ui_scale
     start_w = min(max(start_w, min_w), max_w)
     new_w = min(max(start_w + delta, min_w), max_w)

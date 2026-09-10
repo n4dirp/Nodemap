@@ -6,7 +6,7 @@ from __future__ import annotations
 # Minimap geometry
 # ---------------------------------------------------------------------------
 MIN_MAP_WIDTH: int = 160
-MIN_MAP_HEIGHT: int = 80
+MIN_MAP_HEIGHT: int = 100
 
 # ---------------------------------------------------------------------------
 # Interaction handles
@@ -50,8 +50,7 @@ LABEL_MARGIN_PX: float = 12.0
 # ---------------------------------------------------------------------------
 TYPE_LIST_FONT_ID: int = 0
 TYPE_LIST_FONT_SIZE: int = 10
-TYPE_LIST_MIN_WIDTH: float = 70.0
-TYPE_LIST_MAX_WIDTH_PCT: float = 0.6
+TYPE_LIST_MIN_WIDTH: float = 72.0
 LIST_PAD_X: float = 6.0
 LIST_SWATCH: float = 10.0
 LIST_SWATCH_GAP: float = 5.0
@@ -64,7 +63,7 @@ EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
 SCROLLBAR_THICKNESS: float = 3.0
 SCROLLBAR_THICKNESS_HOVER: float = 6.0
 SCROLLBAR_INSET: float = 2.0
-SCROLLBAR_MIN_THUMB: float = 12.0
+SCROLLBAR_MIN_THUMB: float = 9.0
 SCROLLBAR_ALPHA: float = 0.65
 TYPE_LIST_ANIM_AWAIT_TIMEOUT: float = 1.0
 TYPE_LIST_MIN_LABEL_W: float = 32.0
@@ -100,6 +99,11 @@ FONT_SIZE: int = 11
 BUTTON_SIZE: int = 20
 BUTTON_MARGIN: int = 0
 BUTTON_HOVER_ALPHA: float = 0.02
+
+# Minimap area kept free of the type list: left placement reserves horizontal
+# space, top placement reserves vertical space.
+TYPE_LIST_RESERVE_LEFT: int = 2 * BUTTON_SIZE + 4 * HANDLE_THICKNESS - 1
+TYPE_LIST_RESERVE_TOP: int = 2 * BUTTON_SIZE + 3 * HANDLE_THICKNESS - 1
 
 # ---------------------------------------------------------------------------
 # Batch building

@@ -825,9 +825,9 @@ def _layout_minimap_buttons(
     button_margin = BUTTON_MARGIN * ui_scale
     gap = padding
     if state.list.list_placement == "TOP" and state.list.list_width > 0:
-        # Vertical layout: the row sits just below the top list strip, which
-        # the content rect inset (list + gap + button row) keeps clear of the
-        # map content filling the bottom.
+        # Vertical layout: the row sits just below the top list strip,
+        # overlapping the map content filling the bottom, like the left
+        # placement.
         strip_h = min(state.list.list_width, map_h - 2 * HANDLE_THICKNESS * ui_scale)
         zone_bottom = map_y + map_h - HANDLE_THICKNESS * ui_scale - strip_h
         top_y = round(zone_bottom - TYPE_LIST_TOP_BUTTON_GAP * ui_scale - button_size)

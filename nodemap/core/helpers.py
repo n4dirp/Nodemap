@@ -15,8 +15,9 @@ from .constants import (
     PAN_ANIM_INTERVAL,
     TYPE_LIST_ANIM_DURATION,
     TYPE_LIST_FONT_SIZE,
-    TYPE_LIST_MAX_WIDTH_PCT,
     TYPE_LIST_MIN_WIDTH,
+    TYPE_LIST_RESERVE_LEFT,
+    TYPE_LIST_RESERVE_TOP,
 )
 
 logger = logging.getLogger(base_package)
@@ -282,11 +283,11 @@ def _get_type_list_width(
     """Return the type-list zone extent in pixels (0 when disabled).
 
     The extent is driven by ``type_list_width`` in pixels, clamped to
-    ``TYPE_LIST_MIN_WIDTH`` and ``TYPE_LIST_MAX_WIDTH_PCT`` of the map's
-    reference axis (width in left placement, height in top placement), and
-    does not depend on content measurement; content clips or shows extra
-    padding instead. Called before the map transform so node framing can
-    reserve the zone.
+    ``TYPE_LIST_MIN_WIDTH`` and the map's reference axis minus the placement
+    reserve (width minus ``TYPE_LIST_RESERVE_LEFT`` in left placement, height
+    minus ``TYPE_LIST_RESERVE_TOP`` in top placement), and does not depend on
+    content measurement; content clips or shows extra padding instead. Called
+    before the map transform so node framing can reserve the zone.
     """
     if not settings or not settings.show_type_list or not settings.use_interactive:
         return 0.0
@@ -296,8 +297,11 @@ def _get_type_list_width(
         return 0.0
 
     raw_width = settings.type_list_width * ui_scale
-    reference_w = map_h if (minimap_state.list.list_placement == "TOP" and map_h > 0) else map_w
-    return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), reference_w * TYPE_LIST_MAX_WIDTH_PCT)
+    is_top = minimap_state.list.list_placement == "TOP" and map_h > 0
+    reference_w = map_h if is_top else map_w
+    reserve = TYPE_LIST_RESERVE_TOP if is_top else TYPE_LIST_RESERVE_LEFT
+    max_w = max(0.0, reference_w - reserve * ui_scale)
+    return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), max_w)
 
 
 def start_list_width_animation(minimap_state, settings) -> None:
