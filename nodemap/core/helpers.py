@@ -272,13 +272,19 @@ def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: f
 
 
 def _get_type_list_width(
-    settings, minimap_state, map_w: float, ui_scale: float, font_size: int = TYPE_LIST_FONT_SIZE
+    settings,
+    minimap_state,
+    map_w: float,
+    ui_scale: float,
+    font_size: int = TYPE_LIST_FONT_SIZE,
+    map_h: float = 0.0,
 ) -> float:
-    """Return the type-list zone width in pixels (0 when disabled).
+    """Return the type-list zone extent in pixels (0 when disabled).
 
-    Width is driven by ``type_list_width`` in pixels, clamped to
-    ``TYPE_LIST_MIN_WIDTH`` and ``TYPE_LIST_MAX_WIDTH_PCT`` of the map width,
-    and does not depend on content measurement; content clips or shows extra
+    The extent is driven by ``type_list_width`` in pixels, clamped to
+    ``TYPE_LIST_MIN_WIDTH`` and ``TYPE_LIST_MAX_WIDTH_PCT`` of the map's
+    reference axis (width in left placement, height in top placement), and
+    does not depend on content measurement; content clips or shows extra
     padding instead. Called before the map transform so node framing can
     reserve the zone.
     """
@@ -290,7 +296,8 @@ def _get_type_list_width(
         return 0.0
 
     raw_width = settings.type_list_width * ui_scale
-    return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), map_w * TYPE_LIST_MAX_WIDTH_PCT)
+    reference_w = map_h if (minimap_state.list.list_placement == "TOP" and map_h > 0) else map_w
+    return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), reference_w * TYPE_LIST_MAX_WIDTH_PCT)
 
 
 def start_list_width_animation(minimap_state, settings) -> None:

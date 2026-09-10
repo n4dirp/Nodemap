@@ -22,6 +22,7 @@ settings.show_type_colors = True
 settings.type_list_sort = 'NAME'
 settings.type_list_font_size = 11
 settings.type_list_width = 160
+settings.type_list_position = 'AUTO'
 settings.show_search_bar = True
 settings.show_frame_all_button = True
 settings.show_frame_view_button = True

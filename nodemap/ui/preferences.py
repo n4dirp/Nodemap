@@ -525,11 +525,23 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     type_list_width: IntProperty(
         name="Type List Width",
-        description="Width of the node-type list in pixels",
+        description="Size of the node-type list in pixels (height when the list is on top)",
         default=160,
         min=int(TYPE_LIST_MIN_WIDTH),
         max=10000,
         subtype="PIXEL",
+        update=_update_invalidate_batches,
+    )
+
+    type_list_position: EnumProperty(
+        name="Type List Position",
+        description="Where to place the node-type list (Auto moves it on top when the minimap is taller than wide)",
+        items=[
+            ("AUTO", "Auto", "Place the list on top when the minimap is taller than wide, else on the left"),
+            ("LEFT", "Left", "Always place the list along the left edge"),
+            ("TOP", "Top", "Always place the list across the top edge"),
+        ],
+        default="AUTO",
         update=_update_invalidate_batches,
     )
 
@@ -714,8 +726,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group.label(text="Type List")
         col = group.column()
         col.active = settings.show_type_list
-        row = col.row()
-        row.prop(settings, "type_list_sort", text="Sort", expand=True)
+        col.row().prop(settings, "type_list_position", text="Position", expand=True)
+        col.row().prop(settings, "type_list_sort", text="Sort", expand=True)
         col.prop(settings, "type_list_font_size", text="Font Size")
         row = col.row()
         row.prop(settings, "show_search_bar", text="Filter Bar")

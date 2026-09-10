@@ -76,7 +76,6 @@ class ButtonState:
     rects: dict[str, Rect] = field(default_factory=dict)
     hovered_button_id: str | None = None
     pressed_button_id: str | None = None
-    node_count_anchor: tuple[float, float] | None = None
 
 
 @dataclass
@@ -94,6 +93,9 @@ class ListState:
     """Store geometry and animation state for the node-type list zone."""
 
     list_width: float = 0.0
+    # Zone placement for the current frame: "LEFT" (default) or "TOP" when the
+    # position preference (or Auto on a tall minimap) moves the list on top.
+    list_placement: str = "LEFT"
     search_query: str = ""
     search_cursor: int = 0
     search_focused: bool = False

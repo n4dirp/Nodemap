@@ -222,10 +222,32 @@ def _maybe_preserve_view_for_list_width(
         _preserve_view_for_list_width(state, current_width, new_width, ui_scale, min_delta)
 
 
-def _step_list_width(state: MinimapState, settings, map_w: float, ui_scale: float) -> None:
-    """Advance the animated type-list zone width for this frame."""
+def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, ui_scale: float) -> None:
+    """Advance the animated type-list zone extent for this frame.
+
+    Also refreshes the zone placement from the position preference and minimap
+    aspect; when the placement flips (e.g. Auto on a resize across the
+    threshold), the view is preserved so framed content does not jump.
+    """
+    from ..geo.transforms import _list_placement
+
+    new_placement = _list_placement(map_w, map_h, str(getattr(settings, "type_list_position", "AUTO")))
+    if new_placement != state.list.list_placement and state.list.list_width > 0:
+        from ..geo.transforms import _preserve_view_for_list_width
+
+        _preserve_view_for_list_width(
+            state,
+            state.list.list_width,
+            state.list.list_width,
+            ui_scale,
+            min_delta=0.0,
+            old_placement=state.list.list_placement,
+            new_placement=new_placement,
+        )
+    state.list.list_placement = new_placement
+
     list_font_size = settings.type_list_font_size
-    target_width = _get_type_list_width(settings, state, map_w, ui_scale, list_font_size)
+    target_width = _get_type_list_width(settings, state, map_w, ui_scale, list_font_size, map_h)
 
     # During an interactive width drag, the live pixel width wins.
     if state.list.dragging_width is not None:
@@ -927,6 +949,7 @@ def _compute_zone_geometry(
     row_draw_h: float,
     map_x: float,
     map_y: float,
+    map_w: float,
     map_h: float,
     padding: float,
     colors: dict,
@@ -934,7 +957,11 @@ def _compute_zone_geometry(
     ui_scale: float,
     mvp: Any = None,
 ) -> dict:
-    """Compute list zone metrics and draw the zone background."""
+    """Compute list zone metrics and draw the zone background.
+
+    The zone sits along the left edge ("LEFT") or across the top edge
+    ("TOP") of the minimap depending on ``state.list.list_placement``.
+    """
     font_size = layout["font_size"]
     row_h = layout["row_h"]
     line_h = layout["line_h"]
@@ -953,7 +980,6 @@ def _compute_zone_geometry(
 
     handle_pad = HANDLE_THICKNESS * ui_scale
     zone_x = map_x + handle_pad
-    zone_w = map_x + padding + state.list.list_width - 2 * ui_scale - zone_x
 
     if settings.show_search_bar:
         search_h = (BUTTON_SIZE - 1) * ui_scale
@@ -963,12 +989,20 @@ def _compute_zone_geometry(
         state.list.search_clear_rect = None
         state.list.search_clear_hovered = False
 
-    zone_h = min(
-        map_h - 2 * handle_pad,
-        max(total_h, row_h) + search_h + 3 * row_pad_v,
-    )
-
-    zone_y = round(map_y + map_h - zone_h - handle_pad)
+    if state.list.list_placement == "TOP":
+        # Full-width strip pinned to the top edge; the height is the animated
+        # extent and the button row sits beneath it while the map fills the
+        # bottom.
+        zone_h = min(state.list.list_width, map_h - 2 * handle_pad)
+        zone_y = round(map_y + map_h - handle_pad - zone_h)
+        zone_w = map_w - 2 * handle_pad
+    else:
+        zone_w = map_x + padding + state.list.list_width - 2 * ui_scale - zone_x
+        zone_h = min(
+            map_h - 2 * handle_pad,
+            max(total_h, row_h) + search_h + 3 * row_pad_v,
+        )
+        zone_y = round(map_y + map_h - zone_h - handle_pad)
     state.list.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
 
     search_top = zone_y + zone_h - 1 * ui_scale
@@ -1632,6 +1666,7 @@ def _draw_type_list(
     state: MinimapState,
     map_x: float,
     map_y: float,
+    map_w: float,
     map_h: float,
     padding: float,
     colors: dict,
@@ -1639,7 +1674,7 @@ def _draw_type_list(
     ui_scale: float,
     mvp: Any = None,
 ) -> None:
-    """Draw the interactive node-type list zone along the minimap's left edge."""
+    """Draw the interactive node-type list zone on the minimap's left or top edge."""
     state.list.row_rects = []
     state.list.node_rects = []
     state.list.toggle_rects = {}
@@ -1725,6 +1760,7 @@ def _draw_type_list(
         row_draw_h,
         map_x,
         map_y,
+        map_w,
         map_h,
         padding,
         colors,

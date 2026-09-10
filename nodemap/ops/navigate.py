@@ -225,17 +225,16 @@ def _in_list_zone(region_x: int, region_y: int, state: MinimapState) -> bool:
     """Return True when the cursor is over the type-list zone of the minimap."""
     if state.list.list_width <= 0 or not state.view.rect:
         return False
-    map_x, map_y, _, map_h = state.view.rect
-    hit_pad = HANDLE_THICKNESS * _get_ui_scale()
-    zone_left = map_x + hit_pad
-    zone_right = map_x + state.view.inner_padding + state.list.list_width
     zone_rect = state.list.list_zone_rect
-    if zone_rect:
-        _, zone_y, _, zone_h = zone_rect
-    else:
-        zone_y = map_y + hit_pad
-        zone_h = map_h - 2 * hit_pad
-    return zone_left <= region_x <= zone_right and zone_y <= region_y <= zone_y + zone_h
+    if not zone_rect:
+        # Fallback for the first frame before the zone rect is recorded:
+        # assume the legacy left-edge placement.
+        map_x, map_y, _, map_h = state.view.rect
+        hit_pad = HANDLE_THICKNESS * _get_ui_scale()
+        zone_w = state.view.inner_padding + state.list.list_width
+        zone_rect = (map_x + hit_pad, map_y + hit_pad, zone_w, map_h - 2 * hit_pad)
+    zone_x, zone_y, zone_w, zone_h = zone_rect
+    return zone_x <= region_x <= zone_x + zone_w and zone_y <= region_y <= zone_y + zone_h
 
 
 def _list_row_at(region_x: int, region_y: int, state: MinimapState) -> str | None:
@@ -492,6 +491,7 @@ class NODEMAP_OT_navigate(Operator):
     _snap_dwell: float = 0.0
     _snap_last_time: float = 0.0
     _list_width_start_x: int = 0
+    _list_width_start_y: int = 0
     _list_width_start_px: int = 160
     _last_cursor: str = ""
     _pan_acc: list[float]
@@ -1071,8 +1071,10 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_resize_handle
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
+                self._list_width_start_y = self._mouse_y
                 self._list_width_start_px = settings.type_list_width
-                cursor = _CURSOR_MAP[divider_resize_handle]
+                # The top strip is resized vertically.
+                cursor = "MOVE_Y" if state.list.list_placement == "TOP" else _CURSOR_MAP[divider_resize_handle]
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
                 return {"RUNNING_MODAL"}
@@ -1258,8 +1260,10 @@ class NODEMAP_OT_navigate(Operator):
                 state.interaction.resize_active = divider_handle_r
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
+                self._list_width_start_y = self._mouse_y
                 self._list_width_start_px = settings.type_list_width
-                cursor = _CURSOR_MAP[divider_handle_r]
+                # The top strip is resized vertically.
+                cursor = "MOVE_Y" if state.list.list_placement == "TOP" else _CURSOR_MAP[divider_handle_r]
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor
                 return {"RUNNING_MODAL"}
@@ -1845,7 +1849,12 @@ class NODEMAP_OT_navigate(Operator):
             state.interaction.hovered_handle = divider
             if divider != old_handle:
                 self._redraw_ui()
-            cursor = "HAND" if state.list.width_clamped else _CURSOR_MAP.get(divider, "MOVE_X")
+            if state.list.width_clamped:
+                cursor = "HAND"
+            elif state.list.list_placement == "TOP":
+                cursor = "MOVE_Y"
+            else:
+                cursor = _CURSOR_MAP.get(divider, "MOVE_X")
             if cursor != self._last_cursor:
                 context.window.cursor_modal_set(cursor)
                 self._last_cursor = cursor

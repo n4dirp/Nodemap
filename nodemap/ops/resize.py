@@ -38,16 +38,23 @@ def get_list_divider_handle(state: MinimapState, region_x: int, region_y: int, u
     """Return ``LIST`` when the cursor is over the divider between list and map.
 
     The divider spans the gap (``6*scale``) between the list zone's right edge
-    and the map content's left edge and uses the same hit thickness as the
-    outer resize borders.
+    and the map content's left edge (left placement) or runs along the strip's
+    bottom edge (top placement) and uses the same hit thickness as the outer
+    resize borders.
     """
     if state.list.list_width <= 0 or not state.list.list_zone_rect or not state.view.rect:
         return None
     zone_x, zone_y, zone_w, zone_h = state.list.list_zone_rect
+    hit_half_width = (HANDLE_THICKNESS - 1) * ui_scale
+    if state.list.list_placement == "TOP":
+        # Band centered on the strip's bottom edge, between the top-pinned
+        # list and the button row beneath it.
+        if zone_x <= region_x <= zone_x + zone_w and zone_y - hit_half_width <= region_y <= zone_y + hit_half_width:
+            return ResizeHandle.LIST
+        return None
     # Hit zone starts at the zone's right edge (never reaching into the
     # scrollbar) and extends right into the map gutter for reachability.
     zone_right_edge = zone_x + zone_w
-    hit_half_width = (HANDLE_THICKNESS - 1) * ui_scale
     if zone_right_edge <= region_x <= zone_right_edge + hit_half_width and zone_y <= region_y <= zone_y + zone_h:
         return ResizeHandle.LIST
     return None
@@ -445,20 +452,33 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 
 
 def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
-    """Update the type-list pixel width from the current mouse delta."""
+    """Update the type-list pixel extent from the current mouse delta.
+
+    The drag axis follows the zone placement: horizontal for the left list,
+    vertical for the top strip (the extent then clamps against the map
+    height).
+    """
     state = op._state
     addon = get_addon_preferences(context)
     if not state or not addon:
         return
     settings = addon.settings
 
-    dx = op._mouse_x - op._list_width_start_x
     ui_scale = _get_ui_scale()
+    rect = state.view.rect or (0.0, 0.0, 0.0, 0.0)
+    if state.list.list_placement == "TOP":
+        # Top-pinned strip: the bottom edge moves down (lower region y) to
+        # grow, so the mouse delta is inverted relative to the left list.
+        delta = op._list_width_start_y - op._mouse_y
+        reference = rect[3]
+    else:
+        delta = op._mouse_x - op._list_width_start_x
+        reference = rect[2]
     min_w = TYPE_LIST_MIN_WIDTH * ui_scale
-    max_w = (op._state.view.rect[2] if op._state.view.rect else 0.0) * TYPE_LIST_MAX_WIDTH_PCT
+    max_w = reference * TYPE_LIST_MAX_WIDTH_PCT
     start_w = op._list_width_start_px * ui_scale
     start_w = min(max(start_w, min_w), max_w)
-    new_w = min(max(start_w + dx, min_w), max_w)
+    new_w = min(max(start_w + delta, min_w), max_w)
     new_px = int(round(new_w / max(ui_scale, 1e-6)))
     from ..core.state import suppress_update_callbacks
 

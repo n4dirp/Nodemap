@@ -6,21 +6,62 @@ from typing import Any
 import bpy
 
 from .. import __package__ as base_package
-from ..core.constants import MAX_FRAME_ZOOM, MIN_FRAME_ZOOM
+from ..core.constants import (
+    BUTTON_SIZE,
+    MAX_FRAME_ZOOM,
+    MIN_FRAME_ZOOM,
+    TYPE_LIST_ASPECT_THRESHOLD,
+    TYPE_LIST_TOP_BUTTON_GAP,
+)
 from ..core.helpers import _get_ui_scale, get_addon_preferences
 from ..core.state import MinimapState, _state
 
 logger = logging.getLogger(base_package)
 
 
+def _list_placement(map_w: float, map_h: float, position: str = "AUTO") -> str:
+    """Return the type-list placement for a position preference and minimap aspect.
+
+    "AUTO" resolves to "TOP" when the map is taller than wide by
+    ``TYPE_LIST_ASPECT_THRESHOLD``, else "LEFT". Explicit "TOP"/"LEFT"
+    always win; anything else resolves like "AUTO".
+    """
+    if position == "TOP":
+        return "TOP"
+    if position == "LEFT":
+        return "LEFT"
+    if map_w > 0 and map_h > map_w * TYPE_LIST_ASPECT_THRESHOLD:
+        return "TOP"
+    return "LEFT"
+
+
+def _list_top_inset(list_width: float, ui_scale: float) -> float:
+    """Return the top inset reserved by the list strip plus the button row."""
+    return (TYPE_LIST_TOP_BUTTON_GAP + BUTTON_SIZE) * ui_scale + list_width
+
+
 def _get_map_content_rect_for_width(
-    minimap_state: MinimapState, list_width: float, ui_scale: float | None = None
+    minimap_state: MinimapState,
+    list_width: float,
+    ui_scale: float | None = None,
+    placement: str | None = None,
 ) -> tuple[float, float, float, float]:
-    """Return the content rect for an explicit list width without mutating state."""
+    """Return the content rect for an explicit list width without mutating state.
+
+    ``placement`` overrides the stored zone placement, for preserving views
+    across a placement flip.
+    """
     map_x, map_y, map_w, map_h = minimap_state.view.rect
     padding = minimap_state.view.inner_padding
     if ui_scale is None:
         ui_scale = _get_ui_scale()
+    if placement is None:
+        placement = minimap_state.list.list_placement
+    if list_width > 0 and placement == "TOP":
+        # Top strip plus the button row beneath it; the map content fills
+        # the bottom and the left/right span the full inner width.
+        top_inset = padding + _list_top_inset(list_width, ui_scale)
+        return map_x + padding, map_y + padding, max(map_w - 2 * padding, 1.0), max(map_h - padding - top_inset, 1.0)
     left_inset = padding + list_width
     if list_width > 0:
         left_inset += 4.0 * ui_scale
@@ -42,6 +83,8 @@ def _preserve_view_for_list_width(
     new_width: float,
     ui_scale: float | None = None,
     min_delta: float = 0.5,
+    old_placement: str | None = None,
+    new_placement: str | None = None,
 ) -> None:
     """Adjust ``minimap_state.view.pan/zoom`` so the same world rect stays framed after width change.
 
@@ -54,7 +97,9 @@ def _preserve_view_for_list_width(
 
     No-op when rect/bounds are degenerate or widths are equal within ``min_delta`` px.
     The animation path passes ``min_delta=0.0`` so eased steps map the list
-    width change exactly; interactive deltas keep the 0.5px tolerance.
+    width change exactly; interactive deltas keep the 0.5px tolerance. A
+    placement flip is expressed as equal widths with ``min_delta=0.0`` and
+    explicit old/new placements.
     """
     if abs(new_width - old_width) < min_delta:
         return
@@ -79,10 +124,10 @@ def _preserve_view_for_list_width(
     tree_center_y = (bounds[1] + bounds[3]) / 2
 
     old_inner_l, old_inner_b, old_inner_w, old_inner_h = _get_map_content_rect_for_width(
-        minimap_state, old_width, ui_scale
+        minimap_state, old_width, ui_scale, old_placement
     )
     new_inner_l, new_inner_b, new_inner_w, new_inner_h = _get_map_content_rect_for_width(
-        minimap_state, new_width, ui_scale
+        minimap_state, new_width, ui_scale, new_placement
     )
 
     # Old scale / center derived from current zoom/pan and old geometry.
@@ -138,8 +183,12 @@ def _preserve_view_for_list_width(
         # scaling pan proportionally to the width change only (list
         # affects width, not height). This keeps the same area at
         # the same relative X position and is symmetric for
-        # toggle off (75→100 restores zoom).
-        scale_ratio = new_inner_w / max(old_inner_w, 1.0)
+        # toggle off (75→100 restores zoom). A placement flip changes
+        # both axes, so scale by the tighter axis ratio.
+        if old_placement is not None and old_placement != new_placement:
+            scale_ratio = min(new_inner_w / max(old_inner_w, 1.0), new_inner_h / max(old_inner_h, 1.0))
+        else:
+            scale_ratio = new_inner_w / max(old_inner_w, 1.0)
         new_scale = old_scale * scale_ratio
         new_zoom = new_scale / new_base
         new_zoom = max(MIN_FRAME_ZOOM, min(new_zoom, MAX_FRAME_ZOOM))
@@ -192,6 +241,11 @@ def _preserve_view_for_map_resize(
     list_width = minimap_state.list.list_width
 
     def _base_scale(map_w: float, map_h: float) -> float:
+        if list_width > 0 and minimap_state.list.list_placement == "TOP":
+            top_inset = padding + _list_top_inset(list_width, ui_scale)
+            inner_w = max(map_w * ui_scale - 2.0 * padding, 1.0)
+            inner_h = max(map_h * ui_scale - padding - top_inset, 1.0)
+            return min(inner_w / bbox_w, inner_h / bbox_h)
         left_inset = padding + list_width
         if list_width > 0:
             left_inset += 4.0 * ui_scale

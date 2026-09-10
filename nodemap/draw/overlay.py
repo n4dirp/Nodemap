@@ -18,8 +18,10 @@ from ..core.constants import (
     BUTTON_SIZE,
     CORNER_POSITIONS,
     FONT_SIZE,
+    HANDLE_THICKNESS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
+    TYPE_LIST_TOP_BUTTON_GAP,
 )
 from ..core.helpers import (
     _expand_bounds_margin,
@@ -377,7 +379,14 @@ def _draw_resize_handles(
         zone_rect = state.list.list_zone_rect
         if not zone_rect or not state.view.rect:
             return
-        zone_y, zone_height = zone_rect[1], zone_rect[3]
+        zone_x, zone_y, zone_w, zone_height = zone_rect
+        divider_color = color_warn if state.list.width_clamped else color_base
+        if state.list.list_placement == "TOP":
+            # Horizontal divider along the strip's bottom edge, spanning the
+            # zone width so the pill tracks per-pixel during a drag.
+            divider_y = round(zone_y - handle_thickness / 2.0)
+            _draw_filled_rounded_rect(zone_x, divider_y, zone_w, handle_thickness, 0, divider_color, mvp=mvp)
+            return
         # Derive the divider x from the live zone width so the pill tracks
         # per-pixel during a drag instead of lagging one frame behind.
         map_left = state.view.rect[0]
@@ -390,7 +399,6 @@ def _draw_resize_handles(
             - handle_thickness / 2.0
         )
         # Clamp to zone vertical extent with small margin so pill stays inside.
-        divider_color = color_warn if state.list.width_clamped else color_base
         _draw_filled_rounded_rect(round(divider_x), zone_y, handle_thickness, zone_height, 0, divider_color, mvp=mvp)
         return
 
@@ -547,7 +555,19 @@ def _draw_viewport_overlay(
     # Outline the viewport extent when it overlaps the minimap
     if hole_width > 0 and hole_height > 0:
         outline_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-        border_width = 1.5 * ui_scale
+        border_width = 0.5 * ui_scale
+        outline_thin = border_width / 2
+        _draw_rounded_rect_border(
+            view_x - outline_thin,
+            view_y - outline_thin,
+            view_w + outline_thin * 2,
+            view_h + outline_thin * 2,
+            node_roundness,
+            _alpha_mul(colors["background"], master_alpha),
+            border_width * 4,
+            mvp=mvp,
+        )
+
         _draw_rounded_rect_border(view_x, view_y, view_w, view_h, node_roundness, outline_color, border_width, mvp=mvp)
 
 
@@ -562,7 +582,7 @@ def _draw_node_count(
     master_alpha: float,
     ui_scale: float,
 ) -> None:
-    """Draw the node count text beside the list toggle at the top-left."""
+    """Draw the node count text in the bottom-right corner of the minimap."""
     if not settings.show_node_count:
         return
 
@@ -800,22 +820,29 @@ def _layout_minimap_buttons(
     padding: float,
     ui_scale: float,
     settings=None,
-    content_count: int = 0,
 ) -> dict[str, tuple[float, float, float]]:
     """Return hit-rect origins {id: (x, y, size)} for every visible button.
 
-    The top edge hosts the whole chrome: the list toggle at the left with the
-    node count text beside it, and the frame buttons (ALL/VIEW/SELECTED)
-    leading into the move-grip drag handle at the right. When the move button
-    is disabled the frame row extends to the right padding edge instead.
+    The row hosts the whole chrome: the list toggle at the left and the
+    frame buttons (ALL/VIEW/SELECTED) leading into the move-grip drag handle
+    at the right. The row sits on the top edge, except in the top-list
+    placement where it sits just below the list strip. When the move button is
+    disabled the frame row extends to the right padding edge instead.
     Frame buttons are culled progressively (SELECTED → VIEW → ALL) when the
-    row would spill past the left padding or collide with the list toggle /
-    node count text.
+    row would spill past the left padding or collide with the list toggle.
     """
     button_size = BUTTON_SIZE * ui_scale
     button_margin = BUTTON_MARGIN * ui_scale
     gap = padding
-    top_y = round(map_y + map_h - padding - button_margin - button_size)
+    if state.list.list_placement == "TOP" and state.list.list_width > 0:
+        # Vertical layout: the row sits just below the top list strip, which
+        # the content rect inset (list + gap + button row) keeps clear of the
+        # map content filling the bottom.
+        strip_h = min(state.list.list_width, map_h - 2 * HANDLE_THICKNESS * ui_scale)
+        zone_bottom = map_y + map_h - HANDLE_THICKNESS * ui_scale - strip_h
+        top_y = round(zone_bottom - TYPE_LIST_TOP_BUTTON_GAP * ui_scale - button_size)
+    else:
+        top_y = round(map_y + map_h - padding - button_margin - button_size)
 
     # Move-grip drag handle: rightmost item of the top row when enabled.
     drag_size = BUTTON_SIZE * ui_scale
@@ -834,21 +861,6 @@ def _layout_minimap_buttons(
         if state.list.list_width > 0:
             list_button_x = max(list_button_x, round(_get_map_content_rect(state)[0] + button_margin))
 
-    # Node count text follows the list toggle and is used as the left chrome
-    # boundary when culling the frame row.
-    count_width = 0.0
-    node_count_anchor: tuple[float, float] | None = None
-    if getattr(settings, "show_node_count", False):
-        font_id = 0
-        font_size = int(FONT_SIZE * ui_scale)
-        blf.size(font_id, font_size)
-        count_width, count_height = blf.dimensions(font_id, str(content_count))
-        count_x = (
-            (list_button_x if list_button_x is not None else round(map_x + padding + button_margin)) + button_size + gap
-        )
-        node_count_anchor = (round(count_x), round(top_y + (button_size - count_height) / 2))
-    state.buttons.node_count_anchor = node_count_anchor
-
     # Avoid overlap between the frame row and the left chrome, and overflow of
     # the row outside the minimap. When space is tight (small map_w), hide
     # frame buttons progressively: SELECTED → VIEW → ALL.
@@ -860,13 +872,8 @@ def _layout_minimap_buttons(
         row_left_x = row_right_x - (frame_button_count - 1) * button_size if frame_button_count else row_right_x
         # 1) row would overflow left padding
         row_overflows_left = row_left_x < (map_x + padding)
-        # 2) row would overlap the node count text / list toggle (with clearance)
-        if node_count_anchor is not None:
-            left_chrome_right = node_count_anchor[0] + count_width
-        elif list_button_x is not None:
-            left_chrome_right = list_button_x + button_size
-        else:
-            left_chrome_right = None
+        # 2) row would overlap the list toggle (with clearance)
+        left_chrome_right = list_button_x + button_size if list_button_x is not None else None
         row_overlaps_left_chrome = left_chrome_right is not None and row_left_x < left_chrome_right + gap
         if not row_overflows_left and not row_overlaps_left_chrome:
             break
@@ -896,18 +903,14 @@ def _layout_minimap_buttons(
     return rects
 
 
-def _draw_minimap_buttons(
-    map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count=0, mvp: Any = None
-):
+def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, mvp: Any = None):
     """Draw the interactive minimap buttons and record their hit rects."""
     settings = get_addon_preferences().settings
     state = _state()
     state.buttons.rects.clear()
 
     visible_button_ids = _get_visible_minimap_buttons(settings)
-    rects = _layout_minimap_buttons(
-        state, visible_button_ids, map_x, map_y, map_w, map_h, padding, ui_scale, settings, content_count
-    )
+    rects = _layout_minimap_buttons(state, visible_button_ids, map_x, map_y, map_w, map_h, padding, ui_scale, settings)
     radius = colors["node_roundness"] * ui_scale
     bg_color = _alpha_mul(colors["background"], master_alpha)
     border_color = _alpha_mul(colors["background_border"], master_alpha)
@@ -1242,7 +1245,7 @@ def draw_minimap() -> None:
 
     # Reserve the type-list zone before computing the map transform so
     # node framing and panning never place tree content behind the list.
-    _step_list_width(state, settings, map_w, ui_scale)
+    _step_list_width(state, settings, map_w, map_h, ui_scale)
 
     _clamp_pan_to_viewport(space, region, state, visible)
 
@@ -1420,9 +1423,7 @@ def draw_minimap() -> None:
         mvp=base_mvp,
     )
 
-    _draw_minimap_buttons(
-        map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, content_count, mvp=base_mvp
-    )
+    _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, mvp=base_mvp)
 
     _draw_node_count(settings, content_count, map_x, map_y, map_w, padding, colors, master_alpha, ui_scale)
 
@@ -1444,7 +1445,9 @@ def draw_minimap() -> None:
     # Interactive node-type list zone (drawn unclipped, on top of map content)
     try:
         gpu.state.blend_set("ALPHA")
-        _draw_type_list(settings, state, map_x, map_y, map_h, padding, colors, master_alpha, ui_scale, mvp=base_mvp)
+        _draw_type_list(
+            settings, state, map_x, map_y, map_w, map_h, padding, colors, master_alpha, ui_scale, mvp=base_mvp
+        )
 
         _draw_moving_border(
             map_x,
