@@ -58,6 +58,7 @@ from ..geo.transforms import (
 from . import content_draw
 from .batch_build import _ensure_minimap_batches
 from .gpu_draw import (
+    _draw_dashes,
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_clipped,
     _draw_filled_rounded_rect_varying,
@@ -1065,6 +1066,57 @@ def _redraw_pressed_move_grip(
     _paint_grip_icon(drag_x, drag_y, drag_h, icon_color, ui_scale, mvp=mvp)
 
 
+def _draw_marquee(
+    state: MinimapState,
+    map_x: float,
+    map_y: float,
+    map_w: float,
+    map_h: float,
+    panel_roundness: float,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+    mvp: Any = None,
+) -> None:
+    """Draw the frame-region marquee rectangle while it is being dragged."""
+    start = state.interaction.marquee_start
+    end = state.interaction.marquee_end
+    if not state.interaction.marquee_active or start is None or end is None:
+        return
+    rect_x = min(start[0], end[0])
+    rect_y = min(start[1], end[1])
+    rect_w = abs(end[0] - start[0])
+    rect_h = abs(end[1] - start[1])
+    if rect_w < 1 or rect_h < 1:
+        return
+    base_color = colors["viewport_fill"]
+    fill_color = _alpha_mul(base_color, 0.05 * master_alpha)
+    border_color = _alpha_mul(base_color, master_alpha)
+    border_width = 0.5 * ui_scale
+
+    _draw_filled_rounded_rect_clipped(
+        rect_x, rect_y, rect_w, rect_h, 0.0, fill_color, map_x, map_y, map_w, map_h, panel_roundness, mvp=mvp
+    )
+    _draw_rounded_rect_border(rect_x, rect_y, rect_w, rect_h, 0.0, _alpha_mul(border_color, 0.3), border_width, mvp=mvp)
+
+    points = [
+        (rect_x, rect_y, 0.0),
+        (rect_x + rect_w - 1, rect_y, 0.0),
+        (rect_x + rect_w - 1, rect_y + rect_h - 1, 0.0),
+        (rect_x, rect_y + rect_h - 1, 0.0),
+        (rect_x, rect_y, 0.0),
+    ]
+
+    _draw_dashes(
+        points,
+        4.0 * ui_scale,
+        4.0 * ui_scale,
+        border_color,
+        line_width=border_width,
+        mvp=mvp,
+    )
+
+
 def draw_minimap() -> None:
     """Orchestrate minimap drawing in the Node Editor."""
     context = bpy.context
@@ -1402,6 +1454,19 @@ def draw_minimap() -> None:
         scissor_was_active,
         state,
         visible=visible,
+        mvp=base_mvp,
+    )
+
+    _draw_marquee(
+        state,
+        map_x,
+        map_y,
+        map_w,
+        map_h,
+        panel_roundness,
+        colors,
+        master_alpha,
+        ui_scale,
         mvp=base_mvp,
     )
 

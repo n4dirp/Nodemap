@@ -3,7 +3,8 @@
 import bpy
 
 addon_id = next((ext.module for ext in bpy.context.preferences.addons if ext.module.endswith("nodemap")), "nodemap")
-settings = bpy.context.preferences.addons[addon_id].preferences.settings
+prefs = bpy.context.preferences.addons[addon_id].preferences
+settings = prefs.settings
 
 settings.dock_mode = 'CORNER'
 settings.corner_position = 'TOP_LEFT'
@@ -58,6 +59,8 @@ settings.wire_opacity = 0.5
 settings.scroll_wheel_mode = 'NODE_EDITOR'
 settings.left_click_action = 'PAN'
 settings.right_click_action = 'SELECT_FRAME'
+settings.left_drag_action = 'CENTER_PAN'
+settings.right_drag_action = 'FRAME_RECT'
 settings.use_auto_zoom = True
 settings.use_interactive = True
 settings.use_follow_view = False

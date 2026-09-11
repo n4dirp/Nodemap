@@ -87,6 +87,9 @@ class InteractionState:
     hovered_handle: ResizeHandle | None = None
     resize_active: ResizeHandle | None = None
     pressed: bool = False
+    marquee_active: bool = False
+    marquee_start: tuple[int, int] | None = None
+    marquee_end: tuple[int, int] | None = None
 
 
 @dataclass

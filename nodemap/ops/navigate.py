@@ -42,6 +42,7 @@ from ..geo.framing import (
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
+    _frame_to_bounds,
     frame_all,
     frame_selected,
     frame_view,
@@ -469,11 +470,17 @@ class NODEMAP_OT_navigate(Operator):
     _dragging: bool = False
     _was_in_minimap: bool = False
 
+    _drag_mode: str | None = None
+    _click_action: str | None = None
+    _click_extend: bool = False
+    _click_toggle: bool = False
+
     _mmb_dragging: bool = False
     _mmb_drag_start: tuple[int, int] | None = None
 
     _mx: int = 0
     _my: int = 0
+    _marquee_dragging: bool = False
     _state: MinimapState | None = None
     _area: Area | None = None
     _region: Region | None = None
@@ -566,6 +573,7 @@ class NODEMAP_OT_navigate(Operator):
             self._dragging
             or self._mmb_dragging
             or self._list_mmb_dragging
+            or self._marquee_dragging
             or self._resize_handle is not None
             or self._list_width_dragging
             or self._moving
@@ -828,6 +836,56 @@ class NODEMAP_OT_navigate(Operator):
         in_minimap = _is_in_minimap(self._mouse_x, self._mouse_y, state) if state else False
         return state, addon, settings, in_minimap
 
+    def _resolve_gesture(self, event: Event, settings, side: str) -> tuple[str, str, bool, bool]:
+        """Resolve modifier overrides into (drag, click, extend, toggle).
+
+        An unmodified gesture uses the configured actions. Shift, Ctrl, and
+        Alt are stateless overrides so every drag action stays reachable on
+        either button: Shift frames a region, Ctrl pans the view, and Alt
+        frames a region in the editor. Shift and Ctrl also turn a click into
+        an extend or toggle select. Captured at press so the release finishes
+        the gesture the user started.
+        """
+        if side == "LEFT":
+            drag_action = settings.left_drag_action
+            click_action = settings.left_click_action
+        else:
+            drag_action = settings.right_drag_action
+            click_action = settings.right_click_action
+        if event.shift:
+            return "FRAME_RECT", "SELECT", True, False
+        if event.ctrl:
+            return "PAN", "SELECT", False, True
+        if event.alt:
+            return "FRAME_RECT_EDITOR", click_action, False, False
+        return drag_action, click_action, False, False
+
+    def _reset_gesture(self) -> None:
+        """Clear the resolved gesture captured at press."""
+        self._drag_mode = None
+        self._click_action = None
+        self._click_extend = False
+        self._click_toggle = False
+
+    def _run_click_action(self, context: Context, state: MinimapState) -> None:
+        """Run the resolved click action for a no-drag release."""
+        action = self._click_action
+        if action is None:
+            return
+        if action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
+            state.request_immediate_compile()
+            selection.handle_click_selection(
+                self,
+                context,
+                state,
+                frame=action == "SELECT_FRAME",
+                extend=self._click_extend,
+                toggle=self._click_toggle,
+            )
+        if action in ("PAN", "SELECT_PAN"):
+            self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
+            state.interaction.pressed = False
+
     def _handle_list_search(self, context: Context, event: Event) -> set[str]:
         """Handle key input while the type-list search box is focused.
 
@@ -1024,6 +1082,22 @@ class NODEMAP_OT_navigate(Operator):
                 state.cache.invalidate_batches_only()
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
+            if self._marquee_dragging:
+                self._marquee_dragging = False
+                start = state.interaction.marquee_start
+                end = state.interaction.marquee_end
+                state.interaction.marquee_active = False
+                state.interaction.marquee_start = None
+                state.interaction.marquee_end = None
+                framed = False
+                if start is not None and end is not None:
+                    if self._drag_mode == "FRAME_RECT_EDITOR":
+                        framed = self._frame_marquee_rect_editor(context, state, start, end)
+                    else:
+                        framed = self._frame_marquee_rect(context, state, start, end)
+                if framed:
+                    self._redraw_ui()
+                    return {"RUNNING_MODAL"}
             if self._dragging:
                 self._dragging = False
                 self._drag_start = None
@@ -1053,11 +1127,8 @@ class NODEMAP_OT_navigate(Operator):
                 self._anim.destroy_timer(context)
                 return {"RUNNING_MODAL"}
             if not self._dragging and self._was_in_minimap:
-                if settings.left_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                    state.request_immediate_compile()
-                    selection.handle_click_selection(
-                        self, context, event, state, frame=settings.left_click_action == "SELECT_FRAME"
-                    )
+                if self._click_action is not None:
+                    self._run_click_action(context, state)
                 self._was_in_minimap = False
                 self._drag_start = None
                 return {"RUNNING_MODAL"}
@@ -1191,9 +1262,21 @@ class NODEMAP_OT_navigate(Operator):
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
-            if settings.left_click_action in ("PAN", "SELECT_PAN"):
+            drag_mode, click_action, extend, toggle = self._resolve_gesture(event, settings, "LEFT")
+            self._drag_mode = drag_mode
+            self._click_action = click_action
+            self._click_extend = extend
+            self._click_toggle = toggle
+            if drag_mode in ("PAN", "CENTER_PAN"):
                 self._drag_start = (self._mouse_x, self._mouse_y)
-                self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
+                if drag_mode == "CENTER_PAN":
+                    self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
+            else:
+                self._marquee_dragging = True
+                state.interaction.marquee_active = True
+                state.interaction.marquee_start = (self._mouse_x, self._mouse_y)
+                state.interaction.marquee_end = (self._mouse_x, self._mouse_y)
+                self._redraw_ui()
             return {"RUNNING_MODAL"}
         else:
             self._drag_start = None
@@ -1234,6 +1317,22 @@ class NODEMAP_OT_navigate(Operator):
                 state.cache.invalidate_batches_only()
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
+            if self._marquee_dragging:
+                self._marquee_dragging = False
+                start = state.interaction.marquee_start
+                end = state.interaction.marquee_end
+                state.interaction.marquee_active = False
+                state.interaction.marquee_start = None
+                state.interaction.marquee_end = None
+                framed = False
+                if start is not None and end is not None:
+                    if self._drag_mode == "FRAME_RECT_EDITOR":
+                        framed = self._frame_marquee_rect_editor(context, state, start, end)
+                    else:
+                        framed = self._frame_marquee_rect(context, state, start, end)
+                if framed:
+                    self._redraw_ui()
+                    return {"RUNNING_MODAL"}
             if self._dragging:
                 self._dragging = False
                 self._drag_start = None
@@ -1261,6 +1360,12 @@ class NODEMAP_OT_navigate(Operator):
                     except RuntimeError:
                         pass
                 self._anim.destroy_timer(context)
+                return {"RUNNING_MODAL"}
+            if not self._dragging and self._was_in_minimap:
+                if self._click_action is not None:
+                    self._run_click_action(context, state)
+                self._was_in_minimap = False
+                self._drag_start = None
                 return {"RUNNING_MODAL"}
             self._was_in_minimap = False
             self._drag_start = None
@@ -1367,15 +1472,21 @@ class NODEMAP_OT_navigate(Operator):
                     context.window.cursor_modal_set(cursor)
                     self._last_cursor = cursor
                     return {"RUNNING_MODAL"}
-            if settings.right_click_action in ("SELECT", "SELECT_PAN", "SELECT_FRAME"):
-                state.request_immediate_compile()
-                selection.handle_click_selection(
-                    self, context, event, state, frame=settings.right_click_action == "SELECT_FRAME"
-                )
-            if settings.right_click_action in ("PAN", "SELECT_PAN"):
+            drag_mode, click_action, extend, toggle = self._resolve_gesture(event, settings, "RIGHT")
+            self._drag_mode = drag_mode
+            self._click_action = click_action
+            self._click_extend = extend
+            self._click_toggle = toggle
+            if drag_mode in ("PAN", "CENTER_PAN"):
                 self._drag_start = (self._mouse_x, self._mouse_y)
-                self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
-            self._was_in_minimap = False
+                if drag_mode == "CENTER_PAN":
+                    self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
+            else:
+                self._marquee_dragging = True
+                state.interaction.marquee_active = True
+                state.interaction.marquee_start = (self._mouse_x, self._mouse_y)
+                state.interaction.marquee_end = (self._mouse_x, self._mouse_y)
+                self._redraw_ui()
             return {"RUNNING_MODAL"}
         else:
             self._drag_start = None
@@ -1398,9 +1509,19 @@ class NODEMAP_OT_navigate(Operator):
             _apply_list_scroll_drag(self._mouse_x, self._mouse_y, self._list_scroll_grab, state)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
-        if not self._dragging and not self._mmb_dragging and not self._drag_start:
+        if self._marquee_dragging:
+            state.interaction.marquee_end = (self._mouse_x, self._mouse_y)
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
+        if not self._dragging and not self._mmb_dragging and not self._drag_start and not self._marquee_dragging:
             self._update_cursor(context, event)
-        if not self._dragging and not self._mmb_dragging and not self._resize_handle and not self._list_width_dragging:
+        if (
+            not self._dragging
+            and not self._mmb_dragging
+            and not self._marquee_dragging
+            and not self._resize_handle
+            and not self._list_width_dragging
+        ):
             # Clear (X) button hover feedback; shown only while a query exists.
             # It stays live while the search box is focused since the button is
             # part of the search zone.
@@ -1769,6 +1890,62 @@ class NODEMAP_OT_navigate(Operator):
             except RuntimeError:
                 pass
 
+    def _marquee_tree_bounds(
+        self, state: MinimapState, start: tuple[int, int], end: tuple[int, int]
+    ) -> tuple[float, float, float, float] | None:
+        """Return tree-space bounds for a marquee rect in region pixels, or None."""
+        if abs(end[0] - start[0]) < 2 or abs(end[1] - start[1]) < 2:
+            return None
+        transform = _compute_map_transform(state)
+        tree_start = _tree_from_region(start[0], start[1], transform)
+        tree_end = _tree_from_region(end[0], end[1], transform)
+        if tree_start is None or tree_end is None:
+            return None
+        return (
+            min(tree_start[0], tree_end[0]),
+            min(tree_start[1], tree_end[1]),
+            max(tree_start[0], tree_end[0]),
+            max(tree_start[1], tree_end[1]),
+        )
+
+    def _frame_marquee_rect(
+        self, context: Context, state: MinimapState, start: tuple[int, int], end: tuple[int, int]
+    ) -> bool:
+        """Frame the tree-space area covered by a marquee rect in the minimap.
+
+        Return True when a non-degenerate rect produced a frame; False for a
+        near-zero rect so the caller can fall back to the click action.
+        """
+        bounds = self._marquee_tree_bounds(state, start, end)
+        if bounds is None:
+            return False
+        area_ptr = self._area.as_pointer() if self._area else 0
+        if self._anim._animations_enabled(context):
+            zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(bounds, area_ptr)
+            self._anim.start_frame_animation(context, zoom, [pan_x, pan_y])
+        else:
+            _frame_to_bounds(bounds, area_ptr)
+        return True
+
+    def _frame_marquee_rect_editor(
+        self, context: Context, state: MinimapState, start: tuple[int, int], end: tuple[int, int]
+    ) -> bool:
+        """Frame the tree-space area covered by a marquee rect in the editor.
+
+        Return True when a non-degenerate rect produced a frame; False for a
+        near-zero rect so the caller can fall back to the click action.
+        """
+        bounds = self._marquee_tree_bounds(state, start, end)
+        if bounds is None:
+            return False
+        target = [bounds[0], bounds[1], bounds[2], bounds[3]]
+        for _ in range(100):
+            visible = _get_visible_rect(self._space, self._region)
+            if not visible or self._anim._editor_view_close(visible, target):
+                break
+            self._anim._correct_editor_view(context, target)
+        return True
+
     def _cancel_interaction(self, context: Context) -> None:
         self._anim.cancel_smooth(context)
         if self._dragging or self._drag_start is not None:
@@ -1782,6 +1959,13 @@ class NODEMAP_OT_navigate(Operator):
         if self._list_mmb_dragging:
             self._list_mmb_dragging = False
             self._list_mmb_drag_start = None
+        if self._marquee_dragging:
+            self._marquee_dragging = False
+            state = self._state
+            if state:
+                state.interaction.marquee_active = False
+                state.interaction.marquee_start = None
+                state.interaction.marquee_end = None
         if self._resize_handle:
             self._resize_handle = None
             self._resize_start_mouse = None
@@ -1823,6 +2007,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
+        self._reset_gesture()
         state = self._state
         if state:
             state.buttons.hovered_button_id = None
@@ -2027,6 +2212,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
+        self._reset_gesture()
         self._list_last_row_index = -1
         self._list_width_dragging = False
         self._list_width_start_x = 0
@@ -2065,6 +2251,9 @@ class NODEMAP_OT_navigate(Operator):
             self._state.list.hovered_scrollbar = False
             self._state.list.scrollbar_dragging = False
             self._state.list.search_esc_armed = False
+            self._state.interaction.marquee_active = False
+            self._state.interaction.marquee_start = None
+            self._state.interaction.marquee_end = None
         self._list_row_pressed = None
         self._list_child_pressed = None
         self._list_toggle_pressed = None
@@ -2073,8 +2262,10 @@ class NODEMAP_OT_navigate(Operator):
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
+        self._reset_gesture()
         self._list_last_row_index = -1
         self._list_width_dragging = False
+        self._marquee_dragging = False
         self._moving = False
         self._move_start_mouse = None
         self._move_start_offset = None

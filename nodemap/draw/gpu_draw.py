@@ -25,6 +25,7 @@ _BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_NOODLE_SHADER: gpu.types.GPUShader | None = None
+_LINE_STRIP_SHADER: gpu.types.GPUShader | None = None
 
 _BATCH_CACHE: dict[tuple, Any] = {}
 
@@ -278,6 +279,18 @@ void main() {
 }
 """
 
+_LINE_STRIP_VERT_SRC = """
+void main() {
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_LINE_STRIP_FRAG_SRC = """
+void main() {
+    fragColor = color;
+}
+"""
+
 _BATCH_NOODLE_FRAG_SRC = """
 void main() {
     // Per-quad capsule: the fragment measures distance to the quad's own chord
@@ -433,6 +446,22 @@ def _get_sdf_border_varying_sides_shader() -> gpu.types.GPUShader:
         _BORDER_SDF_VARYING_SIDES_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _BORDER_SDF_VARYING_SIDES_SHADER
+
+
+def _get_line_strip_shader() -> gpu.types.GPUShader:
+    """Return the cached flat-color line-strip shader."""
+    global _LINE_STRIP_SHADER
+    if _LINE_STRIP_SHADER is None:
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.vertex_in(0, "VEC3", "pos")
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_LINE_STRIP_VERT_SRC)
+        info.fragment_source(_LINE_STRIP_FRAG_SRC)
+        _LINE_STRIP_SHADER = gpu.shader.create_from_info(info)
+        del info
+    return _LINE_STRIP_SHADER
 
 
 def _get_pill_shader() -> gpu.types.GPUShader:
@@ -930,6 +959,82 @@ def _draw_filled_quad(
     shader.uniform_float("halfSize", (1.0, 1.0))
     shader.uniform_float("radius", 0.0)
     batch.draw(shader)
+
+
+def _draw_line_strip(
+    points: list[tuple[float, float, float]],
+    color,
+    line_width: float = 1.0,
+    mvp: Any = None,
+) -> None:
+    """Draw a polyline as one ``LINE_STRIP`` batch with a flat color.
+
+    Pass five points (first corner repeated) to stroke a closed rectangle.
+    """
+    if len(points) < 2:
+        return
+    shader = _get_line_strip_shader()
+    previous_width = gpu.state.line_width_get()
+    gpu.state.line_width_set(line_width)
+    try:
+        shader.bind()
+        shader.uniform_float("ModelViewProjectionMatrix", mvp if mvp is not None else _mvp())
+        shader.uniform_float("color", _srgb_to_linear(color))
+        batch = batch_for_shader(shader, "LINE_STRIP", {"pos": points})
+        batch.draw(shader)
+    finally:
+        gpu.state.line_width_set(previous_width)
+
+
+def _draw_dashes(
+    points: list[tuple[float, float, float]],
+    dash_length: float,
+    gap_length: float,
+    color,
+    line_width: float = 1.0,
+    mvp: Any = None,
+) -> None:
+    """Draw a polyline as a series of dashed segments with a flat color.
+
+    Each distinct dash renders as its own ``LINE_STRIP`` so gaps stay clean.
+    To stroke a closed rectangle, pass five points: the four corners with the
+    first corner repeated at the end.
+    """
+    if len(points) < 2:
+        return
+    segments: list[tuple[tuple[float, float, float], tuple[float, float, float]]] = []
+    for start, end in zip(points[:-1], points[1:]):
+        edge_x = end[0] - start[0]
+        edge_y = end[1] - start[1]
+        length = math.sqrt(edge_x * edge_x + edge_y * edge_y)
+        if length <= 0:
+            continue
+        ux, uy = edge_x / length, edge_y / length
+        distance = 0.0
+        draw = True
+        while distance < length:
+            step = dash_length if draw else gap_length
+            next_distance = min(distance + step, length)
+            if draw:
+                p0 = (start[0] + ux * distance, start[1] + uy * distance, start[2])
+                p1 = (start[0] + ux * next_distance, start[1] + uy * next_distance, start[2])
+                segments.append((p0, p1))
+            distance = next_distance
+            draw = not draw
+    if not segments:
+        return
+    shader = _get_line_strip_shader()
+    previous_width = gpu.state.line_width_get()
+    gpu.state.line_width_set(line_width)
+    try:
+        shader.bind()
+        shader.uniform_float("ModelViewProjectionMatrix", mvp if mvp is not None else _mvp())
+        shader.uniform_float("color", _srgb_to_linear(color))
+        for p0, p1 in segments:
+            batch = batch_for_shader(shader, "LINE_STRIP", {"pos": [p0, p1]})
+            batch.draw(shader)
+    finally:
+        gpu.state.line_width_set(previous_width)
 
 
 def _draw_filled_rounded_rect_varying(x, y, width, height, radii, color, mvp: Any = None):

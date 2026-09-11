@@ -125,6 +125,13 @@ _CLICK_ACTION_ITEMS = [
     ("SELECT_PAN", "Select Node + Pan View", "Select the node and pan the view"),
 ]
 
+_DRAG_ACTION_ITEMS = [
+    ("CENTER_PAN", "Center Pan", "Center the view on the cursor and drag to pan it around that point"),
+    ("PAN", "Pan View", "Drag to pan the node editor view"),
+    ("FRAME_RECT", "Frame Region", "Drag to draw a rectangle and frame that area"),
+    ("FRAME_RECT_EDITOR", "Frame Region (Editor)", "Drag to draw a rectangle and frame that area in the editor"),
+]
+
 
 class NODEMAP_PG_settings(PropertyGroup):
     """Store preferences for the Nodes Minimap."""
@@ -621,6 +628,20 @@ class NODEMAP_PG_settings(PropertyGroup):
         default="SELECT_FRAME",
     )
 
+    left_drag_action: EnumProperty(
+        name="Left Drag",
+        description="Left drag behavior in the minimap",
+        items=_DRAG_ACTION_ITEMS,
+        default="CENTER_PAN",
+    )
+
+    right_drag_action: EnumProperty(
+        name="Right Drag",
+        description="Right drag behavior in the minimap",
+        items=_DRAG_ACTION_ITEMS,
+        default="FRAME_RECT",
+    )
+
     use_animations: BoolProperty(
         name="Animations",
         description=(
@@ -819,9 +840,31 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group.separator()
         interaction_column = group.column()
         interaction_column.active = settings.use_interactive
-        interaction_column.prop(settings, "left_click_action", text="Left Click")
-        interaction_column.prop(settings, "right_click_action", text="Right Click")
+        col = interaction_column.column(align=False)
+        col.prop(settings, "left_click_action", text="Left Click")
+        col.prop(settings, "right_click_action", text="Right Click")
+        interaction_column.separator()
+        col = interaction_column.column(align=False)
+        col.prop(settings, "left_drag_action", text="Left Drag")
+        col.prop(settings, "right_drag_action", text="Right Drag")
+
+        interaction_column.separator()
         interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
+
+        interaction_column.separator()
+        split = interaction_column.split(factor=0.4)
+        row = split.row(align=True)
+        row.alignment = "RIGHT"
+        row.label(text="")
+        box = split.box()
+        box.label(text="Key Modifiers:", icon="INFO")
+        flow = box.column_flow(columns=2, align=True)
+        flow.label(text="Shift Drag Frame Region", icon="DOT")
+        flow.label(text="Ctrl Drag Pan View", icon="DOT")
+        flow.label(text="Alt Drag Frame Region (Editor)", icon="DOT")
+        flow.label(text="Shift Click Extend", icon="DOT")
+        flow.label(text="Ctrl Click Toggle selection", icon="DOT")
+        flow.label(text="Alt Scroll Toggle Zoom", icon="DOT")
 
         layout.separator()
         split = layout.split(factor=0.4)

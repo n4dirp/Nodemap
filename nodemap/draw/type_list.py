@@ -1118,10 +1118,7 @@ def _compute_zone_geometry(
         zone_w = map_w - 2 * handle_pad
     else:
         zone_w = map_x + padding + state.list.list_width - 2 * ui_scale - zone_x
-        zone_h = min(
-            map_h - 2 * handle_pad,
-            max(total_h, row_h) + search_h + 3 * row_pad_v,
-        )
+        zone_h = map_h - 2 * handle_pad
         zone_y = round(map_y + map_h - zone_h - handle_pad)
     state.list.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
 
@@ -1328,6 +1325,8 @@ def _draw_list_fills(
     search_pill_y = geo["search_pill_y"]
     search_draw_h = geo["search_draw_h"]
     header_slot_bottom = geo["header_slot_bottom"]
+    view_top = geo["view_top"]
+    view_bottom = geo["view_bottom"]
 
     # Bind the frame MVP once instead of recomposing it per row rect.
     fill = partial(_draw_filled_rounded_rect, mvp=mvp)
@@ -1377,19 +1376,19 @@ def _draw_list_fills(
 
         gpu.state.scissor_set(*view_scissor)
 
-    # Zebra bands.
-    for (
-        _kind,
-        _label,
-        _node_name,
-        _slot_bottom,
-        row_idx,
-        draw_y,
-        _child_active,
-        _child_selected,
-    ) in visible_rows:
-        if row_idx & 1:
-            fill(pill_x, draw_y, pill_w, row_draw_h, 0.0, band_color)
+    # Zebra bands, aligned to the row grid and extended across the full view
+    # instead of stopping at the last item row.
+    if row_h > 0:
+        y0 = view_top + state.list.scroll
+        top_idx = -math.floor(state.list.scroll / row_h)
+        band_top = y0 + top_idx * row_h
+        gap_half = round((row_h - row_draw_h) / 2.0)
+
+        while band_top - row_h < view_top and band_top > view_bottom:
+            if top_idx & 1:
+                fill(pill_x, round(band_top - row_h + gap_half), pill_w, row_draw_h, 0.0, band_color)
+            band_top -= row_h
+            top_idx -= 1
 
     # Header fills, outlines, and hit rects.
     header_rects = []

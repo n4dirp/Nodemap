@@ -20,7 +20,7 @@ from ..core.list_filter import (
 )
 
 if TYPE_CHECKING:
-    from bpy.types import Context, Event, Region
+    from bpy.types import Context, Region
 
     from ..core.state import MinimapState
     from .navigate import NODEMAP_OT_navigate
@@ -134,11 +134,17 @@ def select_node_via_operator(
 def handle_click_selection(
     op: NODEMAP_OT_navigate,
     context: Context,
-    event: Event,
     state: MinimapState,
     frame: bool = False,
+    extend: bool = False,
+    toggle: bool = False,
 ) -> None:
-    """Handle a click on the minimap: find the node under cursor and select it."""
+    """Handle a click on the minimap: find the node under cursor and select it.
+
+    *extend* adds the node to the current selection, *toggle* flips its
+    selection state, and *frame* eases the editor onto the node after the
+    selection change.
+    """
     from .navigate import _region_to_tree
 
     space = op._space
@@ -154,9 +160,11 @@ def handle_click_selection(
 
     node = _find_node_at(node_tree.nodes, tree_coord[0], tree_coord[1])
     if node:
-        if not select_node_via_operator(op, context, node, extend=event.shift, deselect_all=not event.shift):
+        if toggle:
+            select_single_node(op, context, node.name, toggle=True)
+        elif not select_node_via_operator(op, context, node, extend=extend, deselect_all=not extend):
             # Fallback for API changes (may trigger EEVEE compile)
-            if event.shift:
+            if extend:
                 node.select = not node.select
                 if node.select:
                     node_tree.nodes.active = node

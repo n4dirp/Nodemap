@@ -82,6 +82,8 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.scroll_wheel_mode",
         "settings.left_click_action",
         "settings.right_click_action",
+        "settings.left_drag_action",
+        "settings.right_drag_action",
         "settings.use_auto_zoom",
         # Options.
         "settings.use_interactive",
