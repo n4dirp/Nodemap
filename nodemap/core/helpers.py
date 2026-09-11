@@ -19,6 +19,7 @@ from .constants import (
     TYPE_LIST_RESERVE_LEFT,
     TYPE_LIST_RESERVE_TOP,
 )
+from .node_label import _label_fingerprint_parts
 
 logger = logging.getLogger(base_package)
 
@@ -363,6 +364,7 @@ def _get_tree_snapshot(
     mute_sum = 0
     hide_sum = 0
     select_sum = 0
+    label_sum = 0
     content_count = 0
 
     min_x = min_y = float("inf")
@@ -412,6 +414,7 @@ def _get_tree_snapshot(
                 sel_max_y = node_y
         if node.type not in ("FRAME", "REROUTE"):
             content_count += 1
+        label_sum += hash(_label_fingerprint_parts(node))
 
         right_x = node_x + bounds_w
         bottom_y = node_y - bounds_h
@@ -441,6 +444,7 @@ def _get_tree_snapshot(
         width_sum,
         height_sum,
         links_count,
+        label_sum,
     )
     bounds = (min_x, min_y, max_x, max_y) if min_x != float("inf") else (0.0, 0.0, 200.0, 200.0)
     selected_bounds = (sel_min_x, sel_min_y, sel_max_x, sel_max_y) if sel_min_x != float("inf") else None
@@ -448,5 +452,5 @@ def _get_tree_snapshot(
 
 
 def get_tree_fingerprint(node_tree, include_selection: bool = True) -> tuple:
-    """Return a lightweight fingerprint of the node tree structure and selection states."""
+    """Return a lightweight fingerprint of the node tree structure, labels, and selection states."""
     return _get_tree_snapshot(node_tree, include_selection)[0]

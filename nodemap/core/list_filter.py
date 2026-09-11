@@ -38,7 +38,7 @@ def _child_text(name: str, search_texts: dict[str, str] | None) -> str:
     """Return the searchable text for a child node name.
 
     Prefers the caller-provided *search_texts* entry (node name plus its
-    custom label) and falls back to the bare name when absent.
+    display label) and falls back to the bare name when absent.
     """
     if search_texts is not None:
         text = search_texts.get(name)
@@ -56,7 +56,7 @@ def filter_matching_nodes(
     """Return the node names to keep under *query*, or None when not filtering.
 
     A node is kept when its type label matches the query or when its own name
-    (or, with *search_texts*, its combined name + custom label text) matches.
+    (or, with *search_texts*, its combined name + display label text) matches.
     This mirrors the row rules of :func:`filter_type_list`: every child of a
     label-matching type stays, plus any child that matches by name. An empty
     query returns None (draw everything); otherwise the result is a frozenset
@@ -89,7 +89,7 @@ def filter_type_list(
     A type stays visible when its label matches, when the single node of a
     one-node type matches (such types list no child rows), or when at least
     one child node matches. A child "matches" on its node name or, when
-    *search_texts* is provided, on the combined name + custom label text.
+    *search_texts* is provided, on the combined name + display label text.
     The returned display count is the full type count for label matches and
     the number of matching children otherwise.
 
@@ -143,6 +143,32 @@ def filter_type_list(
     return [(label, count) for _rank, label, count in visible], effective, filtered_children
 
 
+def flat_type_nodes(
+    children: dict[str, list[str]],
+    query: str,
+    search_texts: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """Return ``(label, node_name)`` rows for the ungrouped type list.
+
+    Every node gets its own row (no type headers, counts, or expansion).
+    With an empty *query* all nodes are kept, sorted by node name like the
+    label of each child row; otherwise only nodes whose name or display
+    label matches are kept, mirroring the child rule of
+    :func:`filter_type_list`.
+    """
+    norm = normalize_query(query)
+    rows: list[tuple[str, str]] = []
+    for label, names in children.items():
+        if norm and matches(norm, label):
+            rows.extend((label, name) for name in names)
+            continue
+        for name in names:
+            if not norm or matches(norm, _child_text(name, search_texts)):
+                rows.append((label, name))
+    rows.sort(key=lambda row: row[1].lower())
+    return rows
+
+
 def _iter_type_list_layout(
     entries: list[tuple[str, str, float, int]],
     children: dict[str, list[str]],
@@ -160,3 +186,15 @@ def _iter_type_list_layout(
             for node_name in children.get(label, ()):
                 yield (_ROW_CHILD, label, node_name, y)
                 y -= row_h
+
+
+def iter_flat_list_layout(
+    nodes: list[tuple[str, str]],
+    row_h: float,
+):
+    """Yield `(kind, label, node_name, local_y_top)` for each flat node row."""
+    y = 0.0
+
+    for label, node_name in nodes:
+        yield (_ROW_CHILD, label, node_name, y)
+        y -= row_h

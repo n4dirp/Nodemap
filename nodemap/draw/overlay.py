@@ -21,6 +21,7 @@ from ..core.constants import (
     HANDLE_THICKNESS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
+    TYPE_LIST_LEFT_BUTTON_GAP,
     TYPE_LIST_TOP_BUTTON_GAP,
 )
 from ..core.helpers import (
@@ -372,7 +373,7 @@ def _draw_resize_handles(
     width_clamped = state.view.width_clamped
     height_clamped = state.view.height_clamped
 
-    color_base = _alpha_mul(colors["text"], master_alpha)
+    color_base = _alpha_mul(colors["text"], 0.6 * master_alpha)
     color_warn = _alpha_mul(colors["viewport_fill"], master_alpha)
     handle_thickness = 3.0 * ui_scale
 
@@ -383,22 +384,17 @@ def _draw_resize_handles(
         zone_x, zone_y, zone_w, zone_height = zone_rect
         divider_color = color_warn if state.list.width_clamped else color_base
         if state.list.list_placement == "TOP":
-            # Horizontal divider along the strip's bottom edge, spanning the
-            # zone width so the pill tracks per-pixel during a drag.
-            divider_y = round(zone_y - handle_thickness / 2.0)
+            # Horizontal divider centered in the gap between the button row
+            # and the list strip, spanning the zone width so the pill tracks
+            # per-pixel during a drag.
+            divider_y = round(zone_y - TYPE_LIST_TOP_BUTTON_GAP * ui_scale / 2.0 - handle_thickness / 2.0)
             _draw_filled_rounded_rect(zone_x, divider_y, zone_w, handle_thickness, 0, divider_color, mvp=mvp)
             return
-        # Derive the divider x from the live zone width so the pill tracks
-        # per-pixel during a drag instead of lagging one frame behind.
+        # Derive the divider x centered in the gap between the list zone and
+        # the button row so the pill tracks per-pixel during a drag.
         map_left = state.view.rect[0]
-        divider_x = (
-            map_left
-            + state.view.inner_padding
-            + state.list.list_width
-            - 2.0 * ui_scale
-            + 3.0 * ui_scale
-            - handle_thickness / 2.0
-        )
+        zone_right = map_left + state.view.inner_padding + state.list.list_width - 2.0 * ui_scale
+        divider_x = round(zone_right + TYPE_LIST_LEFT_BUTTON_GAP * ui_scale / 2.0 - handle_thickness / 2.0)
         # Clamp to zone vertical extent with small margin so pill stays inside.
         _draw_filled_rounded_rect(round(divider_x), zone_y, handle_thickness, zone_height, 0, divider_color, mvp=mvp)
         return
@@ -1322,6 +1318,7 @@ def draw_minimap() -> None:
         highlight_border,
         wire_curvature,
         wire_thickness,
+        node_border=colors["node_border"],
     )
 
     try:
@@ -1336,6 +1333,19 @@ def draw_minimap() -> None:
     base_mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
 
     panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, mvp=base_mvp)
+
+    dragging = (
+        state.view.moving
+        or state.interaction.pressed
+        or state.interaction.resize_active is not None
+        or state.list.dragging_width is not None
+        or state.list.scrollbar_dragging
+    )
+    if state.interaction.hovered_minimap or dragging:
+        highlight_color = (1.0, 1.0, 1.0, 0.03 * master_alpha)
+        _draw_rounded_rect_border(
+            map_x, map_y, map_w, map_h, panel_roundness, highlight_color, 0.5 * ui_scale, mvp=base_mvp
+        )
 
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]

@@ -36,6 +36,8 @@ from ..core.list_filter import (
     _ROW_HEADER,
     _iter_type_list_layout,
     filter_type_list,
+    flat_type_nodes,
+    iter_flat_list_layout,
     match_span,
     normalize_query,
 )
@@ -342,6 +344,7 @@ def _type_list_cache_key(
         tree_id,
         tree_version,
         settings.type_list_sort,
+        getattr(settings, "use_group_by_type", True),
         settings.show_node_colors,
         settings.show_type_colors,
         frozenset(state.list.expanded),
@@ -380,6 +383,47 @@ def _build_type_list_cache(
     children = tree_data.get("type_nodes") or {}
     search_texts = tree_data.get("type_search") or None
 
+    use_group_by_type = bool(getattr(settings, "use_group_by_type", True))
+
+    _, line_h = blf.dimensions(font_id, "Ay")
+    row_h = line_h + TYPE_LIST_ROW_HEIGHT_OFFSET * ui_scale
+
+    if not use_group_by_type:
+        nodes = flat_type_nodes(children, state.list.search_query, search_texts=search_texts)
+        rows = tuple(iter_flat_list_layout(nodes, row_h))
+
+        state.cache.list_key = key
+        state.cache.list_entries = []
+        state.cache.list_effective_expanded = set()
+        state.cache.list_children = children
+        state.cache.list_filtered_children = {}
+
+        state.cache.list_layout = {
+            "font_size": font_size,
+            "line_h": line_h,
+            "row_h": row_h,
+            "widest_count": 0.0,
+            "rows": rows,
+            "total_h": len(rows) * row_h,
+            "header_local_bottom": {},
+            "entry_map": {},
+        }
+
+        state.cache.list_swatches_batch = None
+        state.cache.list_swatches_border_batch = None
+
+        _bake_list_glyph_batch(
+            state,
+            settings,
+            colors,
+            master_alpha,
+            ui_scale,
+            row_h,
+            rows,
+            {},
+        )
+        return
+
     visible, effective_expanded, filtered_children = filter_type_list(
         type_stats,
         children,
@@ -410,9 +454,6 @@ def _build_type_list_cache(
         full_count = type_stats.get(label, display_count)
         entries.append((label, count_text, count_width, full_count))
         entry_map[label] = (count_text, count_width, full_count)
-
-    _, line_h = blf.dimensions(font_id, "Ay")
-    row_h = line_h + TYPE_LIST_ROW_HEIGHT_OFFSET * ui_scale
 
     # Build the canonical row layout once.
     rows = tuple(
@@ -475,6 +516,10 @@ def _bake_list_glyph_batch(
     children = state.cache.list_filtered_children or state.cache.list_children or {}
 
     show_type_colors = settings.show_type_colors and settings.show_node_colors
+
+    # Ungrouped rows have no header chevron, so their swatch takes the
+    # chevron slot while the text starts at the header column.
+    flat = not bool(getattr(settings, "use_group_by_type", True))
 
     expanded = getattr(state.cache, "list_effective_expanded", None)
     if expanded is None:
@@ -631,9 +676,10 @@ def _bake_list_glyph_batch(
                 )
 
                 swatch_y = local_y - (row_h + swatch) / 2.0
+                swatch_x = x if flat else x + icon_col_x + swatch_col_x
 
                 _push_quad(
-                    x + icon_col_x + swatch_col_x,
+                    swatch_x,
                     swatch_y,
                     swatch,
                     swatch,
@@ -641,7 +687,7 @@ def _bake_list_glyph_batch(
                     _alpha_mul(node_color, master_alpha),
                 )
                 _push_border_quad(
-                    x + icon_col_x + swatch_col_x,
+                    swatch_x,
                     swatch_y,
                     swatch,
                     swatch,
@@ -749,7 +795,7 @@ def _header_is_fully_active(
 
 
 def _type_header_text(label: str, count: int, children: dict, meta_by_name: dict) -> str:
-    """Return header text, appending the lone node's label or group tree name."""
+    """Return header text, appending the lone node's title only when it adds information."""
     if count != 1:
         return label
 
@@ -762,25 +808,99 @@ def _type_header_text(label: str, count: int, children: dict, meta_by_name: dict
         return label
 
     node_label, tree_name = meta[0], meta[1]
-    if node_label:
+    if node_label and node_label != label:
         return f"{label} ({node_label})"
-    if tree_name:
+    if tree_name and tree_name != label:
         return f"{label} ({tree_name})"
     return label
 
 
-def _child_label_text(node_name: str, meta_by_name: dict) -> str:
-    """Return child row text: `name (label)` or group tree-name fallback."""
+def _child_label_text(node_name: str, meta_by_name: dict, type_label: str = "") -> str:
+    """Return child row text, appending the title only when it adds information."""
     meta = (meta_by_name or {}).get(node_name)
     if meta is None:
         return node_name
 
     label, tree_name = meta[0], meta[1]
-    if label:
+    if label and label != tree_name and label != type_label:
         return f"{node_name} ({label})"
     if tree_name:
         return tree_name
     return node_name
+
+
+def _active_node_name(meta_by_name: dict | None) -> str | None:
+    """Return the active node name from compile-time meta, or None when no node is active."""
+    for name, meta in (meta_by_name or {}).items():
+        if meta is not None and meta[3]:
+            return name
+    return None
+
+
+def _type_label_for_node(children: dict, node_name: str) -> str | None:
+    """Return the type label containing *node_name*, or None when absent."""
+    for label, names in (children or {}).items():
+        if node_name in names:
+            return label
+    return None
+
+
+def _follow_target_row(rows: tuple, node_name: str, type_label: str | None) -> float | None:
+    """Return the ``local_y`` of the row to reveal for a node: its child row, else its type header."""
+    header_y = None
+    for kind, label, row_name, local_y in rows:
+        if kind == _ROW_HEADER and label == type_label:
+            header_y = local_y
+        elif kind == _ROW_CHILD and row_name == node_name:
+            return local_y
+    return header_y
+
+
+def _reveal_scroll(
+    scroll: float,
+    local_y: float,
+    row_h: float,
+    view_top: float,
+    view_bottom: float,
+    scroll_max: float,
+) -> float:
+    """Return the scroll offset revealing the row at *local_y*, adjusted minimally and clamped."""
+    slot_top = view_top + scroll + local_y
+    slot_bottom = slot_top - row_h
+    if slot_bottom < view_bottom:
+        scroll += view_bottom - slot_bottom
+    elif slot_top > view_top:
+        scroll -= slot_top - view_top
+    return min(max(scroll, 0.0), max(scroll_max, 0.0))
+
+
+def _prepare_follow_expansion(state: MinimapState, settings, tree_data: dict | None) -> bool:
+    """Track the active node and expand its type on change for follow mode.
+
+    The expansion feeds the cache key below, so rows rebuild in this same draw and the scroll step
+    can reveal the node immediately.
+    """
+    if not bool(getattr(settings, "use_follow_active", False)):
+        state.list.followed_active = None
+        state.list.follow_pending = None
+        return False
+    meta = tree_data.get("type_node_meta") if tree_data else None
+    active_name = _active_node_name(meta)
+    if active_name == state.list.followed_active:
+        return False
+    state.list.followed_active = active_name
+    state.list.follow_pending = active_name
+    if active_name is None or state.list.search_query.strip() or not bool(getattr(settings, "use_group_by_type", True)):
+        return False
+    children = tree_data.get("type_nodes") if tree_data else None
+    type_label = _type_label_for_node(children or {}, active_name)
+    if type_label is None:
+        return False
+    names = (children or {}).get(type_label, ())
+    if len(names) > 1 and type_label not in state.list.expanded:
+        state.list.expanded.add(type_label)
+        return True
+    return False
 
 
 def _draw_expand_guide_line(x: float, top: float, height: float, ui_scale: float, color, mvp: Any = None) -> None:
@@ -1431,7 +1551,10 @@ def _draw_list_text(
     zone_scissor = geo["zone_scissor"]
     view_scissor = geo["view_scissor"]
 
-    child_label_x = label_x + icon_col_x
+    # Ungrouped rows show no expand chevron, so their text starts right
+    # after the swatch instead of reserving the chevron column.
+    flat = not bool(getattr(settings, "use_group_by_type", True))
+    child_label_x = label_x - icon_col_x if flat else label_x + icon_col_x
     child_label_max_width = max(0.0, count_right - child_label_x)
 
     child_clip_left = int(child_label_x)
@@ -1469,15 +1592,22 @@ def _draw_list_text(
             ui_scale,
         )
 
-        search_text_start_x = search_text_x + icon_size + 3 * ui_scale
+        base_text_start_x = search_text_x + icon_size + 3 * ui_scale
+        search_text_start_x = base_text_start_x
+        caret_x = round(base_text_start_x)
+
+        if state.list.search_focused and search_query:
+            prefix_w = blf.dimensions(font_id, search_query[:search_cursor])[0]
+            caret_unscrolled = base_text_start_x + prefix_w
+            if caret_unscrolled > search_text_right:
+                # Scroll the text left so the caret stays visible instead of
+                # sliding under the clear button. Recomputed every frame, so
+                # moving the caret left scrolls back right automatically.
+                search_text_start_x = round(base_text_start_x - (caret_unscrolled - search_text_right))
+            caret_x = round(min(search_text_start_x + prefix_w, search_text_right))
         state.list.search_text_start_x = search_text_start_x
 
         if state.list.search_focused:
-            caret_x = round(
-                search_text_start_x
-                + (blf.dimensions(font_id, search_query[:search_cursor])[0] if search_query else 0.0)
-            )
-
             _draw_filled_rounded_rect(
                 caret_x,
                 round(search_pill_y),
@@ -1490,7 +1620,7 @@ def _draw_list_text(
 
         search_text = search_query if search_query else "Filter"
 
-        blf.clipping(font_id, int(search_text_start_x), clip_top, int(search_text_right), clip_bottom)
+        blf.clipping(font_id, int(base_text_start_x), clip_top, int(search_text_right), clip_bottom)
         blf.position(font_id, search_text_start_x, search_text_y, 0)
         blf.color(font_id, *(text_color if search_query else count_color))
         blf.draw(font_id, search_text)
@@ -1506,20 +1636,22 @@ def _draw_list_text(
 
         gpu.state.scissor_set(*view_scissor)
 
-        if not entries and search_query:
+        # The ungrouped list keeps no type entries, so an empty viewport
+        # decides there too: rows always fill the view when any exist.
+        if not entries and not visible_rows and search_query:
             # Sit the message in the first row slot (scroll is always 0 with no
             # rows), like a real row's text, so it stays at the top of the list.
             no_match_y = round(view_top - row_h) + text_y_off
 
             blf.clipping(
                 font_id,
-                int(search_text_start_x),
+                int(base_text_start_x),
                 int(view_bottom - row_h),
                 int(count_right),
                 int(view_top + row_h),
             )
 
-            blf.position(font_id, search_text_start_x, no_match_y, 0)
+            blf.position(font_id, base_text_start_x, no_match_y, 0)
             blf.color(font_id, *count_color)
             blf.draw(font_id, "No matches")
 
@@ -1551,7 +1683,11 @@ def _draw_list_text(
 
             header_text = _type_header_text(label, full_count, children, meta_by_name)
 
-            blf.clipping(font_id, header_clip_left, clip_top, header_clip_right, clip_bottom)
+            # Headers without a count use the full width so the reserved
+            # count column does not clip the title.
+            has_count = show_counts and full_count > 1
+            title_clip_right = header_clip_right if has_count else int(count_right)
+            blf.clipping(font_id, header_clip_left, clip_top, title_clip_right, clip_bottom)
             _draw_text_with_match(
                 font_id,
                 label_x,
@@ -1564,7 +1700,7 @@ def _draw_list_text(
 
             # Single-node groups already show the node's name in the header
             # text, so their redundant count of 1 is omitted.
-            if show_counts and full_count > 1:
+            if has_count:
                 blf.clipping(font_id, header_clip_right, clip_top, count_clip_right, clip_bottom)
                 blf.position(font_id, count_right - count_width, text_y, 0)
                 blf.color(font_id, *count_color)
@@ -1580,7 +1716,7 @@ def _draw_list_text(
 
             blf.clipping(font_id, child_clip_left, clip_top, child_clip_right, clip_bottom)
 
-            label_text = _child_label_text(node_name, meta_by_name)
+            label_text = _child_label_text(node_name, meta_by_name, label)
 
             _draw_text_with_match(
                 font_id,
@@ -1696,6 +1832,9 @@ def _draw_type_list(
         _clear_list_interaction(state)
         return
 
+    # Follow Active runs before the cache key so a newly expanded type rebuilds its rows this frame.
+    _prepare_follow_expansion(state, settings, tree_data)
+
     key = _type_list_cache_key(state, settings, colors, master_alpha, ui_scale)
 
     if key != state.cache.list_key or not state.cache.list_layout:
@@ -1732,8 +1871,17 @@ def _draw_type_list(
 
     # Safety fallback for older/incomplete caches.
     if rows is None:
-        children = state.cache.list_filtered_children or state.cache.list_children or {}
-        rows = tuple(_iter_type_list_layout(entries, children, expanded, row_h))
+        if bool(getattr(settings, "use_group_by_type", True)):
+            children = state.cache.list_filtered_children or state.cache.list_children or {}
+            rows = tuple(_iter_type_list_layout(entries, children, expanded, row_h))
+        else:
+            tree_data = state.tree_data() or {}
+            nodes = flat_type_nodes(
+                tree_data.get("type_nodes") or {},
+                state.list.search_query,
+                search_texts=tree_data.get("type_search"),
+            )
+            rows = tuple(iter_flat_list_layout(nodes, row_h))
         total_h = len(rows) * row_h
         header_local_bottom = {
             label: local_y - row_h for kind, label, _node_name, local_y in rows if kind == _ROW_HEADER
@@ -1771,6 +1919,22 @@ def _draw_type_list(
         ui_scale,
         mvp=mvp,
     )
+
+    # Follow Active reveals the pending node as soon as its row exists, same frame as any expansion.
+    if state.list.follow_pending is not None:
+        pending = state.list.follow_pending
+        pending_children = tree_data.get("type_nodes") if tree_data else None
+        row_y = _follow_target_row(rows, pending, _type_label_for_node(pending_children or {}, pending))
+        if row_y is not None:
+            state.list.scroll = _reveal_scroll(
+                state.list.scroll,
+                row_y,
+                row_h,
+                geo["view_top"],
+                geo["view_bottom"],
+                state.list.scroll_max,
+            )
+            state.list.follow_pending = None
 
     saved_scissor = None
 

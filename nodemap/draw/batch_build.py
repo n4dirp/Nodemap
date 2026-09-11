@@ -13,7 +13,10 @@ from .. import __package__ as base_package
 from ..core.constants import (
     BATCH_DRIFT_PX,
     CULL_MARGIN_PX,
+    GROUP_MARKER_GAP,
+    GROUP_MARKER_THICKNESS,
     MIN_SOCKET_SCALE,
+    NODE_ROUNDNESS_DEFAULT,
     SCALE_REBUILD_REL,
     ZOOM_DEFER_RATIO_MAX,
     ZOOM_DEFER_RATIO_MIN,
@@ -620,6 +623,7 @@ def _ensure_minimap_batches(
     highlight_border=None,
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
+    node_border: tuple | None = None,
 ):
     """Bake content batches in map-local space, rebuilding only when stale."""
     shared = minimap_state.shared
@@ -654,6 +658,7 @@ def _ensure_minimap_batches(
         tree_id,
         shared.tree_version,
         round(ui_scale, 3),
+        show_borders,
         int(wire_curvature),
         round(wire_thickness, 3),
         query,
@@ -896,6 +901,7 @@ def _ensure_minimap_batches(
             int(wire_curvature),
             wire_thickness,
             filter_names,
+            _alpha_mul(node_border, 0.6 * master_alpha) if show_borders and node_border else None,
         )
         minimap_state.cache.wire_key = wire_key
         minimap_state.cache.wire_scale = bake_scale
@@ -991,6 +997,7 @@ def _rebuild_wire_marker_batches(
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
     filter_names: frozenset[str] | None = None,
+    marker_border_color: tuple | None = None,
 ) -> None:
     """Bake wire batches and group markers."""
 
@@ -1083,8 +1090,8 @@ def _rebuild_wire_marker_batches(
             highlight_batches.append((entry[1], entry[2], entry[3], entry[4]))
     minimap_state.cache.wire_highlight_batch = highlight_batches if highlight_batches else None
 
-    # Group node underline markers — baked like wires
-    marker_batches = []
+    # Group node underline markers — one per-vertex-colored rect batch,
+    # so all marker colors plus the optional border underlay share a draw.
     if filter_names is not None:
         # Rebuild markers from node infos so group nodes hidden by the
         # search filter drop their underline too (markers carry no names).
@@ -1101,19 +1108,90 @@ def _rebuild_wire_marker_batches(
     else:
         group_markers = tree_data.get("group_markers")
     if group_markers:
-        marker_offset = 10 * bake_scale
-        marker_thickness = max(2.0, 2.0 * ui_scale)
-        for marker_color, items in group_markers.items():
-            group = []
+        # Footer strip below the node bottom: thickness and gap scale with
+        # the zoom like node geometry, thickness floored to stay visible.
+        # Corner rounding follows the node body (mirrors the non-frame
+        # node_r in _emit_node) so the strip ends stay aligned with the
+        # node edges instead of bulging past them like a full pill.
+        marker_thickness = max(2.0, GROUP_MARKER_THICKNESS * bake_scale)
+        half_h = marker_thickness / 2
+        marker_gap = GROUP_MARKER_GAP * bake_scale
+        node_radius = NODE_ROUNDNESS_DEFAULT * 4 * ui_scale * bake_scale
+        strip_radius = min(node_radius, half_h)
+        pad = 0.5
+        marker_pos: list[tuple[float, float, float]] = []
+        marker_uv: list[tuple[float, float]] = []
+        marker_half_size: list[tuple[float, float]] = []
+        marker_radius: list[float] = []
+        marker_color_list: list[tuple[float, float, float, float]] = []
+        marker_attr = {
+            "pos": marker_pos,
+            "uv": marker_uv,
+            "half_size": marker_half_size,
+            "radius": marker_radius,
+            "color": marker_color_list,
+        }
+        marker_items: list[tuple[tuple, list[tuple[float, float, float]]]] = []
+        for color, items in group_markers.items():
+            geometry: list[tuple[float, float, float]] = []
             for x_mid, y_bot, length in items:
                 marker_len = length * bake_scale
                 if marker_len < min_dim:
                     continue
                 marker_baked_x = (x_mid - origin_x) * bake_scale
-                marker_baked_y = (y_bot - origin_y) * bake_scale - marker_offset
-                group.append((marker_baked_x, marker_baked_y, marker_len, 0.0))
-            if group:
-                _marker_shader, marker_batch = _build_pill_batch(group, marker_thickness)
-                if marker_batch is not None:
-                    marker_batches.append((marker_color, marker_batch))
-    minimap_state.cache.marker_batches = marker_batches
+                # Baked space is Y-up: below the node means smaller Y.
+                marker_baked_y = (y_bot - origin_y) * bake_scale - marker_gap - half_h
+                geometry.append((marker_baked_x, marker_baked_y, marker_len))
+            if geometry:
+                marker_items.append((color, geometry))
+        for color, geometry in marker_items:
+            linear = _srgb_to_linear(color)
+            for marker_baked_x, marker_baked_y, marker_len in geometry:
+                half_w = marker_len / 2
+                _emit_quad(
+                    marker_attr,
+                    marker_baked_x - half_w,
+                    marker_baked_y - half_h,
+                    marker_baked_x + half_w,
+                    marker_baked_y + half_h,
+                    half_w,
+                    half_h,
+                    strip_radius,
+                    linear,
+                    half_size=(half_w, half_h),
+                )
+        if marker_border_color and marker_items:
+            border = _srgb_to_linear(marker_border_color)
+            for _color, geometry in marker_items:
+                for marker_baked_x, marker_baked_y, marker_len in geometry:
+                    half_w = marker_len / 2 + pad
+                    half_h_border = half_h + pad
+                    _emit_quad(
+                        marker_attr,
+                        marker_baked_x - half_w,
+                        marker_baked_y - half_h_border,
+                        marker_baked_x + half_w,
+                        marker_baked_y + half_h_border,
+                        half_w,
+                        half_h_border,
+                        min(node_radius + pad, half_h_border),
+                        border,
+                        half_size=(half_w, half_h_border),
+                    )
+        if marker_pos:
+            minimap_state.cache.marker_batch = batch_for_shader(
+                _get_batch_rect_shader(),
+                "TRIS",
+                {
+                    "pos": marker_pos,
+                    "uv": marker_uv,
+                    "halfSize": marker_half_size,
+                    "radius": marker_radius,
+                    "color": marker_color_list,
+                },
+                indices=_create_quad_indices(len(marker_pos) // 4),
+            )
+        else:
+            minimap_state.cache.marker_batch = None
+    else:
+        minimap_state.cache.marker_batch = None

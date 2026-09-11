@@ -12,6 +12,7 @@ from ..core.helpers import (
     _get_node_initials,
     get_tree_fingerprint,
 )
+from ..core.node_label import _effective_node_label
 from ..core.state import SharedTreeCache
 from ..core.theme import (
     _COLOR_TAG_TO_THEME_ATTR,
@@ -139,12 +140,13 @@ def _node_display_meta(node, active_node) -> tuple[str, str, bool, bool]:
 
     Precomputed at compile time so the type list never holds live node proxies
     across frames: reading a property off a deleted node is a use-after-free
-    that crashes Blender at the C level. ``label`` is the custom label,
-    ``tree_name`` is the linked tree name (group nodes only), and the bools
-    mirror the node's selection/active state at compile time.
+    that crashes Blender at the C level. ``label`` is the header title Blender
+    shows (custom label, else the linked data or operation name, else the type
+    name), ``tree_name`` is the linked tree name (group nodes only), and the
+    bools mirror the node's selection/active state at compile time.
     """
     try:
-        label = node.label or ""
+        label = _effective_node_label(node) or ""
     except (AttributeError, ReferenceError):
         label = ""
     tree_name = ""
@@ -257,7 +259,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
     show_type_list = settings.show_type_list and settings.use_interactive
 
     def _search_text(node) -> str:
-        """Build the searchable text for a node: name, custom label, and tree name.
+        """Build the searchable text for a node: name, header title, and tree name.
 
         A group node without a label falls back to its linked node-tree's name
         in the list display, so that name is included as a search term too.
@@ -265,11 +267,11 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
         name = node.name
         parts = [name]
         try:
-            label = node.label or ""
+            effective = _effective_node_label(node) or ""
         except (AttributeError, ReferenceError):
-            label = ""
-        if label and label != name:
-            parts.append(label)
+            effective = ""
+        if effective and effective != name and effective not in parts:
+            parts.append(effective)
         try:
             tree = getattr(node, "node_tree", None)
         except (AttributeError, ReferenceError):
@@ -438,9 +440,10 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                 info["frame_label"] = (frame_label, text_color, bg_label_color)
         else:
             if show_node_labels:
-                label = node.label
-                if not label and getattr(node, "node_tree", None):
-                    label = node.node_tree.name
+                try:
+                    label = _effective_node_label(node) or ""
+                except (AttributeError, ReferenceError):
+                    label = ""
                 if not label:
                     label = node.bl_label
 

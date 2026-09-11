@@ -57,7 +57,7 @@ LIST_SWATCH_GAP: float = 5.0
 LIST_COUNT_GAP: float = 8.0
 SCROLLBAR_HIT_PAD: float = 6.0
 TYPE_LIST_ANIM_DURATION: float = 0.08
-EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0)
+EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0, 0)
 
 # Scrollbar appearance
 SCROLLBAR_THICKNESS: float = 3.0
@@ -73,7 +73,9 @@ TYPE_LIST_ROW_HEIGHT_OFFSET: float = 8.0
 # height exceeds width multiplied by this ratio (auto position only).
 TYPE_LIST_ASPECT_THRESHOLD: float = 1.0
 # Gap in UI-scaled pixels between the top list strip and the button row below it.
-TYPE_LIST_TOP_BUTTON_GAP: float = 4.0
+TYPE_LIST_TOP_BUTTON_GAP: float = 5.0
+# Gap in UI-scaled pixels between the left list zone edge and the button row.
+TYPE_LIST_LEFT_BUTTON_GAP: float = 5.0
 
 # ---------------------------------------------------------------------------
 # Animations
@@ -84,7 +86,7 @@ PAN_ANIM_FPS: float = 100.0
 PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
 
 # Fixed animation duration in frames for click-to-pan (fast snap).
-PAN_FRAMES: float = 8.0
+PAN_FRAMES: float = 10.0
 
 # Inertia only kicks in when a released drag ends above this velocity; the
 # release halves the remaining velocity, and a view that has come to a stop
@@ -108,7 +110,7 @@ TYPE_LIST_RESERVE_TOP: int = 2 * BUTTON_SIZE + 3 * HANDLE_THICKNESS - 1
 # ---------------------------------------------------------------------------
 # Batch building
 # ---------------------------------------------------------------------------
-MIN_SOCKET_SCALE: float = 0.15
+MIN_SOCKET_SCALE: float = 0.1
 SCALE_REBUILD_REL: float = 0.015
 BATCH_DRIFT_PX: float = 384.0
 CULL_MARGIN_PX: float = BATCH_DRIFT_PX + 32.0
@@ -116,9 +118,15 @@ CULL_MARGIN_PX: float = BATCH_DRIFT_PX + 32.0
 # scaling the existing batches via the content matrix; rebuild once the scale
 # holds still for ZOOM_SETTLE_MS. The ratio window bounds how far a deferred
 # bake may drift before an immediate rebuild keeps culling/typography fresh.
-ZOOM_SETTLE_MS: float = 180.0
-ZOOM_DEFER_RATIO_MIN: float = 0.1
-ZOOM_DEFER_RATIO_MAX: float = 0.5
+ZOOM_SETTLE_MS: float = 300.0
+ZOOM_DEFER_RATIO_MIN: float = 0.25
+ZOOM_DEFER_RATIO_MAX: float = 0.75
+# Group node marker strip thickness in tree units: the baked thickness
+# scales with the zoom like node geometry, floored to stay visible.
+GROUP_MARKER_THICKNESS: float = 10.0
+# Gap between the node bottom and the marker strip in tree units, scaling
+# with the zoom so the strip sits below the node instead of touching it.
+GROUP_MARKER_GAP: float = 4.0
 
 # ---------------------------------------------------------------------------
 # Socket indicator

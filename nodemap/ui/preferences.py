@@ -208,7 +208,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_width: IntProperty(
         name="Size X",
         description="Minimap width in pixels",
-        default=512,
+        default=400,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -306,7 +306,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     viewport_overlay_color: FloatVectorProperty(
         name="Viewport Overlay Color",
         description="Color of the viewport overlay",
-        default=(0.1, 0.1, 0.1, 0.5),
+        default=(0.0, 0.0, 0.0, 0.4),
         size=4,
         min=0.0,
         max=1.0,
@@ -504,6 +504,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
+    use_group_by_type: BoolProperty(
+        name="Group by Type",
+        description="Group nodes by type in the type list. Disable to show one row per node",
+        default=True,
+        update=_update_invalidate_batches,
+    )
+
     type_list_sort: EnumProperty(
         name="Type List Sort",
         description="How entries are ordered in the node-type list",
@@ -517,7 +524,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     type_list_font_size: IntProperty(
         name="Type List Font Size",
         description="Font size for the node-type list entries (pixels)",
-        default=11,
+        default=10,
         min=8,
         max=20,
         update=_update_invalidate_all,
@@ -552,6 +559,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
+    use_follow_active: BoolProperty(
+        name="Follow Active",
+        description="Scroll the type list to reveal the active node whenever it changes",
+        default=True,
+        update=_update_invalidate_batches,
+    )
+
     debounce_delay: FloatProperty(
         name="Debounce Delay",
         description="Delay in seconds before the minimap updates after a change (0 = instant)",
@@ -584,12 +598,6 @@ class NODEMAP_PG_settings(PropertyGroup):
         description="Keep the editor viewport inside the minimap by adjusting the minimap pan automatically",
         default=False,
         update=_update_invalidate_batches,
-    )
-
-    frame_view_fill: BoolProperty(
-        name="Frame View Fill",
-        description="Zoom in to the viewport while keeping it fully visible, instead of capping zoom at 1x",
-        default=True,
     )
 
     use_auto_zoom: BoolProperty(
@@ -727,13 +735,17 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = group.column()
         col.active = settings.show_type_list
         col.row().prop(settings, "type_list_position", text="Position", expand=True)
-        col.row().prop(settings, "type_list_sort", text="Sort", expand=True)
         col.prop(settings, "type_list_font_size", text="Font Size")
         row = col.row()
         row.prop(settings, "show_search_bar", text="Filter Bar")
         sub = row.row()
         sub.active = settings.show_node_colors
         sub.prop(settings, "show_type_colors", text="Type Colors")
+        row.prop(settings, "use_follow_active")
+
+        col.prop(settings, "use_group_by_type")
+        if settings.use_group_by_type:
+            col.row().prop(settings, "type_list_sort", text="Sort", expand=True)
 
         group.separator()
         group = group.column()
@@ -796,9 +808,10 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         row.use_property_split = False
         col = row.column()
         col.prop(settings, "use_interactive", text="Interactive Map")
-        sub = col.row()
+        sub = col.column()
         sub.active = settings.use_interactive and not context.preferences.view.use_reduce_motion
         sub.prop(settings, "use_animations", text="Animations")
+
         col = row.column()
         col.prop(settings, "use_follow_view", text="Follow View")
         col.prop(settings, "use_auto_zoom", text="Auto Zoom")

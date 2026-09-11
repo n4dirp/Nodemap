@@ -171,7 +171,6 @@ def _preserve_view_for_list_width(
         new_zoom = min(req_zoom_w, req_zoom_h)
         # Clamp like elsewhere (0.1..20) and keep at least 1 for
         # frame_all style (don't magnify small trees).
-        # Use the same cap as _compute_frame_to_bounds_targets(fill=False).
         new_zoom = max(MIN_FRAME_ZOOM, min(new_zoom, MAX_FRAME_ZOOM))
         if new_zoom > 1.0:
             new_zoom = 1.0

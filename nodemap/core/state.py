@@ -82,6 +82,7 @@ class ButtonState:
 class InteractionState:
     """Store transient hover and press state for minimap interaction."""
 
+    hovered_minimap: bool = False
     hovered_node_id: str | None = None
     hovered_handle: ResizeHandle | None = None
     resize_active: ResizeHandle | None = None
@@ -108,6 +109,9 @@ class ListState:
     width_clamped: bool = False
     scroll: float = 0.0
     scroll_max: float = 0.0
+    # Follow Active tracking: last revealed active node and one with a pending reveal.
+    followed_active: str | None = None
+    follow_pending: str | None = None
     row_height: float = 16.0
     hovered_type_label: str | None = None
     hovered_list_row: tuple | None = None
@@ -166,7 +170,7 @@ class RenderCache:
     node_labels: list[tuple[int, str, float, float, tuple[float, ...], float]] | None = None
     wire_batches: list | None = None
     wire_highlight_batch: Any = None
-    marker_batches: list | None = None
+    marker_batch: Any = None
     socket_batch: Any = None
     socket_shadow: list | None = None
     reroute_batch: Any = None
@@ -197,7 +201,7 @@ class RenderCache:
         "node_labels",
         "wire_batches",
         "wire_highlight_batch",
-        "marker_batches",
+        "marker_batch",
         "socket_batch",
         "socket_shadow",
         "reroute_batch",

@@ -15,6 +15,8 @@ from ..core.list_filter import (
     _ROW_HEADER,
     _iter_type_list_layout,
     filter_type_list,
+    flat_type_nodes,
+    iter_flat_list_layout,
 )
 
 if TYPE_CHECKING:
@@ -243,6 +245,7 @@ def select_type_nodes(
     matching nodes are added. When *toggle* is True the behaviour
     depends on the current state: if every matching node is already
     selected they are all deselected, otherwise they are all selected.
+    Selecting leaves the group's first node active.
     """
     space = op._space
     state = op._state
@@ -283,13 +286,20 @@ def select_type_nodes(
     # extend=False would replace the previous node on each iteration
     # and leave only the last one selected (and framed).
     node_extend = extend or deselect
+    first_node = None
     for name in names:
         node = node_tree.nodes.get(name)
         if node:
+            if first_node is None:
+                first_node = node
             # Native operator keeps selection/additive state and sets the
             # active node without tagging the NodeTree for an EEVEE rebuild.
             if not select_node_via_operator(op, context, node, extend=node_extend, deselect_all=False):
                 node.select = True
+    if first_node is not None:
+        # Each operator pick above re-targets the active node, leaving the
+        # last one active; pin the group's first item instead.
+        node_tree.nodes.active = first_node
     op._redraw_ui()
 
 
@@ -415,6 +425,13 @@ def _full_list_rows(state: MinimapState, settings) -> list[tuple]:
     type_nodes = tree_data.get("type_nodes") or {}
     type_stats = tree_data.get("type_stats") or {}
     search_texts = tree_data.get("type_search") or None
+
+    if not bool(getattr(settings, "use_group_by_type", True)):
+        nodes = flat_type_nodes(type_nodes, state.list.search_query, search_texts=search_texts)
+        row_h = state.list.row_height
+        rows = iter_flat_list_layout(nodes, row_h)
+        return [(kind, label, node_name) for kind, label, node_name, _local_y in rows]
+
     visible, effective_expanded, filtered_children = filter_type_list(
         type_stats,
         type_nodes,
@@ -450,14 +467,20 @@ def handle_list_arrow(
 ) -> bool:
     """Move the type-list selection one row along *direction* and select it.
 
-    *direction* is -1 for up and +1 for down. The move starts from the last
-    arrow-selected row, falling back to the active node's row, then to the
-    hovered row, then to the list edge — mouse hover alone never redirects
-    the walk. The target row is scrolled into view (aligned to the viewport
-    edge when it lies outside the visible area) and hovered (so the minimap
-    highlights it like a mouse hover), and selected with everything else
-    deselected. Return True when the key was handled, False when the list is
-    empty so the caller lets the key pass through to the Node Editor.
+    *direction* is -1 for up and +1 for down. The move starts from the
+    editor active node's row, falling back to the last arrow-selected row,
+    then to the hovered row, then to the list edge — mouse hover alone
+    never redirects the walk. While the walk cursor sits inside the active
+    node's group it stays authoritative, so stepping onto a header (which
+    activates the group's first item) still continues past it on the next
+    press. When the active node sits in a collapsed group that group is
+    expanded first, so the walk steps through its items instead of hopping
+    header to header. The target row is scrolled into view (aligned to the
+    viewport edge when it lies outside the visible area) and hovered (so
+    the minimap highlights it like a mouse hover), and selected with
+    everything else deselected. Return True when the key was handled,
+    False when the list is empty so the caller lets the key pass through
+    to the Node Editor.
     """
     rows = _full_list_rows(state, settings)
     if not rows:
@@ -471,21 +494,53 @@ def handle_list_arrow(
             index_of.setdefault(("child", label, node_name), row_index)
 
     start = None
+    active_label = None
+    active_row = None
+    node_tree = op._space.edit_tree if op._space else None
+    active_node = node_tree.nodes.active if node_tree else None
+    if active_node is not None:
+        tree_data = state.tree_data() or {}
+        type_nodes = tree_data.get("type_nodes") or {}
+        for type_label, names in type_nodes.items():
+            if active_node.name in names:
+                active_label = type_label
+                active_row = index_of.get(("child", type_label, active_node.name))
+                if active_row is None:
+                    active_row = index_of.get(("header", type_label))
+                break
     arrow_key = state.list.arrow_key
-    if arrow_key is not None:
+    if arrow_key is not None and active_label is not None and tuple(arrow_key)[1] == active_label:
+        # The walk cursor is inside the active node's group: it stays
+        # authoritative so stepping onto a header (which activates the
+        # group's first item) still continues past it on the next press
+        # instead of bouncing back to that same header.
         start = index_of.get(tuple(arrow_key))
     if start is None:
-        node_tree = op._space.edit_tree if op._space else None
-        active_node = node_tree.nodes.active if node_tree else None
-        if active_node is not None:
-            tree_data = state.tree_data() or {}
-            type_nodes = tree_data.get("type_nodes") or {}
-            for type_label, names in type_nodes.items():
-                if active_node.name in names:
-                    start = index_of.get(("child", type_label, active_node.name))
-                    if start is None:
-                        start = index_of.get(("header", type_label))
-                    break
+        start = active_row
+    if (
+        active_label is not None
+        and start is not None
+        and start == index_of.get(("header", active_label))
+        and bool(getattr(settings, "use_group_by_type", True))
+        and not state.list.search_query.strip()
+    ):
+        type_stats = (state.tree_data() or {}).get("type_stats") or {}
+        if type_stats.get(active_label, 0) > 1 and active_label not in state.list.expanded:
+            # The editor selection lives in a collapsed group: expand it so
+            # the walk starts at the active node's own row and steps through
+            # the group's items instead of hopping header to header.
+            state.list.expanded.add(active_label)
+            state.cache.list_key = None
+            rows = _full_list_rows(state, settings)
+            index_of = {}
+            for row_index, (kind, label, node_name) in enumerate(rows):
+                if kind == _ROW_HEADER:
+                    index_of.setdefault(("header", label), row_index)
+                else:
+                    index_of.setdefault(("child", label, node_name), row_index)
+            start = index_of.get(("child", active_label, active_node.name), index_of.get(("header", active_label)))
+    if start is None and arrow_key is not None:
+        start = index_of.get(tuple(arrow_key))
     if start is None:
         child_hover = state.list.hovered_list_row
         if child_hover is not None:
@@ -530,13 +585,15 @@ def handle_list_expand(
     """Collapse or expand the active type-list group and select it.
 
     *expand* is True for the right arrow (expand / drill in) and False for
-    the left arrow (collapse). The active group resolves from the arrow
-    cursor, then the active node's group, then the hovered row — matching
+    the left arrow (collapse). The active group resolves from the active
+    node's group, then the arrow cursor, then the hovered row — matching
     :func:`handle_list_arrow`. Expanding selects the group's first child,
     collapsing selects the group header so the active node stays visible.
     Return True when the key was handled, False when the list is empty or
     no active group resolves, so the caller lets the key pass through.
     """
+    if not bool(getattr(settings, "use_group_by_type", True)):
+        return False
     rows = _full_list_rows(state, settings)
     if not rows:
         return False
@@ -547,20 +604,20 @@ def handle_list_expand(
             index_of.setdefault(("header", label), row_index)
 
     label = None
-    arrow_key = state.list.arrow_key
-    if arrow_key is not None and index_of.get(("header", arrow_key[1])) is not None:
-        label = arrow_key[1]
+    node_tree = op._space.edit_tree if op._space else None
+    active_node = node_tree.nodes.active if node_tree else None
+    if active_node is not None:
+        tree_data = state.tree_data() or {}
+        type_nodes = tree_data.get("type_nodes") or {}
+        for type_label, names in type_nodes.items():
+            if active_node.name in names:
+                if index_of.get(("header", type_label)) is not None:
+                    label = type_label
+                break
     if label is None:
-        node_tree = op._space.edit_tree if op._space else None
-        active_node = node_tree.nodes.active if node_tree else None
-        if active_node is not None:
-            tree_data = state.tree_data() or {}
-            type_nodes = tree_data.get("type_nodes") or {}
-            for type_label, names in type_nodes.items():
-                if active_node.name in names:
-                    if index_of.get(("header", type_label)) is not None:
-                        label = type_label
-                    break
+        arrow_key = state.list.arrow_key
+        if arrow_key is not None and index_of.get(("header", arrow_key[1])) is not None:
+            label = arrow_key[1]
     if label is None:
         child_hover = state.list.hovered_list_row
         if child_hover is not None and index_of.get(("header", child_hover[0])) is not None:
@@ -619,11 +676,15 @@ def handle_list_toggle_all(
 ) -> bool:
     """Expand or collapse every expandable group in the type list.
 
-    Groups holding more than one node are targeted; when any of them is
-    currently expanded all are collapsed, otherwise all are expanded.
-    Return True when the key was handled, False when no group can be
-    expanded so the caller lets the key pass through to the Node Editor.
+    Groups holding more than one node are targeted; all are expanded
+    unless every one of them is already expanded, in which case all are
+    collapsed. The scroll is adjusted so the top visible row stays in
+    place. Return True when the key was handled, False when no group
+    can be expanded so the caller lets the key pass through to the Node
+    Editor.
     """
+    if not bool(getattr(settings, "use_group_by_type", True)):
+        return False
     tree_data = state.tree_data() or {}
     type_nodes = tree_data.get("type_nodes") or {}
     type_stats = tree_data.get("type_stats") or {}
@@ -641,11 +702,46 @@ def handle_list_toggle_all(
     if not expandable:
         return False
 
-    if state.list.expanded & expandable:
+    # Anchor the top visible row (with its fractional offset) so the view
+    # stays put once the row count changes below.
+    row_h = state.list.row_height
+    old_rows = _full_list_rows(state, settings)
+    anchor = None
+    anchor_offset = 0.0
+    if old_rows and row_h > 0:
+        top_index = min(max(int(state.list.scroll / row_h), 0), len(old_rows) - 1)
+        anchor = old_rows[top_index]
+        anchor_offset = state.list.scroll - top_index * row_h
+
+    if len(state.list.expanded & expandable) == len(expandable):
         state.list.expanded.difference_update(expandable)
     else:
         state.list.expanded.update(expandable)
     state.cache.list_key = None
+
+    if anchor is not None and row_h > 0:
+        new_rows = _full_list_rows(state, settings)
+        anchor_index = None
+        for row_index, row in enumerate(new_rows):
+            if row == anchor:
+                anchor_index = row_index
+                break
+        if anchor_index is None and anchor[0] != _ROW_HEADER:
+            # A collapsed child row is gone; hold its group header instead.
+            for row_index, row in enumerate(new_rows):
+                if row[0] == _ROW_HEADER and row[1] == anchor[1]:
+                    anchor_index = row_index
+                    break
+        if anchor_index is not None:
+            new_scroll = anchor_index * row_h + anchor_offset
+            zone_rect = state.list.list_zone_rect
+            if zone_rect is not None:
+                ui_scale = _get_ui_scale()
+                search_h = (BUTTON_SIZE - 1) * ui_scale if settings.show_search_bar else 0.0
+                view_h = max(zone_rect[3] - search_h - 2 * ui_scale - 1, row_h)
+                scroll_max = max(0.0, len(new_rows) * row_h - view_h)
+                new_scroll = min(max(new_scroll, 0.0), scroll_max)
+            state.list.scroll = new_scroll
     state.request_immediate_compile()
     op._redraw_ui()
     return True
@@ -677,6 +773,20 @@ def focus_list_on_active_node(op: NODEMAP_OT_navigate, context: Context) -> None
     type_nodes = tree_data.get("type_nodes") or {}
     type_stats = tree_data.get("type_stats") or {}
     search_texts = tree_data.get("type_search") or None
+
+    if not bool(getattr(settings, "use_group_by_type", True)):
+        nodes = flat_type_nodes(type_nodes, state.list.search_query, search_texts=search_texts)
+        row_h = state.list.row_height
+        rows = list(iter_flat_list_layout(nodes, row_h))
+        row_index = next(
+            (index for index, (_kind, _label, node_name, _local_y) in enumerate(rows) if node_name == active_node.name),
+            None,
+        )
+        if row_index is None:
+            return
+        if _scroll_list_to_row(state, len(rows), row_index, row_h, settings):
+            op._redraw_ui()
+        return
 
     label = None
     for key, names in type_nodes.items():

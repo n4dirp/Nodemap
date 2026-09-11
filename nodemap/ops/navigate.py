@@ -582,6 +582,9 @@ class NODEMAP_OT_navigate(Operator):
         if not is_interactive:
             under_mouse_area, under_mouse_region = _get_area_and_region_under_mouse(context, event)
             if not under_mouse_area or under_mouse_area.type != "NODE_EDITOR" or not under_mouse_region:
+                if self._state and self._state.interaction.hovered_minimap:
+                    self._state.interaction.hovered_minimap = False
+                    self._redraw_ui()
                 self._state = None
                 self._area = None
                 self._region = None
@@ -615,6 +618,9 @@ class NODEMAP_OT_navigate(Operator):
 
         state = self._state
         in_minimap = _is_in_minimap(self._mouse_x, self._mouse_y, state)
+        if state.interaction.hovered_minimap != in_minimap:
+            state.interaction.hovered_minimap = in_minimap
+            self._redraw_ui()
 
         # Type-list search: while focused, swallow keyboard events so keystrokes
         # never leak into the Node Editor (rename, tab, etc.). Mouse events
@@ -1627,8 +1633,7 @@ class NODEMAP_OT_navigate(Operator):
                                 map_h,
                                 state.view.inner_padding,
                             )
-                        fill = settings.frame_view_fill
-                        targets = _compute_frame_to_bounds_targets(visible, fill, area_ptr)
+                        targets = _compute_frame_to_bounds_targets(visible, area_ptr)
                         self._anim.start_frame_animation(context, targets[0], [targets[1], targets[2]])
                 else:
                     frame_view(self._space, self._region, area_ptr)

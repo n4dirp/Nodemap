@@ -21,7 +21,7 @@ CONTENT_LAYERS: tuple[Layer, ...] = (
     Layer("backdrops", ("backdrops_batch",)),
     Layer("borders", ("borders_batch",)),
     Layer("highlight", ("highlight_borders_batch",)),
-    Layer("markers", ("marker_batches",)),
+    Layer("markers", ("marker_batch",)),
     Layer("socket", ("socket_batch",)),
     Layer("reroute", ("reroute_batch",)),
     Layer("labels", ("node_labels",), in_content_matrix=False),

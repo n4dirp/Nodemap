@@ -162,17 +162,14 @@ def _draw_layer_highlight(state: MinimapState, settings: NODEMAP_PG_settings, mv
 
 
 def _draw_layer_markers(state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]) -> None:
-    """Draw group node underline marker batches."""
-    marker_batches = state.cache.marker_batches or []
-    if not marker_batches:
+    """Draw group node underline marker batch (per-vertex colored)."""
+    marker_batch = state.cache.marker_batch
+    if not marker_batch:
         return
-    pill_shader = _get_batch_pill_shader()
-    pill_shader.bind()
-    pill_shader.uniform_float("ModelViewProjectionMatrix", mvp)
-    pill_shader.uniform_float("dashData", (0.0, 0.0))
-    for marker_color, batch in marker_batches:
-        pill_shader.uniform_float("color", _srgb_to_linear(marker_color))
-        batch.draw(pill_shader)
+    shader = _get_batch_rect_shader()
+    shader.bind()
+    shader.uniform_float("ModelViewProjectionMatrix", mvp)
+    marker_batch.draw(shader)
 
 
 def _draw_layer_socket(state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]) -> None:

@@ -102,12 +102,11 @@ def frame_all(
 
 def _compute_frame_to_bounds_targets(
     target_bounds: tuple[float, float, float, float],
-    fill: bool = False,
     area_ptr: int | None = None,
 ) -> tuple[float, float, float]:
     """Compute target zoom and pan to frame the given bounds without applying them.
 
-    Return ``(zoom, pan_x, pan_y)``.
+    The bounds are zoomed to entirely fill the minimap. Return ``(zoom, pan_x, pan_y)``.
     """
     minimap_state = _state(area_ptr)
 
@@ -115,10 +114,7 @@ def _compute_frame_to_bounds_targets(
 
     target_w = max(target_bounds[2] - target_bounds[0], 1.0)
     target_h = max(target_bounds[3] - target_bounds[1], 1.0)
-    if fill:
-        zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h))
-    else:
-        zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h), 1.0)
+    zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h))
 
     target_cx = (target_bounds[0] + target_bounds[2]) / 2
     target_cy = (target_bounds[1] + target_bounds[3]) / 2
@@ -130,17 +126,11 @@ def _compute_frame_to_bounds_targets(
 
 def _frame_to_bounds(
     target_bounds: tuple[float, float, float, float],
-    fill: bool = False,
     area_ptr: int | None = None,
 ) -> None:
-    """Adjust minimap zoom/pan to frame the given bounds in tree coordinates.
-
-    When *fill* True the bounds are zoomed to entirely fill the minimap
-    (one axis may clip); when False the bounds frame within the minimap
-    (empty space may remain).
-    """
+    """Adjust minimap zoom/pan to frame the given bounds in tree coordinates."""
     minimap_state = _state(area_ptr)
-    zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(target_bounds, fill, area_ptr)
+    zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(target_bounds, area_ptr)
     minimap_state.view.anchor_zoom = zoom
     minimap_state.view.user_zoom = zoom
     minimap_state.view.pan = (pan_x, pan_y)
@@ -221,7 +211,7 @@ def _compute_frame_selected_targets(
         inner_h = max(rect[3] - 2 * minimap_state.view.inner_padding, 1.0)
         margin = margin_px * bounds_h / inner_h
         zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(
-            (min_x - margin, min_y - margin, max_x + margin, max_y + margin), fill=True, area_ptr=area_ptr
+            (min_x - margin, min_y - margin, max_x + margin, max_y + margin), area_ptr
         )
         return min(zoom, MAX_FRAME_ZOOM), pan_x, pan_y
 
@@ -327,8 +317,6 @@ def frame_view(
     if not visible:
         return
 
-    fill = get_addon_preferences().settings.frame_view_fill
-
     rect = minimap_state.view.rect
     _, _, map_w, map_h = rect
     raw_bounds = minimap_state.view.raw_tree_bounds
@@ -337,7 +325,7 @@ def frame_view(
     minimap_state.view.tree_bounds = _expand_bounds_margin(
         raw_bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding
     )
-    _frame_to_bounds(visible, fill=fill, area_ptr=area_ptr)
+    _frame_to_bounds(visible, area_ptr)
 
 
 def _redraw() -> None:
