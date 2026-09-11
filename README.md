@@ -34,16 +34,17 @@ Drag the generated `.zip` file into Blender to install it.
 
 ## Shortcuts
 
-| Input                      | Shortcut             | Action                       |
-| -------------------------- | -------------------- | ---------------------------- |
-| Node Editor                | `Ctrl+M`             | Toggle minimap               |
-| Minimap                    | `Home`               | Frame all nodes              |
-| Minimap                    | `Shift+Home`         | Frame current view           |
-| Minimap                    | `Numpad .`           | Frame selected nodes         |
-| Minimap                    | `T`                  | Toggle node-type list        |
-| Minimap                    | `Ctrl+F`             | Reveal list and focus filter |
-| Minimap                    | `Left Click`         | Pan the view                 |
-| Minimap                    | `Right Click`        | Select nodes and frame them  |
-| Minimap                    | `Middle Drag`        | Pan the minimap              |
-| Minimap                    | `Middle Scroll`      | Zoom minimap / Node Editor   |
-| Minimap                    | `Alt + Scroll`       | Temporarily swap zoom target |
+| Input                      | Shortcut             | Action                        |
+| -------------------------- | -------------------- | ----------------------------- |
+| Node Editor                | `Ctrl+M`             | Toggle minimap                |
+| Minimap                    | `Home`               | Frame all nodes               |
+| Minimap                    | `End`                | Frame current view            |
+| Minimap                    | `Numpad .`           | Frame selected nodes          |
+| Minimap                    | `T`                  | Toggle node-type list         |
+| Minimap                    | `Shift+A`            | Expand / collapse list groups |
+| Minimap                    | `Ctrl+F`             | Reveal list and focus filter  |
+| Minimap                    | `Left Click`         | Pan the view                  |
+| Minimap                    | `Right Click`        | Select nodes and frame them   |
+| Minimap                    | `Middle Drag`        | Pan the minimap               |
+| Minimap                    | `Middle Scroll`      | Zoom minimap / Node Editor    |
+| Minimap                    | `Alt + Scroll`       | Temporarily swap zoom target  |

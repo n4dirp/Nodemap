@@ -23,6 +23,7 @@
 - All extension options are now available in the addon preferences
 
 ### Fixed
+- Minimap node labels now match the node editor titles, showing image names and math operations instead of the generic type name
 - Selecting a node from the type list no longer triggers a full EEVEE material rebuild
 - Minimap redraws now affect only the Node Editor being interacted with instead of refreshing all open Node Editors
 - Scrollbars now appear only when nodes extend beyond the visible area
