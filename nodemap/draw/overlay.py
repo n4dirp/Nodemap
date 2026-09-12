@@ -63,6 +63,7 @@ from .gpu_draw import (
     _draw_filled_rounded_rect_clipped,
     _draw_filled_rounded_rect_varying,
     _draw_filled_rounded_rect_with_hole,
+    _draw_pill,
     _draw_rounded_rect_border,
     _draw_rounded_rect_border_varying_sides,
     _draw_text_with_shadow,
@@ -312,47 +313,66 @@ def _draw_background(
 
 
 def _draw_moving_border(
-    map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, moving, snapped, mvp: Any = None
+    map_x,
+    map_y,
+    map_w,
+    map_h,
+    panel_roundness,
+    colors,
+    master_alpha,
+    ui_scale,
+    moving,
+    snapped,
+    position,
+    mvp: Any = None,
 ):
+    border_width = 1.5 * ui_scale
+    border_color = _alpha_mul(colors["background_border"], master_alpha)
+
     if moving:
-        # bg_color = _alpha_mul(colors["background"], 0.2 * master_alpha)
         _draw_filled_rounded_rect(
             map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.4 * master_alpha), mvp=mvp
         )
 
-        if not snapped:
-            border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-            border_width = 0.5 * ui_scale
-            _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
+        # if not snapped:
+        #     border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
 
+    if snapped and (snap_sides := _snap_sides_for(position)):
+        snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        side_colors = {side: snap_color for side in snap_sides}
 
-def _draw_edge_pills(
-    map_x: float,
-    map_y: float,
-    map_w: float,
-    map_h: float,
-    ui_scale: float,
-    side_colors: dict[str, tuple[float, float, float, float]] | None,
-    mvp: Any = None,
-) -> None:
-    """Draw a highlight pill on each map side with a non-None color."""
-    if not side_colors:
-        return
-    thickness = 3.0 * ui_scale
-    margin = 6 * ui_scale
-    inset = 2.0 * ui_scale
-    if (color := side_colors.get("top")) is not None:
-        _draw_filled_rounded_rect(
-            map_x + margin, map_y + map_h - inset - thickness, map_w - 2 * margin, thickness, 0, color, mvp=mvp
-        )
-    if (color := side_colors.get("bottom")) is not None:
-        _draw_filled_rounded_rect(map_x + margin, map_y + inset, map_w - 2 * margin, thickness, 0, color, mvp=mvp)
-    if (color := side_colors.get("left")) is not None:
-        _draw_filled_rounded_rect(map_x + inset, map_y + margin, thickness, map_h - 2 * margin, 0, color, mvp=mvp)
-    if (color := side_colors.get("right")) is not None:
-        _draw_filled_rounded_rect(
-            map_x + map_w - inset - thickness, map_y + margin, thickness, map_h - 2 * margin, 0, color, mvp=mvp
-        )
+        if not side_colors:
+            return
+
+        thickness = border_width
+        margin = HANDLE_THICKNESS * ui_scale
+        inset = 0.5 * ui_scale
+        radius = 0
+
+        # Pre-compute all repeated edge coordinates once
+        x_inner = map_x
+        y_inner = map_y
+        x_margin = map_x + margin
+        y_margin = map_y + margin
+        w_pill = map_w - 2.0 * margin
+        h_pill = map_h - 2.0 * margin
+        x_right = map_x + map_w - inset - thickness
+        y_top = map_y + map_h - inset - thickness
+
+        # (x, y, w, h) for each side; only drawn when color is present
+        edges: dict[str, tuple[float, float, float, float]] = {
+            "top": (x_margin, y_top, w_pill, thickness),
+            "bottom": (x_margin, y_inner, w_pill, thickness),
+            "left": (x_inner, y_margin, thickness, h_pill),
+            "right": (x_right, y_margin, thickness, h_pill),
+        }
+
+        for side, rect in edges.items():
+            fill_color = side_colors.get(side)
+            if fill_color is not None:
+                # _draw_divider(*rect, radius, fill_color, border_color, border_width, mvp=mvp)
+                _draw_filled_rounded_rect(*rect, radius, fill_color, mvp)
 
 
 def _draw_resize_handles(
@@ -363,6 +383,7 @@ def _draw_resize_handles(
     colors: dict,
     master_alpha: float,
     ui_scale: float,
+    panel_roundness: float,
     state: MinimapState,
     mvp: Any = None,
 ) -> None:
@@ -374,49 +395,76 @@ def _draw_resize_handles(
     width_clamped = state.view.width_clamped
     height_clamped = state.view.height_clamped
 
-    color_base = _alpha_mul(colors["text"], 0.6 * master_alpha)
+    color_base = _alpha_mul(colors["scroll_item"], master_alpha)
     color_warn = _alpha_mul(colors["viewport_fill"], master_alpha)
-    handle_thickness = 3.0 * ui_scale
+    thickness = 3.0 * ui_scale
+
+    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.2 * master_alpha), mvp=mvp)
 
     if resize_handle == ResizeHandle.LIST:
-        zone_rect = state.list.list_zone_rect
+        list_state = state.list
+        zone_rect = list_state.list_zone_rect
+
         if not zone_rect or not state.view.rect:
             return
-        zone_x, zone_y, zone_w, zone_height = zone_rect
-        divider_color = color_warn if state.list.width_clamped else color_base
-        if state.list.list_placement == "TOP":
-            # Horizontal divider centered in the gap between the button row
-            # and the list strip, spanning the zone width so the pill tracks
-            # per-pixel during a drag.
-            divider_y = round(zone_y - TYPE_LIST_TOP_BUTTON_GAP * ui_scale / 2.0 - handle_thickness / 2.0)
-            _draw_filled_rounded_rect(zone_x, divider_y, zone_w, handle_thickness, 0, divider_color, mvp=mvp)
-            return
-        # Derive the divider x centered in the gap between the list zone and
-        # the button row so the pill tracks per-pixel during a drag.
-        map_left = state.view.rect[0]
-        zone_right = map_left + state.view.inner_padding + state.list.list_width - 2.0 * ui_scale
-        divider_x = round(zone_right + TYPE_LIST_LEFT_BUTTON_GAP * ui_scale / 2.0 - handle_thickness / 2.0)
-        # Clamp to zone vertical extent with small margin so pill stays inside.
-        _draw_filled_rounded_rect(round(divider_x), zone_y, handle_thickness, zone_height, 0, divider_color, mvp=mvp)
+
+        zone_x, zone_y, zone_w, zone_h = zone_rect
+        fill_color = color_warn if list_state.width_clamped else color_base
+
+        half_scale = ui_scale / 2.0
+        half_handle = thickness / 2.0
+
+        if list_state.list_placement == "TOP":
+            x, y = zone_x, round(zone_y - TYPE_LIST_TOP_BUTTON_GAP * half_scale - half_handle)
+            w, h = zone_w, thickness
+        else:  # LEFT
+            view = state.view
+            zone_right = view.rect[0] + view.inner_padding + list_state.list_width - 2.0 * ui_scale
+            x, y = round(zone_right + TYPE_LIST_LEFT_BUTTON_GAP * half_scale - half_handle), zone_y
+            w, h = thickness, zone_h
+
+        _draw_pill(x, y, w, h, fill_color, mvp=mvp)
         return
 
-    width_side = None
+    # Determine which edges to highlight
+    width_side = height_side = None
     if resize_handle in (ResizeHandle.LEFT, ResizeHandle.TOP_LEFT, ResizeHandle.BOTTOM_LEFT):
         width_side = "left"
     elif resize_handle in (ResizeHandle.RIGHT, ResizeHandle.TOP_RIGHT, ResizeHandle.BOTTOM_RIGHT):
         width_side = "right"
-    height_side = None
     if resize_handle in (ResizeHandle.TOP, ResizeHandle.TOP_LEFT, ResizeHandle.TOP_RIGHT):
         height_side = "top"
     elif resize_handle in (ResizeHandle.BOTTOM, ResizeHandle.BOTTOM_LEFT, ResizeHandle.BOTTOM_RIGHT):
         height_side = "bottom"
 
-    side_colors: dict[str, tuple[float, float, float, float]] = {}
+    active_sides = {}
     if width_side:
-        side_colors[width_side] = color_warn if width_clamped else color_base
+        active_sides[width_side] = color_warn if width_clamped else color_base
     if height_side:
-        side_colors[height_side] = color_warn if height_clamped else color_base
-    _draw_edge_pills(map_x, map_y, map_w, map_h, ui_scale, side_colors or None, mvp=mvp)
+        active_sides[height_side] = color_warn if height_clamped else color_base
+
+    margin = HANDLE_THICKNESS * ui_scale
+    inset = 2.0 * ui_scale
+
+    x_inner = map_x + inset
+    y_inner = map_y + inset
+    x_margin = map_x + margin
+    y_margin = map_y + margin
+    w_pill = map_w - 2.0 * margin
+    h_pill = map_h - 2.0 * margin
+    x_right = map_x + map_w - inset - thickness
+    y_top = map_y + map_h - inset - thickness
+
+    edges = {
+        "top": (x_margin, y_top, w_pill, thickness),
+        "bottom": (x_margin, y_inner, w_pill, thickness),
+        "left": (x_inner, y_margin, thickness, h_pill),
+        "right": (x_right, y_margin, thickness, h_pill),
+    }
+
+    for side, rect in edges.items():
+        if (fill_color := active_sides.get(side)) is not None:
+            _draw_pill(*rect, fill_color, mvp=mvp)
 
 
 def _draw_view_fill(
@@ -553,7 +601,7 @@ def _draw_viewport_overlay(
     # Outline the viewport extent when it overlaps the minimap
     if hole_width > 0 and hole_height > 0:
         outline_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-        border_width = 0.5 * ui_scale
+        border_width = 1.5 * ui_scale
 
         _draw_rounded_rect_border(view_x, view_y, view_w, view_h, node_roundness, outline_color, border_width, mvp=mvp)
 
@@ -1470,23 +1518,24 @@ def draw_minimap() -> None:
         mvp=base_mvp,
     )
 
-    _draw_minimap_scrollbars(
-        map_x,
-        map_y,
-        map_w,
-        map_h,
-        padding,
-        map_anchor_x,
-        map_anchor_y,
-        scale,
-        tree_center_x,
-        tree_center_y,
-        raw_bounds,
-        colors,
-        ui_scale,
-        master_alpha,
-        mvp=base_mvp,
-    )
+    if not state.view.moving:
+        _draw_minimap_scrollbars(
+            map_x,
+            map_y,
+            map_w,
+            map_h,
+            padding,
+            map_anchor_x,
+            map_anchor_y,
+            scale,
+            tree_center_x,
+            tree_center_y,
+            raw_bounds,
+            colors,
+            ui_scale,
+            master_alpha,
+            mvp=base_mvp,
+        )
 
     _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale, master_alpha, mvp=base_mvp)
 
@@ -1527,6 +1576,10 @@ def draw_minimap() -> None:
             settings, state, map_x, map_y, map_w, map_h, padding, colors, master_alpha, ui_scale, mvp=base_mvp
         )
 
+        _draw_resize_handles(
+            map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, panel_roundness, state, mvp=base_mvp
+        )
+
         _draw_moving_border(
             map_x,
             map_y,
@@ -1538,20 +1591,10 @@ def draw_minimap() -> None:
             ui_scale,
             state.view.moving,
             state.view.snapped,
+            settings.current_position,
             mvp=base_mvp,
         )
-
-        _draw_resize_handles(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, state, mvp=base_mvp)
-
-        # Repaint the pressed move grip above the moving dark overlay so its
-        # viewport_fill press state is not smothered while the map is dragged.
         _redraw_pressed_move_grip(state, colors, master_alpha, ui_scale, mvp=base_mvp)
-
-        if state.view.snapped and (snap_sides := _snap_sides_for(settings.current_position)):
-            snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)
-            _draw_edge_pills(
-                map_x, map_y, map_w, map_h, ui_scale, {side: snap_color for side in snap_sides}, mvp=base_mvp
-            )
 
     finally:
         try:
