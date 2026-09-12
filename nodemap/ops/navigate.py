@@ -12,6 +12,8 @@ from ..core.constants import (
     CONTENT_PADDING,
     DOCK_DWELL_MS,
     INERTIA_MIN_SPEED,
+    INERTIA_PAN_MIN_SPEED,
+    INERTIA_PAN_VELOCITY_SCALE,
     MAX_FRAME_ZOOM,
     MIN_FRAME_ZOOM,
     SCROLLBAR_HIT_PAD,
@@ -769,8 +771,10 @@ class NODEMAP_OT_navigate(Operator):
                     self._mmb_drag_start = None
                     _clamp_pan_to_viewport(self._space, self._region, state)
                     if self._anim._animations_enabled(context):
+                        self._anim.smooth_velocity[0] *= INERTIA_PAN_VELOCITY_SCALE
+                        self._anim.smooth_velocity[1] *= INERTIA_PAN_VELOCITY_SCALE
                         speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
-                        if speed > INERTIA_MIN_SPEED:
+                        if speed > INERTIA_PAN_MIN_SPEED:
                             self._anim.inertia_active = True
                             self._anim.inertia_mode = "PAN"
                             self._anim.create_timer(context)

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 from .. import __package__ as base_package
-from ..core.constants import PAN_ANIM_INTERVAL, PAN_FRAMES, PAN_MIN_FRAMES
+from ..core.constants import INERTIA_PAN_DECAY, PAN_ANIM_INTERVAL, PAN_FRAMES, PAN_MIN_FRAMES
 from ..core.helpers import get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
 from ..geo.transforms import (
@@ -262,7 +262,10 @@ class AnimationController:
     def apply_inertia(self, context: Context) -> None:
         """Decay inertia and apply pan deltas."""
         op = self._op
-        decay = _INERTIA_DECAY
+        if self.inertia_mode == "PAN":
+            decay = INERTIA_PAN_DECAY
+        else:
+            decay = _INERTIA_DECAY
         self.smooth_velocity[0] *= decay
         self.smooth_velocity[1] *= decay
         speed = max(abs(self.smooth_velocity[0]), abs(self.smooth_velocity[1]))

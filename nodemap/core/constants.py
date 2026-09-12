@@ -111,7 +111,7 @@ PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
 # Fixed animation duration in frames for click-to-pan (fast snap).
 # Tuned to the 1.5.0 FAST preset: 12 frames at 60Hz (0.2s) maps to 20
 # frames at the current 100Hz tick rate for the same wall-clock duration.
-PAN_FRAMES: float = 12.0
+PAN_FRAMES: float = 10.0
 
 # Minimum animation duration in frames so close pans stay visible instead of
 # collapsing to a single tick.
@@ -123,6 +123,13 @@ PAN_MIN_FRAMES: float = PAN_FRAMES * 0.66
 # under SMOOTH_DAMP_STILL sits still instead of wobbling.
 INERTIA_MIN_SPEED: float = 2.0
 SMOOTH_DAMP_STILL: float = 0.15
+
+# Middle-mouse minimap pan uses a shorter glide than view pans: the release
+# velocity is scaled down, needs a higher speed to trigger, and decays
+# faster per tick.
+INERTIA_PAN_VELOCITY_SCALE: float = 0.6
+INERTIA_PAN_MIN_SPEED: float = 3.0
+INERTIA_PAN_DECAY: float = 0.85
 
 # ---------------------------------------------------------------------------
 # Minimap chrome (header buttons, font)
