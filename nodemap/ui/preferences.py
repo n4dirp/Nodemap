@@ -131,7 +131,7 @@ _DRAG_ACTION_ITEMS = [
     (
         "FRAME_RECT",
         "Frame Region",
-        "Drag to draw a rectangle and frame that area (drag right to left to zoom out)",
+        "Drag to draw a rectangle and frame that area",
     ),
     ("FRAME_RECT_EDITOR", "Frame Region (Editor)", "Drag to draw a rectangle and frame that area in the editor"),
 ]
@@ -663,6 +663,14 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
     settings: PointerProperty(type=NODEMAP_PG_settings)
 
+    show_general: BoolProperty(default=True)
+    show_layout: BoolProperty(default=True)
+    show_objects: BoolProperty(default=True)
+    show_theme: BoolProperty(default=True)
+    show_navigation: BoolProperty(default=True)
+    show_performance: BoolProperty(default=False)
+    show_development: BoolProperty(default=False)
+
     use_logging: BoolProperty(
         name="Console Logging",
         description="Output add-on log messages to the console",
@@ -685,21 +693,56 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
-        settings = self.settings
 
+        self._draw_general(layout, context)
+        # layout.separator(type="LINE")
+        self._draw_layout(layout.box())
+        # layout.separator(type="LINE")
+        self._draw_objects(layout.box())
+        # layout.separator(type="LINE")
+        self._draw_theme(layout.box())
+        # layout.separator(type="LINE")
+        self._draw_navigation(layout.box(), context)
+        # layout.separator()
+        # layout.separator(type="LINE")
+        self._draw_performance(layout.box())
+        # layout.separator(type="LINE")
+        self._draw_development(layout.box())
+
+    def _section_header(self, layout, prop, title):
+        """Draw the toggle header row for a collapsible section."""
+        row = layout.row(align=True)
+        row.use_property_split = False
+        row.alignment = "LEFT"
+        row.prop(
+            self,
+            prop,
+            icon="DISCLOSURE_TRI_DOWN" if getattr(self, prop) else "DISCLOSURE_TRI_RIGHT",
+            text="",
+            emboss=False,
+        )
+        row.label(text=title)
+        # return row
+
+    def _draw_general(self, layout, context):
+        """Draw the General section with the presets header."""
+        settings = self.settings
         row = layout.row()
         row.label(text="General")
 
         NODEMAP_PT_presets.draw_panel_header(row)
 
         layout.prop(settings, "show_by_default", text="Show in New Editors")
+        self._draw_shortcuts(layout, context)
 
-        layout.separator(type="LINE")
+    def _draw_layout(self, layout):
+        """Draw the Layout section for docking and size."""
+        self._section_header(layout, "show_layout", "Layout")
+        if not self.show_layout:
+            return
+        settings = self.settings
         group = layout.column()
-        group.label(text="Layout")
-
         group.row().prop(settings, "dock_mode", text="Dock Mode", expand=True)
-
         col = group.column(align=True)
         if settings.dock_mode == "CORNER":
             col.prop(settings, "corner_position", text="Corner")
@@ -710,22 +753,34 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             col.prop(settings, "offset_y", text="Y")
             group.prop(settings, "use_snap_to_borders", text="Snap to Borders")
         group.separator()
-
         col = group.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
         col.prop(settings, "minimap_height", text="Y")
-
         col = group.column(align=True)
         col.prop(settings, "max_width_percent", text="Max Width")
         col.prop(settings, "max_height_percent", text="Max Height")
 
-        layout.separator(type="LINE")
+    def _draw_objects(self, layout):
+        """Draw the Objects section for node, type-list, and wire display."""
+        self._section_header(layout, "show_objects", "Objects")
+        if not self.show_objects:
+            return
         group = layout.column()
-        group.label(text="Objects")
         split = group.split(factor=0.4)
         split.label(text="")
         row = split.row()
         row.use_property_split = False
+        self._draw_show_column(row)
+        self._draw_labels_column(row)
+        self._draw_buttons_column(row)
+        group.separator()
+        self._draw_type_list(group)
+        group.separator()
+        self._draw_wires(group)
+
+    def _draw_show_column(self, row):
+        """Draw the Show column for node and wire visibility."""
+        settings = self.settings
         col = row.column(heading="Show")
         col.prop(settings, "show_frames", text="Frames")
         col.prop(settings, "show_node_colors", text="Node Colors")
@@ -738,13 +793,19 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.prop(settings, "show_type_list", text="Type List")
         col.prop(settings, "show_wires", text="Wires")
 
+    def _draw_labels_column(self, row):
+        """Draw the Labels column for node and frame labels."""
+        settings = self.settings
         col = row.column(heading="Labels")
         col.prop(settings, "show_node_labels", text="Node Labels")
         if settings.show_node_labels:
-            col.prop(settings, "compact_node_labels", text="Compact Node Labels")
+            col.prop(settings, "compact_node_labels", text="Compact Labels")
         if settings.show_frames:
             col.prop(settings, "show_frame_labels", text="Frame Labels")
 
+    def _draw_buttons_column(self, row):
+        """Draw the Buttons column for the minimap action buttons."""
+        settings = self.settings
         col = row.column(heading="Buttons")
         col.active = settings.use_interactive
         col.prop(settings, "show_frame_all_button", text="Frame All")
@@ -754,7 +815,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "show_list_toggle_button", text="List Toggle")
         col.prop(settings, "show_move_button", text="Move Handle")
 
-        group.separator()
+    def _draw_type_list(self, group):
+        """Draw the Type List subsection within the Objects group."""
+        settings = self.settings
         group = group.column()
         group.label(text="Type List")
         col = group.column()
@@ -767,12 +830,13 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = settings.show_node_colors
         sub.prop(settings, "show_type_colors", text="Type Colors")
         row.prop(settings, "use_follow_active")
-
         col.prop(settings, "use_group_by_type")
         if settings.use_group_by_type:
             col.row().prop(settings, "type_list_sort", text="Sort", expand=True)
 
-        group.separator()
+    def _draw_wires(self, group):
+        """Draw the Wires subsection within the Objects group."""
+        settings = self.settings
         group = group.column()
         group.label(text="Wires")
         col = group.column()
@@ -781,41 +845,39 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         row.prop(settings, "show_wire_color", text="Wire Colors")
         row.prop(settings, "show_dashed_wires", text="Dashed Fields")
         row.prop(settings, "highlight_selected_wires", text="Highlight Selection")
-
         sub = col.column(heading="Noodle Curving")
         row = sub.row(align=True, heading="")
         row.prop(settings, "use_custom_noodle_curving", text="")
         sub = row.row(align=True)
         sub.active = settings.use_custom_noodle_curving
         sub.row().prop(settings, "noodle_curving", text="", expand=True)
-
         col.prop(settings, "wire_thickness", text="Thickness")
         col.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
-        layout.separator(type="LINE")
+    def _draw_theme(self, layout):
+        """Draw the Theme section for opacity and colors."""
+        self._section_header(layout, "show_theme", "Theme")
+        if not self.show_theme:
+            return
+        settings = self.settings
         group = layout.column()
-        group.label(text="Theme")
         col = group.column()
         col.prop(settings, "opacity", text="Opacity")
-
         row = col.row(align=True, heading="Colors")
         row.prop(settings, "use_custom_viewport_fill", text="View Highlight")
         sub = row.row(align=True)
         sub.active = settings.use_custom_viewport_fill
         sub.prop(settings, "viewport_fill_color", text="")
-
         row = col.row(align=True)
         row.prop(settings, "show_viewport_overlay", text="View Dimming")
         sub = row.row(align=True)
         sub.active = settings.show_viewport_overlay
         sub.prop(settings, "viewport_overlay_color", text="")
-
         row = col.row(align=True)
         row.prop(settings, "use_custom_background", text="Background")
         sub = row.row(align=True)
         sub.active = settings.use_custom_background
         sub.prop(settings, "background_color", text="")
-
         row = col.row(align=True)
         row.prop(settings, "use_custom_text", text="Text Color")
         sub = row.row(align=True)
@@ -824,9 +886,13 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         row = col.row(align=True)
         row.prop(settings, "show_text_shadow", text="Text Shadows")
 
-        layout.separator(type="LINE")
+    def _draw_navigation(self, layout, context):
+        """Draw the Navigation section for interaction and input mapping."""
+        self._section_header(layout, "show_navigation", "Navigation")
+        if not self.show_navigation:
+            return
+        settings = self.settings
         group = layout.column()
-        group.label(text="Navigation")
         split = group.split(factor=0.4)
         split.label(text="")
         row = split.row()
@@ -836,11 +902,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub = col.column()
         sub.active = settings.use_interactive and not context.preferences.view.use_reduce_motion
         sub.prop(settings, "use_animations", text="Animations")
-
         col = row.column()
         col.prop(settings, "use_follow_view", text="Follow View")
         col.prop(settings, "use_auto_zoom", text="Auto Zoom")
-
         group.separator()
         interaction_column = group.column()
         interaction_column.active = settings.use_interactive
@@ -851,18 +915,23 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = interaction_column.column(align=False)
         col.prop(settings, "left_drag_action", text="Left Drag")
         col.prop(settings, "right_drag_action", text="Right Drag")
-
         interaction_column.separator()
         interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
-
         interaction_column.separator()
-        split = interaction_column.split(factor=0.4)
+        self._draw_key_modifiers(interaction_column)
+
+    def _draw_key_modifiers(self, column):
+        """Draw the key-modifiers reference box."""
+        split = column.split(factor=0.4)
         row = split.row(align=True)
         row.alignment = "RIGHT"
         row.label(text="")
         box = split.box()
-        box.label(text="Key Modifiers:", icon="INFO")
-        flow = box.column_flow(columns=2, align=True)
+        box.active = False
+        box.label(text="Modifiers", icon="INFO")
+        row = box.row(align=True)
+        row.separator(factor=2.0)
+        flow = row.column_flow(columns=2, align=True)
         flow.label(text="Shift Drag Frame Region", icon="DOT")
         flow.label(text="Ctrl Drag Pan View", icon="DOT")
         flow.label(text="Alt Drag Frame Region (Editor)", icon="DOT")
@@ -870,7 +939,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         flow.label(text="Ctrl Click Toggle selection", icon="DOT")
         flow.label(text="Alt Scroll Toggle Zoom", icon="DOT")
 
-        layout.separator()
+    def _draw_shortcuts(self, layout, context):
+        """Draw the Shortcuts section reflecting the user keymap."""
         split = layout.split(factor=0.4)
         sub = split.column(align=True)
         sub.alignment = "RIGHT"
@@ -894,14 +964,20 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             else:
                 col.operator("nodemap.restore_keymap", text="Restore")
 
-        layout.separator(type="LINE")
+    def _draw_performance(self, layout):
+        """Draw the Performance section."""
+        self._section_header(layout, "show_performance", "Performance")
+        if not self.show_performance:
+            return
         group = layout.column()
-        group.label(text="Performance")
         group.prop(self.settings, "debounce_delay", text="Debounce Delay")
 
-        layout.separator(type="LINE")
+    def _draw_development(self, layout):
+        """Draw the Development section for console logging."""
+        self._section_header(layout, "show_development", "Development")
+        if not self.show_development:
+            return
         group = layout.column()
-        group.label(text="Development")
         row = group.row(align=True, heading="Console Logging")
         row.prop(self, "use_logging", text="")
         sub = row.row(align=True)

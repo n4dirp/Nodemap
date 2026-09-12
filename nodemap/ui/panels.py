@@ -74,7 +74,7 @@ class NODEMAP_PT_popup(Panel):
 
             sub = flow.row(align=True)
             sub.active = settings.show_node_labels
-            sub.prop(settings, "compact_node_labels", text="Compact")
+            sub.prop(settings, "compact_node_labels", text="Compact Labels")
 
             # flow.prop(settings, "show_reroutes", text="Reroutes")
             # flow.prop(settings, "show_socket_indicators", text="Sockets")
