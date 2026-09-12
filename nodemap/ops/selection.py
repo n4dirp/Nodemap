@@ -482,8 +482,8 @@ def handle_list_arrow(
     node's group it stays authoritative, so stepping onto a header (which
     activates the group's first item) still continues past it on the next
     press. When the active node sits in a collapsed group that group is
-    expanded first, so the walk steps through its items instead of hopping
-    header to header. The target row is scrolled into view (aligned to the
+    expanded first — but only with Follow Active enabled — so the walk steps
+    through its items instead of hopping header to header. The target row is scrolled into view (aligned to the
     viewport edge when it lies outside the visible area) and hovered (so
     the minimap highlights it like a mouse hover), and selected with
     everything else deselected. Return True when the key was handled,
@@ -531,6 +531,7 @@ def handle_list_arrow(
         and start == index_of.get(("header", active_label))
         and bool(getattr(settings, "use_group_by_type", True))
         and not state.list.search_query.strip()
+        and bool(getattr(settings, "use_follow_active", False))
     ):
         type_stats = (state.tree_data() or {}).get("type_stats") or {}
         if type_stats.get(active_label, 0) > 1 and active_label not in state.list.expanded:
@@ -637,7 +638,25 @@ def handle_list_expand(
         return False
 
     expanded = state.list.expanded
+
     if expand:
+        tree_data = state.tree_data() or {}
+        type_stats = tree_data.get("type_stats") or {}
+        type_nodes = tree_data.get("type_nodes") or {}
+        type_count = type_stats.get(label, len(type_nodes.get(label, ())))
+        if type_count <= 1:
+            # A single-node group lists no child rows, so expanding it would
+            # only pollute ``expanded`` and draw a stray guide line over the
+            # following row. Select its header instead.
+            select_type_nodes(op, context, label)
+            target_key: tuple = ("header", label)
+            state.list.hovered_type_label = label
+            state.list.hovered_list_row = None
+            state.interaction.hovered_node_id = None
+            state.list.arrow_key = target_key
+            op._list_last_row_index = state.list.visible_row_index_map.get(target_key, op._list_last_row_index)
+            op._redraw_ui()
+            return True
         changed = label not in expanded
         expanded.add(label)
     else:
@@ -654,7 +673,7 @@ def handle_list_expand(
                 break
         if first_child is None:
             select_type_nodes(op, context, label)
-            target_key: tuple = ("header", label)
+            target_key = ("header", label)
             state.list.hovered_type_label = label
             state.list.hovered_list_row = None
             state.interaction.hovered_node_id = None

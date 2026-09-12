@@ -1461,15 +1461,16 @@ def _draw_list_fills(
 
     state.list.node_rects = child_rects
 
-    # Expand guide lines (on top of the row fills).
+    # Expand guide lines (on top of the row fills). Only groups that list at
+    # least one visible child row can draw one: single-node groups have no
+    # child rows (and must never show a line over the following row), and a
+    # search or scroll that leaves no child visible hides the line too.
     children_get = children.get
+    expandable_labels = {label for label in header_has_visible if entry_map.get(label, _DEFAULT_ENTRY)[2] > 1}
+    child_labels = {label for kind, label, *_rest in visible_rows if kind == _ROW_CHILD}
 
-    for label in header_has_visible:
+    for label in expandable_labels & child_labels:
         if label not in expanded:
-            continue
-
-        child_count = len(children_get(label, ()))
-        if child_count <= 0:
             continue
 
         guide_top = header_slot_bottom.get(label)
@@ -1482,6 +1483,7 @@ def _draw_list_fills(
             _alpha_mul(color, master_alpha) if show_type_colors else _alpha_mul(colors["text"], 0.1 * master_alpha)
         )
 
+        child_count = len(children_get(label, ()))
         guide(
             round(content_x + swatch / 2),
             guide_top - 1,

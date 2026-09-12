@@ -20,6 +20,7 @@ from .core.state import _cleanup_shared_tree_caches, _ensure_area_states, _minim
 from .core.theme import _srgb_to_linear
 from .draw.overlay import draw_minimap
 from .ops.navigate import classes as operator_classes
+from .ui.menus import classes as menu_classes
 from .ui.panels import classes as panel_classes
 from .ui.panels import draw_minimap_header_button
 from .ui.preferences import _update_logger_from_prefs
@@ -35,6 +36,7 @@ logger.addHandler(logging.NullHandler())
 classes = (
     *prefs_classes,
     *preset_classes,
+    *menu_classes,
     *operator_classes,
     *panel_classes,
 )

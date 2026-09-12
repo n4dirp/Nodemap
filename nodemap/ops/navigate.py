@@ -53,6 +53,7 @@ from ..geo.transforms import (
     _get_minimap_transform,
     _get_visible_rect,
 )
+from ..ui.menus import open_minimap_button_menu
 from . import resize, selection
 from .animations import AnimationController
 
@@ -512,6 +513,7 @@ class NODEMAP_OT_navigate(Operator):
     _list_search_pressed: bool = False
     _list_search_clear_pressed: bool = False
     _search_blur_consumed: bool = False
+    _context_menu_button: str | None = None
     _list_mmb_dragging: bool = False
     _list_mmb_drag_start: tuple[int, int] | None = None
     _list_last_row_index: int = -1
@@ -593,6 +595,23 @@ class NODEMAP_OT_navigate(Operator):
                 if self._state and self._state.interaction.hovered_minimap:
                     self._state.interaction.hovered_minimap = False
                     self._redraw_ui()
+                # The cursor left the Node Editor (e.g. over a popup, menu, or
+                # header): drop any pending click/drag arming so a later
+                # release outside the minimap cannot fire a stale gesture.
+                # An actively held drag keeps its state so it can complete.
+                if not (
+                    self._dragging
+                    or self._marquee_dragging
+                    or self._moving
+                    or self._mmb_dragging
+                    or self._list_mmb_dragging
+                    or self._list_scroll_pressed
+                    or self._resize_handle is not None
+                    or self._list_width_dragging
+                ):
+                    self._was_in_minimap = False
+                    self._drag_start = None
+                    self._reset_gesture()
                 self._state = None
                 self._area = None
                 self._region = None
@@ -750,7 +769,10 @@ class NODEMAP_OT_navigate(Operator):
 
             case "NUMPAD_PERIOD":
                 if event.value == "PRESS" and in_minimap:
-                    self._dispatch_frame_action(context, settings, "SELECTED")
+                    if _in_list_zone(self._mouse_x, self._mouse_y, state):
+                        self._dispatch_frame_action(context, settings, "SELECTED", scope="LIST")
+                    else:
+                        self._dispatch_frame_action(context, settings, "SELECTED", scope="MAP")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -1096,11 +1118,16 @@ class NODEMAP_OT_navigate(Operator):
                     else:
                         framed = self._frame_marquee_rect(context, state, start, end)
                 if framed:
+                    self._was_in_minimap = False
+                    self._drag_start = None
+                    self._reset_gesture()
                     self._redraw_ui()
                     return {"RUNNING_MODAL"}
             if self._dragging:
                 self._dragging = False
                 self._drag_start = None
+                self._was_in_minimap = False
+                self._reset_gesture()
                 if self._anim.drag_active:
                     self._pan_acc[0] += self._anim.drag_target[0]
                     self._pan_acc[1] += self._anim.drag_target[1]
@@ -1127,15 +1154,31 @@ class NODEMAP_OT_navigate(Operator):
                 self._anim.destroy_timer(context)
                 return {"RUNNING_MODAL"}
             if not self._dragging and self._was_in_minimap:
-                if self._click_action is not None:
-                    self._run_click_action(context, state)
+                # A click only acts when both press and release land inside
+                # the minimap: a press swallowed elsewhere (e.g. by a popup)
+                # must never let its release pan or select, and a release
+                # outside belongs to the editor, so it passes through.
                 self._was_in_minimap = False
                 self._drag_start = None
-                return {"RUNNING_MODAL"}
+                if self._click_action is not None and in_minimap:
+                    self._run_click_action(context, state)
+                    self._reset_gesture()
+                    return {"RUNNING_MODAL"}
+                self._reset_gesture()
+                return {"PASS_THROUGH"}
             self._was_in_minimap = False
             self._drag_start = None
+            self._reset_gesture()
             return {"PASS_THROUGH"}
         # --- Press ---
+        # Synthetic follow-ups (CLICK) carry no new user intent: only PRESS
+        # and DOUBLE_CLICK may arm a gesture, so a stray CLICK can never
+        # leave a pending drag or click behind for a later release to fire.
+        if event.value not in ("PRESS", "DOUBLE_CLICK"):
+            self._was_in_minimap = False
+            self._drag_start = None
+            self._reset_gesture()
+            return {"PASS_THROUGH"}
         # While the search box is focused, the first click outside the search
         # zone only blurs and is swallowed, so it never arms buttons, rows,
         # drags, or resizes. Clicking the box itself keeps focus (below).
@@ -1279,7 +1322,9 @@ class NODEMAP_OT_navigate(Operator):
                 self._redraw_ui()
             return {"RUNNING_MODAL"}
         else:
+            self._was_in_minimap = False
             self._drag_start = None
+            self._reset_gesture()
             return {"PASS_THROUGH"}
 
     def _handle_right_mouse(self, context: Context, event: Event) -> set[str]:
@@ -1288,6 +1333,12 @@ class NODEMAP_OT_navigate(Operator):
         if event.value == "RELEASE":
             if self._search_blur_consumed:
                 self._search_blur_consumed = False
+                return {"RUNNING_MODAL"}
+            context_menu_button = self._context_menu_button
+            if context_menu_button is not None:
+                self._context_menu_button = None
+                if state is not None and _frame_button_at(self._mouse_x, self._mouse_y, state) == context_menu_button:
+                    self._open_button_context_menu(context, context_menu_button)
                 return {"RUNNING_MODAL"}
             if self._list_width_dragging:
                 self._list_width_dragging = False
@@ -1331,11 +1382,16 @@ class NODEMAP_OT_navigate(Operator):
                     else:
                         framed = self._frame_marquee_rect(context, state, start, end)
                 if framed:
+                    self._was_in_minimap = False
+                    self._drag_start = None
+                    self._reset_gesture()
                     self._redraw_ui()
                     return {"RUNNING_MODAL"}
             if self._dragging:
                 self._dragging = False
                 self._drag_start = None
+                self._was_in_minimap = False
+                self._reset_gesture()
                 if self._anim.drag_active:
                     self._pan_acc[0] += self._anim.drag_target[0]
                     self._pan_acc[1] += self._anim.drag_target[1]
@@ -1362,21 +1418,42 @@ class NODEMAP_OT_navigate(Operator):
                 self._anim.destroy_timer(context)
                 return {"RUNNING_MODAL"}
             if not self._dragging and self._was_in_minimap:
-                if self._click_action is not None:
-                    self._run_click_action(context, state)
+                # A click only acts when both press and release land inside
+                # the minimap: a press swallowed elsewhere (e.g. by a popup)
+                # must never let its release pan or select, and a release
+                # outside belongs to the editor, so it passes through.
                 self._was_in_minimap = False
                 self._drag_start = None
-                return {"RUNNING_MODAL"}
+                if self._click_action is not None and in_minimap:
+                    self._run_click_action(context, state)
+                    self._reset_gesture()
+                    return {"RUNNING_MODAL"}
+                self._reset_gesture()
+                return {"PASS_THROUGH"}
             self._was_in_minimap = False
             self._drag_start = None
+            self._reset_gesture()
             return {"PASS_THROUGH"}
         # --- Press ---
+        # Synthetic follow-ups (CLICK) carry no new user intent: only PRESS
+        # and DOUBLE_CLICK may arm a gesture, so a stray CLICK can never
+        # leave a pending drag or click behind for a later release to fire.
+        if event.value not in ("PRESS", "DOUBLE_CLICK"):
+            self._was_in_minimap = False
+            self._drag_start = None
+            self._reset_gesture()
+            return {"PASS_THROUGH"}
         # Same blur-then-swallow rule as the left button: the first right-click
         # outside the focused search box only blurs instead of selecting rows.
         if self._consume_search_blur_press(context, state):
             return {"RUNNING_MODAL"}
         self._was_in_minimap = in_minimap
         if self._was_in_minimap:
+            context_button_id = _frame_button_at(self._mouse_x, self._mouse_y, state)
+            if context_button_id:
+                self._reset_gesture()
+                self._context_menu_button = context_button_id
+                return {"RUNNING_MODAL"}
             self._anim.cancel_smooth(context)
             ui_scale = _get_ui_scale()
             divider_handle_r = resize.get_list_divider_handle(state, self._mouse_x, self._mouse_y, ui_scale)
@@ -1489,7 +1566,9 @@ class NODEMAP_OT_navigate(Operator):
                 self._redraw_ui()
             return {"RUNNING_MODAL"}
         else:
+            self._was_in_minimap = False
             self._drag_start = None
+            self._reset_gesture()
             return {"PASS_THROUGH"}
 
     def _handle_mouse_move(self, context: Context, event: Event) -> set[str]:
@@ -1701,6 +1780,14 @@ class NODEMAP_OT_navigate(Operator):
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
 
+    def _open_button_context_menu(self, context: Context, button_id: str) -> None:
+        """Open the toggle context menu tied to the right-clicked minimap button."""
+        try:
+            with self._override_ctx(context):
+                open_minimap_button_menu(context, button_id)
+        except RuntimeError:
+            pass
+
     def _activate_armed_button(self, context: Context, settings) -> None:
         """Release the armed minimap button; run its action when still under the cursor."""
         button_id = self._armed_button
@@ -1723,10 +1810,14 @@ class NODEMAP_OT_navigate(Operator):
             self._redraw_ui()
         self._dispatch_frame_action(context, settings, button_id)
 
-    def _dispatch_frame_action(self, context: Context, settings, button_id: str) -> None:
+    def _dispatch_frame_action(self, context: Context, settings, button_id: str, scope: str = "BOTH") -> None:
         """Run a frame action directly, or eased via animation when smooth pan applies.
 
         Shared by the minimap button release and the Home / End / Numpad shortcuts.
+        The SELECTED action touches two spaces: the minimap view and the type
+        list. *scope* selects which one runs: "MAP" frames only the nodes in
+        the minimap, "LIST" focuses only the list on the active node, and
+        "BOTH" keeps the combined behaviour for buttons and operators.
         """
         state = self._state
         if not state:
@@ -1759,14 +1850,16 @@ class NODEMAP_OT_navigate(Operator):
                 else:
                     frame_view(self._space, self._region, area_ptr)
             case "SELECTED":
-                if smooth:
-                    targets = _compute_frame_selected_targets(self._space, self._region, area_ptr)
-                    if targets:
-                        target_zoom = targets[0] if targets[0] is not None else state.view.user_zoom
-                        self._anim.start_frame_animation(context, target_zoom, [targets[1], targets[2]])
-                else:
-                    frame_selected(self._space, self._region, area_ptr)
-                selection.focus_list_on_active_node(self, context)
+                if scope in ("BOTH", "MAP"):
+                    if smooth:
+                        targets = _compute_frame_selected_targets(self._space, self._region, area_ptr)
+                        if targets:
+                            target_zoom = targets[0] if targets[0] is not None else state.view.user_zoom
+                            self._anim.start_frame_animation(context, target_zoom, [targets[1], targets[2]])
+                    else:
+                        frame_selected(self._space, self._region, area_ptr)
+                if scope in ("BOTH", "LIST"):
+                    selection.focus_list_on_active_node(self, context)
 
     def _pan_view(self, context: Context, dx: int, dy: int, smooth: bool = False) -> None:
         state = self._state
@@ -2212,6 +2305,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
+        self._context_menu_button = None
         self._reset_gesture()
         self._list_last_row_index = -1
         self._list_width_dragging = False
@@ -2262,6 +2356,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
+        self._context_menu_button = None
         self._reset_gesture()
         self._list_last_row_index = -1
         self._list_width_dragging = False
