@@ -55,8 +55,8 @@ BORDER_POSITIONS: frozenset[str] = frozenset({"TOP_BORDER", "BOTTOM_BORDER", "LE
 # ---------------------------------------------------------------------------
 # Framing / zoom
 # ---------------------------------------------------------------------------
-MIN_FRAME_ZOOM: float = 0.1
-MAX_FRAME_ZOOM: float = 20.0
+MIN_FRAME_ZOOM: float = 0.3
+MAX_FRAME_ZOOM: float = 5.0
 EDITOR_FIT_MARGIN: float = 0.15
 
 # Wheel zoom steps the view by this factor per notch.
@@ -72,7 +72,7 @@ LABEL_MARGIN_PX: float = 12.0
 # Type-list zone
 # ---------------------------------------------------------------------------
 TYPE_LIST_FONT_ID: int = 0
-TYPE_LIST_FONT_SIZE: int = 10
+TYPE_LIST_FONT_SIZE: int = 11
 TYPE_LIST_MIN_WIDTH: float = 72.0
 LIST_PAD_X: float = 6.0
 LIST_SWATCH: float = 10.0
@@ -168,7 +168,7 @@ GROUP_MARKER_GAP: float = 4.0
 # ---------------------------------------------------------------------------
 # Socket indicator
 # ---------------------------------------------------------------------------
-SOCKET_PILL_SIZE_MULTIPLIER: float = 2.0
+SOCKET_PILL_SIZE_MULTIPLIER: float = 3.0
 
 # ---------------------------------------------------------------------------
 # Node rendering

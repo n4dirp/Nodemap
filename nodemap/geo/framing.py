@@ -106,7 +106,10 @@ def _compute_frame_to_bounds_targets(
 ) -> tuple[float, float, float]:
     """Compute target zoom and pan to frame the given bounds without applying them.
 
-    The bounds are zoomed to entirely fill the minimap. Return ``(zoom, pan_x, pan_y)``.
+    The bounds are zoomed to entirely fill the minimap. The zoom is clamped
+    to ``MIN_FRAME_ZOOM``/``MAX_FRAME_ZOOM`` so tiny marquees cannot magnify
+    excessively and huge ones cannot shrink below the minimum. Return
+    ``(zoom, pan_x, pan_y)``.
     """
     minimap_state = _state(area_ptr)
 
@@ -115,35 +118,11 @@ def _compute_frame_to_bounds_targets(
     target_w = max(target_bounds[2] - target_bounds[0], 1.0)
     target_h = max(target_bounds[3] - target_bounds[1], 1.0)
     zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h))
+    zoom = max(MIN_FRAME_ZOOM, min(zoom, MAX_FRAME_ZOOM))
 
     target_cx = (target_bounds[0] + target_bounds[2]) / 2
     target_cy = (target_bounds[1] + target_bounds[3]) / 2
 
-    pan_x = -(target_cx - tree_center_x) * base_scale * zoom
-    pan_y = -(target_cy - tree_center_y) * base_scale * zoom
-    return zoom, pan_x, pan_y
-
-
-def _compute_zoom_out_from_bounds_targets(
-    target_bounds: tuple[float, float, float, float],
-    area_ptr: int | None = None,
-) -> tuple[float, float, float]:
-    """Compute target zoom and pan that zoom out by the mirrored framing ratio.
-
-    Framing *target_bounds* would zoom in by ``frame_zoom / current``; this
-    returns ``current / ratio`` centered on the bounds instead, clamped so the
-    gesture never zooms in (a huge rect only recenters) and never passes
-    ``MIN_FRAME_ZOOM``. Return ``(zoom, pan_x, pan_y)``.
-    """
-    minimap_state = _state(area_ptr)
-    frame_zoom, _, _ = _compute_frame_to_bounds_targets(target_bounds, area_ptr)
-    current = max(minimap_state.view.user_zoom, MIN_FRAME_ZOOM)
-    ratio = max(frame_zoom / current, 1.0)
-    zoom = min(max(current / ratio, MIN_FRAME_ZOOM), current)
-
-    _, _, _, _, _, _, base_scale, tree_center_x, tree_center_y = _compute_base_map_geom(minimap_state)
-    target_cx = (target_bounds[0] + target_bounds[2]) / 2
-    target_cy = (target_bounds[1] + target_bounds[3]) / 2
     pan_x = -(target_cx - tree_center_x) * base_scale * zoom
     pan_y = -(target_cy - tree_center_y) * base_scale * zoom
     return zoom, pan_x, pan_y
@@ -156,21 +135,6 @@ def _frame_to_bounds(
     """Adjust minimap zoom/pan to frame the given bounds in tree coordinates."""
     minimap_state = _state(area_ptr)
     zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(target_bounds, area_ptr)
-    minimap_state.view.anchor_zoom = zoom
-    minimap_state.view.user_zoom = zoom
-    minimap_state.view.pan = (pan_x, pan_y)
-    # Force a batch rebuild on the next draw (see frame_all).
-    minimap_state.cache._batches_dirty = True
-    _redraw()
-
-
-def _zoom_out_to_bounds(
-    target_bounds: tuple[float, float, float, float],
-    area_ptr: int | None = None,
-) -> None:
-    """Zoom the minimap out by the mirrored framing ratio of the given bounds."""
-    minimap_state = _state(area_ptr)
-    zoom, pan_x, pan_y = _compute_zoom_out_from_bounds_targets(target_bounds, area_ptr)
     minimap_state.view.anchor_zoom = zoom
     minimap_state.view.user_zoom = zoom
     minimap_state.view.pan = (pan_x, pan_y)

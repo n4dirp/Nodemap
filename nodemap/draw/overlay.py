@@ -492,10 +492,10 @@ def _draw_view_fill(
     if not visible:
         return
 
-    view_x = round(map_anchor_x + (visible[0] - tree_center_x) * scale)
-    view_y = round(map_anchor_y + (visible[1] - tree_center_y) * scale)
-    view_w = round(max((visible[2] - visible[0]) * scale, 1.0))
-    view_h = round(max((visible[3] - visible[1]) * scale, 1.0))
+    view_x = map_anchor_x + (visible[0] - tree_center_x) * scale
+    view_y = map_anchor_y + (visible[1] - tree_center_y) * scale
+    view_w = max((visible[2] - visible[0]) * scale, 1.0)
+    view_h = max((visible[3] - visible[1]) * scale, 1.0)
 
     view_left = max(view_x, map_x)
     view_bottom = max(view_y, map_y)
@@ -509,6 +509,7 @@ def _draw_view_fill(
     fill_color = colors["viewport_fill"]
     fill_color = _alpha_mul(fill_color, 0.2 * master_alpha)
     node_roundness = colors.get("node_roundness", 2.0) * ui_scale
+    
     _draw_filled_rounded_rect_clipped(
         view_left,
         view_bottom,

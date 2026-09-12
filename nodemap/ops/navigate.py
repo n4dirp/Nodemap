@@ -44,9 +44,7 @@ from ..geo.framing import (
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
-    _compute_zoom_out_from_bounds_targets,
     _frame_to_bounds,
-    _zoom_out_to_bounds,
     frame_all,
     frame_selected,
     frame_view,
@@ -2089,7 +2087,6 @@ class NODEMAP_OT_navigate(Operator):
     ) -> bool:
         """Frame the tree-space area covered by a marquee rect in the minimap.
 
-        A right-to-left drag zooms out by the mirrored framing ratio instead.
         Return True when a non-degenerate rect produced a frame; False for a
         near-zero rect so the caller can fall back to the click action.
         """
@@ -2098,13 +2095,8 @@ class NODEMAP_OT_navigate(Operator):
             return False
         area_ptr = self._area.as_pointer() if self._area else 0
         if self._anim._animations_enabled(context):
-            if end[0] < start[0]:
-                zoom, pan_x, pan_y = _compute_zoom_out_from_bounds_targets(bounds, area_ptr)
-            else:
-                zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(bounds, area_ptr)
+            zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(bounds, area_ptr)
             self._anim.start_frame_animation(context, zoom, [pan_x, pan_y])
-        elif end[0] < start[0]:
-            _zoom_out_to_bounds(bounds, area_ptr)
         else:
             _frame_to_bounds(bounds, area_ptr)
         return True
@@ -2114,13 +2106,25 @@ class NODEMAP_OT_navigate(Operator):
     ) -> bool:
         """Frame the tree-space area covered by a marquee rect in the editor.
 
-        Return True when a non-degenerate rect produced a frame; False for a
-        near-zero rect so the caller can fall back to the click action.
+        Tiny rects are expanded to the ``MAX_FRAME_ZOOM`` limit so the editor
+        cannot magnify excessively. Return True when a non-degenerate rect
+        produced a frame; False for a near-zero rect so the caller can fall
+        back to the click action.
         """
         bounds = self._marquee_tree_bounds(state, start, end)
         if bounds is None:
             return False
-        target = [bounds[0], bounds[1], bounds[2], bounds[3]]
+        visible = _get_visible_rect(self._space, self._region)
+        if visible:
+            viewport_w = max(visible[2] - visible[0], 1.0)
+            viewport_h = max(visible[3] - visible[1], 1.0)
+            center_x = (bounds[0] + bounds[2]) / 2
+            center_y = (bounds[1] + bounds[3]) / 2
+            half_w = max((bounds[2] - bounds[0]) / 2, viewport_w / MAX_FRAME_ZOOM / 2)
+            half_h = max((bounds[3] - bounds[1]) / 2, viewport_h / MAX_FRAME_ZOOM / 2)
+            target = [center_x - half_w, center_y - half_h, center_x + half_w, center_y + half_h]
+        else:
+            target = [bounds[0], bounds[1], bounds[2], bounds[3]]
         for _ in range(100):
             visible = _get_visible_rect(self._space, self._region)
             if not visible or self._anim._editor_view_close(visible, target):
