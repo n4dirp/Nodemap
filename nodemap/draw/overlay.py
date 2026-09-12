@@ -16,9 +16,9 @@ from ..core.constants import (
     BUTTON_HOVER_ALPHA,
     BUTTON_MARGIN,
     BUTTON_SIZE,
+    CONTENT_PADDING,
     CORNER_POSITIONS,
     FONT_SIZE,
-    HANDLE_THICKNESS,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
     TYPE_LIST_LEFT_BUTTON_GAP,
@@ -140,7 +140,7 @@ def _compute_minimap_rect(
     map_w = min(map_w, (safe_width - x_margin) * max_width_pct)
     map_h = min(map_h, (safe_height - y_margin - margin) * max_height_pct)
 
-    padding = 6 * ui_scale
+    padding = CONTENT_PADDING * ui_scale
 
     if corner in CORNER_POSITIONS:
         match corner:
@@ -346,7 +346,7 @@ def _draw_moving_border(
             return
 
         thickness = border_width
-        margin = HANDLE_THICKNESS * ui_scale
+        margin = CONTENT_PADDING * ui_scale
         inset = 0.5 * ui_scale
         radius = 0
 
@@ -443,7 +443,7 @@ def _draw_resize_handles(
     if height_side:
         active_sides[height_side] = color_warn if height_clamped else color_base
 
-    margin = HANDLE_THICKNESS * ui_scale
+    margin = CONTENT_PADDING * ui_scale
     inset = 2.0 * ui_scale
 
     x_inner = map_x + inset
@@ -873,8 +873,8 @@ def _layout_minimap_buttons(
         # Vertical layout: the row sits just below the top list strip,
         # overlapping the map content filling the bottom, like the left
         # placement.
-        strip_h = min(state.list.list_width, map_h - 2 * HANDLE_THICKNESS * ui_scale)
-        zone_bottom = map_y + map_h - HANDLE_THICKNESS * ui_scale - strip_h
+        strip_h = min(state.list.list_width, map_h - 2 * CONTENT_PADDING * ui_scale)
+        zone_bottom = map_y + map_h - CONTENT_PADDING * ui_scale - strip_h
         top_y = round(zone_bottom - TYPE_LIST_TOP_BUTTON_GAP * ui_scale - button_size)
     else:
         top_y = round(map_y + map_h - padding - button_margin - button_size)

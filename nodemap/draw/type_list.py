@@ -12,7 +12,7 @@ from mathutils import Matrix
 
 from ..core.constants import (
     BUTTON_SIZE,
-    HANDLE_THICKNESS,
+    CONTENT_PADDING,
     LIST_COUNT_GAP,
     LIST_PAD_X,
     LIST_SWATCH,
@@ -1134,7 +1134,7 @@ def _compute_zone_geometry(
 
     children = state.cache.list_filtered_children or state.cache.list_children or {}
 
-    handle_pad = HANDLE_THICKNESS * ui_scale
+    handle_pad = CONTENT_PADDING * ui_scale
     zone_x = map_x + handle_pad
 
     if settings.show_search_bar:

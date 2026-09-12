@@ -2,7 +2,7 @@
 
 import bpy
 
-from ..core.constants import EDITOR_FIT_MARGIN, HANDLE_THICKNESS, MAX_FRAME_ZOOM, MIN_FRAME_ZOOM
+from ..core.constants import CONTENT_PADDING, EDITOR_FIT_MARGIN, MAX_FRAME_ZOOM, MIN_FRAME_ZOOM
 from ..core.helpers import (
     _expand_bounds_margin,
     _get_node_dims,
@@ -246,7 +246,7 @@ def _compute_frame_selected_targets(
     )
 
     if len(selected) > 1 or selected[0].type == "FRAME":
-        margin_px = (HANDLE_THICKNESS * 2) * _get_ui_scale()
+        margin_px = (CONTENT_PADDING * 2) * _get_ui_scale()
         bounds_h = max(max_y - min_y, 1.0)
         inner_h = max(rect[3] - 2 * minimap_state.view.inner_padding, 1.0)
         margin = margin_px * bounds_h / inner_h

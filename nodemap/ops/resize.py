@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from .. import __package__ as base_package
 from ..core.constants import (
     HANDLE_THICKNESS,
+    LIST_TOP_RESIZE_HALF_WIDTH,
     MAP_CORNER_SNAP_RADIUS,
     MAP_SNAP_CENTER_ZONE_PCT,
     MAP_SNAP_TOLERANCE,
@@ -38,19 +39,20 @@ logger = logging.getLogger(base_package)
 def get_list_divider_handle(state: MinimapState, region_x: int, region_y: int, ui_scale: float) -> ResizeHandle | None:
     """Return ``LIST`` when the cursor is over the divider between list and map.
 
-    The divider spans the gap (``6*scale``) between the list zone's right edge
-    and the map content's left edge (left placement) or runs along the strip's
-    bottom edge (top placement) and uses the same hit thickness as the outer
-    resize borders.
+    The divider spans the gap (``CONTENT_PADDING*scale``) between the list
+    zone's right edge and the map content's left edge (left placement) or runs
+    along the strip's bottom edge (top placement) with its own grab band.
     """
     if state.list.list_width <= 0 or not state.list.list_zone_rect or not state.view.rect:
         return None
     zone_x, zone_y, zone_w, zone_h = state.list.list_zone_rect
     hit_half_width = (HANDLE_THICKNESS - 1) * ui_scale
     if state.list.list_placement == "TOP":
-        # Band centered on the strip's bottom edge, between the top-pinned
-        # list and the button row beneath it.
-        if zone_x <= region_x <= zone_x + zone_w and zone_y - hit_half_width <= region_y <= zone_y + hit_half_width:
+        # Band hangs below the strip's bottom edge, between the top-pinned
+        # list and the button row beneath it, so it never covers the bottom
+        # rows or the horizontal scrollbar.
+        top_half_width = LIST_TOP_RESIZE_HALF_WIDTH * ui_scale
+        if zone_x <= region_x <= zone_x + zone_w and zone_y - top_half_width <= region_y <= zone_y:
             return ResizeHandle.LIST
         return None
     # Hit zone starts at the zone's right edge (never reaching into the

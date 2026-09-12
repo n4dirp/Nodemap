@@ -11,6 +11,7 @@ from typing import Any
 import bpy
 
 from .. import __package__ as base_package
+from .constants import CONTENT_PADDING
 from .helpers import get_addon_preferences
 
 logger = logging.getLogger(base_package)
@@ -58,7 +59,7 @@ class ViewState:
     raw_tree_bounds: Rect | None = None
     snapshot_selected_bounds: Rect | None = None
     outer_margin: float = 10.0
-    inner_padding: float = 6.0
+    inner_padding: float = CONTENT_PADDING
     map_scale: float = 1.0
     user_zoom: float = 1.0
     anchor_zoom: float = 1.0

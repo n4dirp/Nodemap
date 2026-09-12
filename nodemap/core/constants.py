@@ -11,7 +11,30 @@ MIN_MAP_HEIGHT: int = 100
 # ---------------------------------------------------------------------------
 # Interaction handles
 # ---------------------------------------------------------------------------
+# Grab width of the resize hit areas. Visual only for hit-testing; the gap
+# between the minimap frame and its content is CONTENT_PADDING below.
 HANDLE_THICKNESS: int = 6
+
+# Half-width of the grab band for resizing the type-list height when the
+# list sits on top; the band centers on the strip's bottom edge.
+LIST_TOP_RESIZE_HALF_WIDTH: int = 5
+
+# ---------------------------------------------------------------------------
+# Content padding
+# ---------------------------------------------------------------------------
+# Single knob for the gap between the minimap frame and its content (node
+# area, type-list zone, edge pills). Scrollbars keep their own
+# SCROLLBAR_INSET/SCROLLBAR_THICKNESS metrics.
+CONTENT_PADDING: int = 6
+
+# Single knob for the gap between the minimap and the editor region edges.
+# Breadcrumb and asset-shelf offsets derive from this plus their fixed heights.
+MINIMAP_MARGIN: int = 12
+
+# Heights of the editor rows the minimap must clear: the breadcrumb context
+# path and the compositor asset shelf.
+CONTEXT_PATH_HEIGHT: int = 29
+ASSET_SHELF_HEIGHT: int = 24
 
 # ---------------------------------------------------------------------------
 # Dock / snap-to-border
@@ -111,8 +134,8 @@ BUTTON_HOVER_ALPHA: float = 0.02
 
 # Minimap area kept free of the type list: left placement reserves horizontal
 # space, top placement reserves vertical space.
-TYPE_LIST_RESERVE_LEFT: int = 2 * BUTTON_SIZE + 4 * HANDLE_THICKNESS - 1
-TYPE_LIST_RESERVE_TOP: int = 2 * BUTTON_SIZE + 3 * HANDLE_THICKNESS - 1
+TYPE_LIST_RESERVE_LEFT: int = 2 * BUTTON_SIZE + 4 * CONTENT_PADDING - 1
+TYPE_LIST_RESERVE_TOP: int = 2 * BUTTON_SIZE + 3 * CONTENT_PADDING - 1
 
 # ---------------------------------------------------------------------------
 # Batch building

@@ -9,8 +9,8 @@ from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
 from .. import __package__ as base_package
 from ..core.constants import (
+    CONTENT_PADDING,
     DOCK_DWELL_MS,
-    HANDLE_THICKNESS,
     INERTIA_MIN_SPEED,
     MAX_FRAME_ZOOM,
     MIN_FRAME_ZOOM,
@@ -234,7 +234,7 @@ def _in_list_zone(region_x: int, region_y: int, state: MinimapState) -> bool:
         # Fallback for the first frame before the zone rect is recorded:
         # assume the legacy left-edge placement.
         map_x, map_y, _, map_h = state.view.rect
-        hit_pad = HANDLE_THICKNESS * _get_ui_scale()
+        hit_pad = CONTENT_PADDING * _get_ui_scale()
         zone_w = state.view.inner_padding + state.list.list_width
         zone_rect = (map_x + hit_pad, map_y + hit_pad, zone_w, map_h - 2 * hit_pad)
     zone_x, zone_y, zone_w, zone_h = zone_rect

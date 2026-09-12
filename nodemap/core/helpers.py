@@ -10,8 +10,11 @@ import bpy
 
 from .. import __package__ as base_package
 from .constants import (
+    ASSET_SHELF_HEIGHT,
+    CONTEXT_PATH_HEIGHT,
     EMPTY_FINGERPRINT,
     LABEL_MARGIN_PX,
+    MINIMAP_MARGIN,
     PAN_ANIM_INTERVAL,
     TYPE_LIST_ANIM_DURATION,
     TYPE_LIST_FONT_SIZE,
@@ -208,12 +211,12 @@ def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, fl
     show_asset_shelf = getattr(space, "show_region_asset_shelf", False)
     show_context_path = getattr(space.overlay, "show_context_path", False)
 
-    map_padding = 12.0
-    x_margin = map_padding * ui_scale
+    x_margin = MINIMAP_MARGIN * ui_scale
     y_margin = x_margin
     margin_bottom = x_margin
 
-    adjusted_margin = (map_padding + 29) * ui_scale
+    context_margin = (MINIMAP_MARGIN + CONTEXT_PATH_HEIGHT) * ui_scale
+    shelf_margin = (MINIMAP_MARGIN + ASSET_SHELF_HEIGHT) * ui_scale
 
     # Classify the dock by which vertical edge it sits near: top corners and
     # the top border treat the context path above and the asset shelf below;
@@ -221,14 +224,14 @@ def _get_minimap_margins(space, corner: str, ui_scale: float) -> tuple[float, fl
     docks_bottom = corner in ("BOTTOM_RIGHT", "BOTTOM_LEFT", "BOTTOM_BORDER")
     if docks_bottom:
         if is_compositor and show_asset_shelf:
-            y_margin = adjusted_margin
+            y_margin = shelf_margin
         if show_context_path:
-            margin_bottom = adjusted_margin
+            margin_bottom = context_margin
     else:
         if show_context_path:
-            y_margin = adjusted_margin
+            y_margin = context_margin
         if is_compositor and show_asset_shelf:
-            margin_bottom = adjusted_margin
+            margin_bottom = shelf_margin
 
     return x_margin, y_margin, margin_bottom
 
