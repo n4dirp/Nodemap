@@ -278,6 +278,7 @@ def _clear_search_stale_hover(state: MinimapState) -> None:
     state.interaction.hovered_node_id = None
     state.buttons.hovered_button_id = None
     state.list.hovered_scrollbar = False
+    state.list.hovered_h_scrollbar = False
     state.interaction.hovered_handle = None
     state.buttons.pressed_button_id = None
 
@@ -313,6 +314,33 @@ def _apply_list_scroll_drag(mouse_x: int, mouse_y: int, grab: float, state: Mini
     track_span = max(track_len - thumb_length, 1.0)
     scroll_offset = min(max(mouse_y + grab - thumb_length - track_y, 0.0), track_span)
     state.list.scroll = (1.0 - scroll_offset / track_span) * state.list.scroll_max
+
+
+def _list_h_scrollbar_hit(region_x: int, region_y: int, state: MinimapState) -> bool:
+    """Return True when the cursor is over the horizontal type-list scrollbar."""
+    scrollbar_track = state.list.h_scrollbar_track
+    if not scrollbar_track or state.list.h_scroll_max <= 0:
+        return False
+    x, y, w, h = scrollbar_track
+    hit_pad = SCROLLBAR_HIT_PAD * _get_ui_scale()
+    return x <= region_x <= x + w and y - hit_pad <= region_y <= y + h + hit_pad
+
+
+def _apply_list_h_scroll_drag(mouse_x: int, mouse_y: int, grab: float, state: MinimapState) -> None:
+    """Scroll the type list sideways so the dragged thumb tracks the cursor.
+
+    *grab* is the cursor-to-thumb-left distance captured at press; mapping
+    the thumb left back to a track fraction keeps the grab point stable.
+    """
+    scrollbar_track = state.list.h_scrollbar_track
+    scrollbar_thumb = state.list.h_scrollbar_thumb
+    if not scrollbar_track or not scrollbar_thumb or state.list.h_scroll_max <= 0:
+        return
+    track_x, track_y, track_len, _track_h = scrollbar_track
+    thumb_length = scrollbar_thumb[2]
+    track_span = max(track_len - thumb_length, 1.0)
+    scroll_offset = min(max(mouse_x - grab - track_x, 0.0), track_span)
+    state.list.h_scroll = (scroll_offset / track_span) * state.list.h_scroll_max
 
 
 _CURSOR_MAP: dict[ResizeHandle, str] = {
@@ -510,6 +538,8 @@ class NODEMAP_OT_navigate(Operator):
     _list_toggle_pressed: str | None = None
     _list_scroll_pressed: bool = False
     _list_scroll_grab: float = 0.0
+    _list_h_scroll_pressed: bool = False
+    _list_h_scroll_grab: float = 0.0
     _list_search_pressed: bool = False
     _list_search_clear_pressed: bool = False
     _search_blur_consumed: bool = False
@@ -581,6 +611,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._moving
             or self._drag_start is not None
             or self._list_scroll_pressed
+            or self._list_h_scroll_pressed
             or self._search_blur_consumed
             or self._anim.anim_active
             or self._anim.inertia_active
@@ -606,6 +637,7 @@ class NODEMAP_OT_navigate(Operator):
                     or self._mmb_dragging
                     or self._list_mmb_dragging
                     or self._list_scroll_pressed
+                    or self._list_h_scroll_pressed
                     or self._resize_handle is not None
                     or self._list_width_dragging
                 ):
@@ -1016,6 +1048,12 @@ class NODEMAP_OT_navigate(Operator):
                 self._list_scroll_grab = 0.0
                 self._redraw_ui()
                 return {"RUNNING_MODAL"}
+            if self._list_h_scroll_pressed:
+                self._list_h_scroll_pressed = False
+                state.list.h_scrollbar_dragging = False
+                self._list_h_scroll_grab = 0.0
+                self._redraw_ui()
+                return {"RUNNING_MODAL"}
             if self._list_search_clear_pressed:
                 self._list_search_clear_pressed = False
                 clear_rect = state.list.search_clear_rect
@@ -1247,6 +1285,27 @@ class NODEMAP_OT_navigate(Operator):
                     state.list.scrollbar_dragging = True
                     self._redraw_ui()
                     return {"RUNNING_MODAL"}
+                h_track = state.list.h_scrollbar_track
+                h_thumb = state.list.h_scrollbar_thumb
+                if _list_h_scrollbar_hit(self._mouse_x, self._mouse_y, state) and h_track and h_thumb:
+                    thumb_right_x = h_thumb[0] + h_thumb[2]
+                    if h_thumb[0] <= self._mouse_x <= thumb_right_x:
+                        # Direct grab: keep the pressed point pinned to the cursor.
+                        self._list_h_scroll_grab = self._mouse_x - h_thumb[0]
+                    else:
+                        # Trough click pages one track-width toward the click,
+                        # then continues as a drag from there.
+                        if self._mouse_x < h_thumb[0]:
+                            state.list.h_scroll = max(state.list.h_scroll - h_track[2], 0.0)
+                        else:
+                            state.list.h_scroll = min(state.list.h_scroll + h_track[2], state.list.h_scroll_max)
+                        track_span = max(h_track[2] - h_thumb[2], 1.0)
+                        scroll_offset = track_span * (state.list.h_scroll / state.list.h_scroll_max)
+                        self._list_h_scroll_grab = self._mouse_x - (h_track[0] + scroll_offset)
+                    self._list_h_scroll_pressed = True
+                    state.list.h_scrollbar_dragging = True
+                    self._redraw_ui()
+                    return {"RUNNING_MODAL"}
                 child_row = _list_child_at(self._mouse_x, self._mouse_y, state)
                 if child_row:
                     # The flag is only armed so the release is consumed by the
@@ -1472,7 +1531,9 @@ class NODEMAP_OT_navigate(Operator):
                 self._last_cursor = cursor
                 return {"RUNNING_MODAL"}
             if _in_list_zone(self._mouse_x, self._mouse_y, state):
-                if _list_scrollbar_hit(self._mouse_x, self._mouse_y, state):
+                if _list_scrollbar_hit(self._mouse_x, self._mouse_y, state) or _list_h_scrollbar_hit(
+                    self._mouse_x, self._mouse_y, state
+                ):
                     # Scrollbar owns the press; no row selection or pan.
                     return {"RUNNING_MODAL"}
                 child_row = _list_child_at(self._mouse_x, self._mouse_y, state)
@@ -1590,6 +1651,10 @@ class NODEMAP_OT_navigate(Operator):
             _apply_list_scroll_drag(self._mouse_x, self._mouse_y, self._list_scroll_grab, state)
             self._redraw_ui()
             return {"RUNNING_MODAL"}
+        if self._list_h_scroll_pressed and state.list.h_scrollbar_dragging:
+            _apply_list_h_scroll_drag(self._mouse_x, self._mouse_y, self._list_h_scroll_grab, state)
+            self._redraw_ui()
+            return {"RUNNING_MODAL"}
         if self._marquee_dragging:
             state.interaction.marquee_end = (self._mouse_x, self._mouse_y)
             self._redraw_ui()
@@ -1623,12 +1688,17 @@ class NODEMAP_OT_navigate(Operator):
                 if state.list.hovered_scrollbar != over_bar:
                     state.list.hovered_scrollbar = over_bar
                     self._redraw_ui()
-                if over_bar or not in_list:
+                over_h_bar = in_list and _list_h_scrollbar_hit(self._mouse_x, self._mouse_y, state)
+                if state.list.hovered_h_scrollbar != over_h_bar:
+                    state.list.hovered_h_scrollbar = over_h_bar
+                    self._redraw_ui()
+                over_any_bar = over_bar or over_h_bar
+                if over_any_bar or not in_list:
                     row_label = None
                 else:
                     row_label = _list_row_at(self._mouse_x, self._mouse_y, state)
                 child_hover = None
-                if not over_bar and in_list:
+                if not over_any_bar and in_list:
                     child_hover = _list_child_at(self._mouse_x, self._mouse_y, state)
                 if state.list.hovered_type_label != row_label:
                     state.list.hovered_type_label = row_label
@@ -1657,11 +1727,16 @@ class NODEMAP_OT_navigate(Operator):
                     state.buttons.hovered_button_id = new_btn
                     self._redraw_ui()
         if self._list_mmb_dragging and self._list_mmb_drag_start:
+            dx = self._mouse_x - self._list_mmb_drag_start[0]
             dy = self._mouse_y - self._list_mmb_drag_start[1]
-            if abs(dy) > 0:
+            if abs(dx) > 0 or abs(dy) > 0:
                 state.list.scroll = min(
                     max(state.list.scroll - dy, 0.0),
                     state.list.scroll_max,
+                )
+                state.list.h_scroll = min(
+                    max(state.list.h_scroll + dx, 0.0),
+                    state.list.h_scroll_max,
                 )
                 self._list_mmb_drag_start = (self._mouse_x, self._mouse_y)
                 self._redraw_ui()
@@ -2099,6 +2174,8 @@ class NODEMAP_OT_navigate(Operator):
         self._list_toggle_pressed = None
         self._list_scroll_pressed = False
         self._list_scroll_grab = 0.0
+        self._list_h_scroll_pressed = False
+        self._list_h_scroll_grab = 0.0
         self._list_search_pressed = False
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
@@ -2111,6 +2188,8 @@ class NODEMAP_OT_navigate(Operator):
             state.interaction.hovered_node_id = None
             state.list.hovered_scrollbar = False
             state.list.scrollbar_dragging = False
+            state.list.hovered_h_scrollbar = False
+            state.list.h_scrollbar_dragging = False
             state.list.search_cursor = 0
             state.list.search_focused = False
             state.list.search_esc_armed = False

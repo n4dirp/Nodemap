@@ -112,6 +112,8 @@ class ListState:
     width_clamped: bool = False
     scroll: float = 0.0
     scroll_max: float = 0.0
+    h_scroll: float = 0.0
+    h_scroll_max: float = 0.0
     # Follow Active tracking: last revealed active node and one with a pending reveal.
     followed_active: str | None = None
     follow_pending: str | None = None
@@ -120,12 +122,16 @@ class ListState:
     hovered_list_row: tuple | None = None
     hovered_scrollbar: bool = False
     scrollbar_dragging: bool = False
+    hovered_h_scrollbar: bool = False
+    h_scrollbar_dragging: bool = False
     expanded: set[str] = field(default_factory=set)
     row_rects: list[Rect] = field(default_factory=list)
     node_rects: list[Rect] = field(default_factory=list)
     toggle_rects: dict[str, Rect] = field(default_factory=dict)
     scrollbar_thumb: Rect | None = None
     scrollbar_track: Rect | None = None
+    h_scrollbar_thumb: Rect | None = None
+    h_scrollbar_track: Rect | None = None
     list_zone_rect: Rect | None = None
     visible_row_keys: list[tuple] = field(default_factory=list)
     visible_row_index_map: dict[tuple, int] = field(default_factory=dict)

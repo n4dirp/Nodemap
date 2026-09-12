@@ -392,6 +392,12 @@ def _build_type_list_cache(
         nodes = flat_type_nodes(children, state.list.search_query, search_texts=search_texts)
         rows = tuple(iter_flat_list_layout(nodes, row_h))
 
+        meta_by_name = tree_data.get("type_node_meta") or {}
+        widest_child = 0.0
+        for _kind, label, node_name, _local_y in rows:
+            text_w = blf.dimensions(font_id, _child_label_text(node_name, meta_by_name, label))[0]
+            widest_child = max(widest_child, text_w)
+
         state.cache.list_key = key
         state.cache.list_entries = []
         state.cache.list_effective_expanded = set()
@@ -403,6 +409,9 @@ def _build_type_list_cache(
             "line_h": line_h,
             "row_h": row_h,
             "widest_count": 0.0,
+            "widest_header_count": 0.0,
+            "widest_header_plain": 0.0,
+            "widest_child": widest_child,
             "rows": rows,
             "total_h": len(rows) * row_h,
             "header_local_bottom": {},
@@ -467,6 +476,24 @@ def _build_type_list_cache(
 
     header_local_bottom = {label: local_y - row_h for kind, label, _node_name, local_y in rows if kind == _ROW_HEADER}
 
+    meta_by_name = tree_data.get("type_node_meta") or {}
+    widest_header_count = 0.0
+    widest_header_plain = 0.0
+    widest_child = 0.0
+    for kind, label, node_name, _local_y in rows:
+        if kind == _ROW_HEADER:
+            full_count = entry_map.get(label, _DEFAULT_ENTRY)[2]
+            text = _type_header_text(label, full_count, filtered_children, meta_by_name)
+            width = blf.dimensions(font_id, text)[0]
+            if full_count > 1:
+                widest_header_count = max(widest_header_count, width)
+            else:
+                widest_header_plain = max(widest_header_plain, width)
+        else:
+            widest_child = max(
+                widest_child, blf.dimensions(font_id, _child_label_text(node_name, meta_by_name, label))[0]
+            )
+
     state.cache.list_key = key
     state.cache.list_entries = entries
     state.cache.list_effective_expanded = effective_expanded
@@ -478,6 +505,9 @@ def _build_type_list_cache(
         "line_h": line_h,
         "row_h": row_h,
         "widest_count": widest_count,
+        "widest_header_count": widest_header_count,
+        "widest_header_plain": widest_header_plain,
+        "widest_child": widest_child,
         "rows": rows,
         "total_h": len(rows) * row_h,
         "header_local_bottom": header_local_bottom,
@@ -730,7 +760,7 @@ def _bake_list_glyph_batch(
         )
 
 
-def _draw_list_glyph_batch(state: MinimapState, zone_x: float, view_y: float) -> None:
+def _draw_list_glyph_batch(state: MinimapState, zone_x: float, view_y: float, h_scroll: float = 0.0) -> None:
     """Draw the baked swatch/chevron batch under a `(zone_x, view_y)` translate."""
     batch = state.cache.list_swatches_batch
     border_batch = state.cache.list_swatches_border_batch
@@ -739,7 +769,7 @@ def _draw_list_glyph_batch(state: MinimapState, zone_x: float, view_y: float) ->
 
     gpu.matrix.push()
     try:
-        gpu.matrix.translate((zone_x, view_y))
+        gpu.matrix.translate((zone_x - h_scroll, view_y))
 
         mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
 
@@ -1043,6 +1073,9 @@ def _clear_list_interaction(state: MinimapState) -> None:
     state.list.hovered_scrollbar = False
     state.list.scrollbar_thumb = None
     state.list.scrollbar_track = None
+    state.list.hovered_h_scrollbar = False
+    state.list.h_scrollbar_thumb = None
+    state.list.h_scrollbar_track = None
     state.list.list_zone_rect = None
     state.list.search_rect = None
     state.list.search_clear_rect = None
@@ -1086,6 +1119,9 @@ def _compute_zone_geometry(
     row_h = layout["row_h"]
     line_h = layout["line_h"]
     widest_count = layout["widest_count"]
+    widest_header_count = layout.get("widest_header_count", 0.0)
+    widest_header_plain = layout.get("widest_header_plain", 0.0)
+    widest_child = layout.get("widest_child", 0.0)
     total_h = layout["total_h"]
     header_local_bottom = layout["header_local_bottom"]
 
@@ -1176,6 +1212,28 @@ def _compute_zone_geometry(
         (count_right - widest_count - count_gap if show_counts else count_right) - label_x,
     )
 
+    flat_list = not bool(getattr(settings, "use_group_by_type", True))
+    child_label_x = label_x - icon_col_x if flat_list else label_x + icon_col_x
+    header_full_avail = max(0.0, count_right - label_x)
+    header_count_avail = max(0.0, header_full_avail - widest_count - count_gap) if show_counts else header_full_avail
+    child_avail = max(0.0, count_right - child_label_x)
+    over_plain = widest_header_plain - header_full_avail
+    over_count = widest_header_count - header_count_avail
+    over_child = widest_child - child_avail
+    h_scroll_max = max(0.0, over_plain, over_count, over_child)
+    state.list.h_scroll = min(max(state.list.h_scroll, 0.0), h_scroll_max)
+    state.list.h_scroll_max = h_scroll_max
+
+    if over_child >= over_plain and over_child >= over_count:
+        h_view_w = child_avail
+        h_content_w = widest_child
+    elif over_count >= over_plain:
+        h_view_w = header_count_avail
+        h_content_w = widest_header_count
+    else:
+        h_view_w = header_full_avail
+        h_content_w = widest_header_plain
+
     text_y_off = round((row_h - line_h) / 2)
 
     text_color = _alpha_mul(colors["text"], master_alpha)
@@ -1252,6 +1310,10 @@ def _compute_zone_geometry(
         "view_bottom": view_bottom,
         "view_h": view_h,
         "scroll_max": scroll_max,
+        "h_scroll": state.list.h_scroll,
+        "h_scroll_max": h_scroll_max,
+        "h_view_w": h_view_w,
+        "h_content_w": h_content_w,
         "header_slot_bottom": header_slot_bottom,
         "show_type_colors": show_type_colors,
         "content_x": content_x,
@@ -1311,6 +1373,7 @@ def _draw_list_fills(
     content_x = geo["content_x"]
     swatch = geo["swatch"]
     swatch_gap = geo["swatch_gap"]
+    h_scroll = geo.get("h_scroll", 0.0)
 
     children = geo["children"]
     expanded = geo["expanded"]
@@ -1425,7 +1488,7 @@ def _draw_list_fills(
         header_rects.append((pill_x, slot_bottom, pill_w, row_h, label))
 
         if full_count > 1:
-            toggle_rects[label] = (content_x, slot_bottom, swatch + swatch_gap, row_h)
+            toggle_rects[label] = (content_x - h_scroll, slot_bottom, swatch + swatch_gap, row_h)
 
     state.list.row_rects = header_rects
     state.list.toggle_rects = toggle_rects
@@ -1485,7 +1548,7 @@ def _draw_list_fills(
 
         child_count = len(children_get(label, ()))
         guide(
-            round(content_x + swatch / 2),
+            round(content_x + swatch / 2 - h_scroll),
             guide_top - 1,
             child_count * row_h - 2,
             ui_scale,
@@ -1507,10 +1570,12 @@ def _draw_list_text(
     mvp: Any = None,
 ) -> None:
     """Draw glyph batch, row labels, counts, and search UI text."""
+    h_scroll = geo.get("h_scroll", 0.0)
     _draw_list_glyph_batch(
         state,
         geo["zone_x"],
         round(geo["view_top"] + state.list.scroll),
+        h_scroll,
     )
 
     font_id = TYPE_LIST_FONT_ID
@@ -1522,7 +1587,7 @@ def _draw_list_text(
         blf.shadow(font_id, 3, 0, 0, 0, 255)
         blf.shadow_offset(font_id, 0, -1)
 
-    label_x = geo["label_x"]
+    label_x = geo["label_x"] - h_scroll
     label_max_width = geo["label_max_width"]
     icon_col_x = geo["icon_col_x"]
     count_right = geo["count_right"]
@@ -1556,16 +1621,21 @@ def _draw_list_text(
     # after the swatch instead of reserving the chevron column.
     flat = not bool(getattr(settings, "use_group_by_type", True))
     child_label_x = label_x - icon_col_x if flat else label_x + icon_col_x
-    child_label_max_width = max(0.0, count_right - child_label_x)
 
-    child_clip_left = int(child_label_x)
-    child_clip_right = int(child_label_x + child_label_max_width)
+    # No left text clipping: the view scissor already cuts rows at the zone
+    # edge, so the clip window stays open on the left and only bounds the
+    # right side before the pinned count column.
+    content_left = int(geo["zone_x"])
+    base_label_x = geo["label_x"]
+    base_child_x = base_label_x - icon_col_x if flat else base_label_x + icon_col_x
+    child_clip_left = content_left
+    child_clip_right = int(base_child_x + max(0.0, count_right - base_child_x))
 
     clip_top = int(zone_y - row_h)
     clip_bottom = int(zone_y + zone_h + row_h)
 
-    header_clip_left = int(label_x)
-    header_clip_right = int(label_x + label_max_width)
+    header_clip_left = content_left
+    header_clip_right = int(base_label_x + label_max_width)
 
     count_clip_right = int(count_right + geo["widest_count"]) if show_counts else 0
 
@@ -1757,9 +1827,12 @@ def _draw_list_scrollbar(
 
     gpu.state.blend_set("ALPHA")
 
-    track_x = round(geo["zone_x"] + geo["zone_w"] - SCROLLBAR_THICKNESS_HOVER - 1 * int(SCROLLBAR_INSET * ui_scale))
-    track_y = geo["zone_y"] + int(SCROLLBAR_INSET * ui_scale)
-    track_h = max(geo["view_top"] - geo["zone_y"] - 2 * int(SCROLLBAR_INSET * ui_scale), 0.0)
+    _bar_inset = int(SCROLLBAR_INSET * ui_scale)
+    h_reserve = (int(SCROLLBAR_THICKNESS_HOVER) + 2 * _bar_inset) if geo.get("h_scroll_max", 0.0) > 0 else 0
+
+    track_x = round(geo["zone_x"] + geo["zone_w"] - SCROLLBAR_THICKNESS_HOVER - 1 * _bar_inset)
+    track_y = geo["zone_y"] + _bar_inset + h_reserve
+    track_h = max(geo["view_top"] - geo["zone_y"] - 2 * _bar_inset - h_reserve, 0.0)
 
     if state.list.hovered_scrollbar:
         hover_fill_color = (0, 0, 0, 0.1 * master_alpha)
@@ -1781,8 +1854,8 @@ def _draw_list_scrollbar(
 
     thumb_rect, track_rect = _draw_scrollbar_thumb(
         round(geo["zone_x"] + geo["zone_w"] - thick - bar_offset),
-        geo["zone_y"] + bar_offset,
-        (max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset, 0.0)),
+        geo["zone_y"] + bar_offset + h_reserve,
+        (max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset - h_reserve, 0.0)),
         geo["view_h"] / total_h,
         1.0 - frac,
         colors,
@@ -1794,6 +1867,70 @@ def _draw_list_scrollbar(
 
     state.list.scrollbar_thumb = thumb_rect
     state.list.scrollbar_track = track_rect
+
+
+def _draw_list_h_scrollbar(
+    state: MinimapState,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+    geo: dict,
+    mvp: Any = None,
+) -> None:
+    """Draw the horizontal list scrollbar thumb when rows overflow sideways."""
+    state.list.h_scrollbar_thumb = None
+    state.list.h_scrollbar_track = None
+
+    h_scroll_max = geo.get("h_scroll_max", 0.0)
+    h_content_w = geo.get("h_content_w", 0.0)
+    h_view_w = geo.get("h_view_w", 0.0)
+
+    if h_scroll_max <= 0 or h_content_w <= 0 or h_view_w <= 0:
+        return
+
+    gpu.state.blend_set("ALPHA")
+
+    bar_offset = int((SCROLLBAR_INSET - 1) * ui_scale)
+    v_reserve = (int(SCROLLBAR_THICKNESS_HOVER) + 0 * bar_offset) if geo.get("scroll_max", 0.0) > 0 else 0
+
+    track_x = geo["pill_x"] + bar_offset
+    track_right = geo["pill_x"] + geo["pill_w"] - bar_offset - v_reserve
+    track_w = max(track_right - track_x, 0.0)
+    if track_w <= 0:
+        return
+    track_y = geo["view_bottom"] + bar_offset
+
+    if state.list.hovered_h_scrollbar:
+        hover_fill_color = (0, 0, 0, 0.1 * master_alpha)
+        _draw_filled_rounded_rect(
+            track_x,
+            track_y,
+            track_w,
+            SCROLLBAR_THICKNESS_HOVER,
+            SCROLLBAR_THICKNESS_HOVER / 2.0,
+            hover_fill_color,
+            mvp=mvp,
+        )
+
+    frac = state.list.h_scroll / h_scroll_max
+    active = state.list.hovered_h_scrollbar or state.list.h_scrollbar_dragging
+
+    thumb_rect, track_rect = _draw_scrollbar_thumb(
+        track_x,
+        track_y,
+        track_w,
+        min(max(h_view_w / h_content_w, 0.0), 1.0),
+        frac,
+        colors,
+        master_alpha,
+        ui_scale,
+        horizontal=True,
+        active=active,
+        mvp=mvp,
+    )
+
+    state.list.h_scrollbar_thumb = thumb_rect
+    state.list.h_scrollbar_track = track_rect
 
 
 # ---------------------------------------------------------------------------
@@ -1819,6 +1956,7 @@ def _draw_type_list(
     state.list.node_rects = []
     state.list.toggle_rects = {}
     state.list.scroll_max = 0.0
+    state.list.h_scroll_max = 0.0
     state.list.visible_row_keys = []
     state.list.visible_row_index_map = {}
 
@@ -1898,6 +2036,9 @@ def _draw_type_list(
         "line_h": line_h,
         "row_h": row_h,
         "widest_count": widest_count,
+        "widest_header_count": layout.get("widest_header_count", 0.0),
+        "widest_header_plain": layout.get("widest_header_plain", 0.0),
+        "widest_child": layout.get("widest_child", 0.0),
         "total_h": total_h,
         "header_local_bottom": header_local_bottom,
     }
@@ -2046,3 +2187,4 @@ def _draw_type_list(
             pass
 
     _draw_list_scrollbar(state, colors, master_alpha, ui_scale, geo, mvp=mvp)
+    _draw_list_h_scrollbar(state, colors, master_alpha, ui_scale, geo, mvp=mvp)

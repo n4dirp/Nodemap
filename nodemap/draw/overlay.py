@@ -1295,6 +1295,7 @@ def draw_minimap() -> None:
             # into this tree.
             state.list.expanded.clear()
             state.list.scroll = 0.0
+            state.list.h_scroll = 0.0
             state.list.search_query = ""
             state.list.search_cursor = 0
             # Drop the cached list layout so the new tree rebuilds it from its
@@ -1392,7 +1393,7 @@ def draw_minimap() -> None:
     )
     state.view.map_scale = scale
     highlight_border = (
-        _alpha_mul(colors["node_active"], 0.3)
+        _alpha_mul(colors["node_active"], 0.4)
         if (state.list.hovered_type_label or state.interaction.hovered_node_id)
         else None
     )
