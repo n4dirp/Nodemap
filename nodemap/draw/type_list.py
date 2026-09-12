@@ -1622,14 +1622,12 @@ def _draw_list_text(
     flat = not bool(getattr(settings, "use_group_by_type", True))
     child_label_x = label_x - icon_col_x if flat else label_x + icon_col_x
 
-    # No left text clipping: the view scissor already cuts rows at the zone
-    # edge, so the clip window stays open on the left and only bounds the
-    # right side before the pinned count column.
+    # Row labels are already bounded by the view scissor at the zone edge, so
+    # only headers that draw a count next to their title get a narrower clip
+    # rect; every other label lets the scissor do the clipping.
     content_left = int(geo["zone_x"])
+    row_clip_right = int(geo["zone_x"] + geo["zone_w"])
     base_label_x = geo["label_x"]
-    base_child_x = base_label_x - icon_col_x if flat else base_label_x + icon_col_x
-    child_clip_left = content_left
-    child_clip_right = int(base_child_x + max(0.0, count_right - base_child_x))
 
     clip_top = int(zone_y - row_h)
     clip_bottom = int(zone_y + zone_h + row_h)
@@ -1754,10 +1752,10 @@ def _draw_list_text(
 
             header_text = _type_header_text(label, full_count, children, meta_by_name)
 
-            # Headers without a count use the full width so the reserved
-            # count column does not clip the title.
+            # Headers without a count use the full zone width; the view
+            # scissor clips them at the zone edge instead of the count column.
             has_count = show_counts and full_count > 1
-            title_clip_right = header_clip_right if has_count else int(count_right)
+            title_clip_right = header_clip_right if has_count else row_clip_right
             blf.clipping(font_id, header_clip_left, clip_top, title_clip_right, clip_bottom)
             _draw_text_with_match(
                 font_id,
@@ -1785,7 +1783,7 @@ def _draw_list_text(
             else:
                 label_color = text_color
 
-            blf.clipping(font_id, child_clip_left, clip_top, child_clip_right, clip_bottom)
+            blf.clipping(font_id, content_left, clip_top, row_clip_right, clip_bottom)
 
             label_text = _child_label_text(node_name, meta_by_name, label)
 

@@ -506,10 +506,20 @@ def _draw_view_fill(
     if hole_width <= 0 or hole_height <= 0:
         return
 
+    # Pad the fill 1px inside the viewport outline so the border stroke
+    # covers the fill edge instead of the fill spilling past it.
+    fill_padding = 1.0
+    view_left += fill_padding
+    view_bottom += fill_padding
+    hole_width -= 2.0 * fill_padding
+    hole_height -= 2.0 * fill_padding
+    if hole_width <= 0 or hole_height <= 0:
+        return
+
     fill_color = colors["viewport_fill"]
-    fill_color = _alpha_mul(fill_color, 0.2 * master_alpha)
+    fill_color = _alpha_mul(fill_color, 0.1 * master_alpha)
     node_roundness = colors.get("node_roundness", 2.0) * ui_scale
-    
+
     _draw_filled_rounded_rect_clipped(
         view_left,
         view_bottom,

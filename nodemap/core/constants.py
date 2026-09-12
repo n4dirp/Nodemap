@@ -56,7 +56,7 @@ BORDER_POSITIONS: frozenset[str] = frozenset({"TOP_BORDER", "BOTTOM_BORDER", "LE
 # Framing / zoom
 # ---------------------------------------------------------------------------
 MIN_FRAME_ZOOM: float = 0.3
-MAX_FRAME_ZOOM: float = 5.0
+MAX_FRAME_ZOOM: float = 10.0
 EDITOR_FIT_MARGIN: float = 0.15
 
 # Wheel zoom steps the view by this factor per notch.
@@ -77,7 +77,7 @@ TYPE_LIST_MIN_WIDTH: float = 72.0
 LIST_PAD_X: float = 6.0
 LIST_SWATCH: float = 10.0
 LIST_SWATCH_GAP: float = 5.0
-LIST_COUNT_GAP: float = 8.0
+LIST_COUNT_GAP: float = 0.0
 SCROLLBAR_HIT_PAD: float = 6.0
 TYPE_LIST_ANIM_DURATION: float = 0.08
 EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0, 0)
