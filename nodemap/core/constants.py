@@ -82,14 +82,21 @@ TYPE_LIST_LEFT_BUTTON_GAP: float = 5.0
 # ---------------------------------------------------------------------------
 # Smooth-drag, inertia, and frame/editor animations tick at this rate; the
 # pan-speed preference then spreads them over a whole number of frames.
-PAN_ANIM_FPS: float = 100.0
+PAN_ANIM_FPS: float = 60.0
 PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
 
 # Fixed animation duration in frames for click-to-pan (fast snap).
-PAN_FRAMES: float = 10.0
+# Tuned to the 1.5.0 FAST preset: 12 frames at 60Hz (0.2s) maps to 20
+# frames at the current 100Hz tick rate for the same wall-clock duration.
+PAN_FRAMES: float = 12.0
 
-# Inertia only kicks in when a released drag ends above this velocity; the
-# release halves the remaining velocity, and a view that has come to a stop
+# Minimum animation duration in frames so close pans stay visible instead of
+# collapsing to a single tick.
+PAN_MIN_FRAMES: float = PAN_FRAMES * 0.66
+
+# Inertia kicks in when a released drag ends above this velocity, matching
+# the 1.5.0 FAST feel; lower values glide on light flicks, higher values
+# only glide on hard throws. A view that has come to a stop
 # under SMOOTH_DAMP_STILL sits still instead of wobbling.
 INERTIA_MIN_SPEED: float = 2.0
 SMOOTH_DAMP_STILL: float = 0.15

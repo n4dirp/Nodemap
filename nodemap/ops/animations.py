@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 from .. import __package__ as base_package
-from ..core.constants import PAN_ANIM_FPS, PAN_ANIM_INTERVAL, PAN_FRAMES
+from ..core.constants import PAN_ANIM_INTERVAL, PAN_FRAMES, PAN_MIN_FRAMES
 from ..core.helpers import get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
 from ..geo.transforms import (
@@ -29,20 +29,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(base_package)
 
-# Smooth-drag spring feel. Inertia decays the released view velocity each tick
-# until it falls below the stop speed. The drag follow fraction and per-tick
-# move cap grow with the remaining target magnitude; dt is clamped to one
-# sane frame so a heavy redraw does not stretch the lag.
+# Smooth-drag spring feel tuned to the 1.5.0 FAST preset. Inertia decays the
+# released view velocity each tick until it falls below the stop speed. The
+# drag follow fraction and per-tick move cap grow with the remaining target
+# magnitude; both are normalized by the real frame delta against the legacy
+# 60Hz reference rate so the per-second catch-up matches 1.5.0 while heavy
+# redraws (big trees at low fps) do not stretch the lag.
 _INERTIA_DECAY: float = 0.92
 _INERTIA_STOP_SPEED: float = 0.5
 _DRAG_MAX_FRAME_DT: float = 0.25
+_DRAG_REF_FPS: float = 60.0
 _DRAG_FOLLOW_SCALE: float = 200.0
-_DRAG_FOLLOW_BASE: float = 0.4
-_DRAG_FOLLOW_GAIN: float = 0.4
-_DRAG_FOLLOW_MAX: float = 0.95
-_DRAG_MOVE_BASE: float = 240.0
-_DRAG_MOVE_GAIN: float = 0.35
-_DRAG_MOVE_MAX: float = 3000.0
+_DRAG_FOLLOW_BASE: float = 0.25
+_DRAG_FOLLOW_GAIN: float = 0.55
+_DRAG_FOLLOW_MAX: float = 0.8
+_DRAG_MOVE_BASE: float = 120.0
+_DRAG_MOVE_GAIN: float = 0.15
+_DRAG_MOVE_MAX: float = 800.0
 _ANIM_FINISH_EPS: float = 0.5
 
 
@@ -171,17 +174,27 @@ class AnimationController:
 
         Match Blender's ``view2d_smooth_view`` duration scaling
         (``smooth_viewtx * fac``): far view changes take the full pan-speed
-        budget while near changes take fewer frames, never below one frame.
+        budget while near changes take fewer frames, never below the minimum
+        visible floor.
         """
         base = PAN_FRAMES
-        return max(min(base * fac, base), 1.0)
+        return max(min(base * fac, base), PAN_MIN_FRAMES)
 
     @staticmethod
     def _ease(progress: float) -> float:
+        """Ease-out cubic interpolation for *progress* in [0, 1].
+
+        Match the 1.5.0 FAST feel (``1 - (1 - t)^3``): fast start with a
+        gentle landing, used by the click-to-pan center animation.
+        """
+        return 1.0 - (1.0 - progress) ** 3
+
+    @staticmethod
+    def _ease_smooth(progress: float) -> float:
         """Ease-in-out (smoothstep) interpolation for *progress* in [0, 1].
 
         Match the timer step of Blender's ``view2d_smooth_view``
-        (``3t^2 - 2t^3``); all view animations share it.
+        (``3t^2 - 2t^3``); frame and editor viewport animations share it.
         """
         return progress * progress * (3.0 - 2.0 * progress)
 
@@ -289,7 +302,10 @@ class AnimationController:
         if dt <= 0.0 or dt > _DRAG_MAX_FRAME_DT:
             dt = PAN_ANIM_INTERVAL
         self._last_drag_tick = now
-        ticks = max(dt * PAN_ANIM_FPS, 1.0)
+        # Reference the legacy 60Hz tick so the per-second catch-up matches
+        # 1.5.0 at any timer rate; no lower clamp so 100Hz ticks take smaller
+        # steps instead of over-applying the follow fraction.
+        ticks = dt * _DRAG_REF_FPS
 
         magnitude = (self.drag_target[0] ** 2 + self.drag_target[1] ** 2) ** 0.5
         raw = magnitude / _DRAG_FOLLOW_SCALE
@@ -392,7 +408,7 @@ class AnimationController:
             self._finish_frame_animation(context)
             op._redraw_ui()
             return
-        eased = self._ease(progress)
+        eased = self._ease_smooth(progress)
         start_world = _minimap_world_rect(state, self.frame_anim_start_zoom, self.frame_anim_start_pan)
         target_world = _minimap_world_rect(state, self.frame_anim_target_zoom, self.frame_anim_target_pan)
         zoom, pan = _minimap_view_from_world_rect(state, _interp_rect(start_world, target_world, eased))
@@ -444,7 +460,7 @@ class AnimationController:
             self.destroy_timer(context)
             return
         self.editor_anim_progress = progress
-        eased = self._ease(progress)
+        eased = self._ease_smooth(progress)
         desired = [
             start + (target - start) * eased
             for start, target in zip(self.editor_anim_start_rect, self.editor_anim_target_rect)

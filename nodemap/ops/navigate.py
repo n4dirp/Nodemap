@@ -735,8 +735,6 @@ class NODEMAP_OT_navigate(Operator):
                     self._mmb_drag_start = None
                     _clamp_pan_to_viewport(self._space, self._region, state)
                     if self._anim._animations_enabled(context):
-                        self._anim.smooth_velocity[0] *= 0.5
-                        self._anim.smooth_velocity[1] *= 0.5
                         speed = max(abs(self._anim.smooth_velocity[0]), abs(self._anim.smooth_velocity[1]))
                         if speed > INERTIA_MIN_SPEED:
                             self._anim.inertia_active = True
@@ -905,6 +903,10 @@ class NODEMAP_OT_navigate(Operator):
                 toggle=self._click_toggle,
             )
         if action in ("PAN", "SELECT_PAN"):
+            if self._drag_mode == "CENTER_PAN":
+                # The press already centered on nearly the same point, so a
+                # second center would only restart the animation.
+                return
             self._center_view_on_mouse(context, self._mouse_x, self._mouse_y)
             state.interaction.pressed = False
 
