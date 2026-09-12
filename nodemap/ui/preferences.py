@@ -128,7 +128,11 @@ _CLICK_ACTION_ITEMS = [
 _DRAG_ACTION_ITEMS = [
     ("CENTER_PAN", "Center Pan", "Center the view on the cursor and drag to pan it around that point"),
     ("PAN", "Pan View", "Drag to pan the node editor view"),
-    ("FRAME_RECT", "Frame Region", "Drag to draw a rectangle and frame that area"),
+    (
+        "FRAME_RECT",
+        "Frame Region",
+        "Drag to draw a rectangle and frame that area (drag right to left to zoom out)",
+    ),
     ("FRAME_RECT_EDITOR", "Frame Region (Editor)", "Drag to draw a rectangle and frame that area in the editor"),
 ]
 

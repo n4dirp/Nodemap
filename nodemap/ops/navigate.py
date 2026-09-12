@@ -42,7 +42,9 @@ from ..geo.framing import (
     _compute_frame_all_targets,
     _compute_frame_selected_targets,
     _compute_frame_to_bounds_targets,
+    _compute_zoom_out_from_bounds_targets,
     _frame_to_bounds,
+    _zoom_out_to_bounds,
     frame_all,
     frame_selected,
     frame_view,
@@ -1731,11 +1733,11 @@ class NODEMAP_OT_navigate(Operator):
             dy = self._mouse_y - self._list_mmb_drag_start[1]
             if abs(dx) > 0 or abs(dy) > 0:
                 state.list.scroll = min(
-                    max(state.list.scroll - dy, 0.0),
+                    max(state.list.scroll + dy, 0.0),
                     state.list.scroll_max,
                 )
                 state.list.h_scroll = min(
-                    max(state.list.h_scroll + dx, 0.0),
+                    max(state.list.h_scroll - dx, 0.0),
                     state.list.h_scroll_max,
                 )
                 self._list_mmb_drag_start = (self._mouse_x, self._mouse_y)
@@ -2083,6 +2085,7 @@ class NODEMAP_OT_navigate(Operator):
     ) -> bool:
         """Frame the tree-space area covered by a marquee rect in the minimap.
 
+        A right-to-left drag zooms out by the mirrored framing ratio instead.
         Return True when a non-degenerate rect produced a frame; False for a
         near-zero rect so the caller can fall back to the click action.
         """
@@ -2091,8 +2094,13 @@ class NODEMAP_OT_navigate(Operator):
             return False
         area_ptr = self._area.as_pointer() if self._area else 0
         if self._anim._animations_enabled(context):
-            zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(bounds, area_ptr)
+            if end[0] < start[0]:
+                zoom, pan_x, pan_y = _compute_zoom_out_from_bounds_targets(bounds, area_ptr)
+            else:
+                zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(bounds, area_ptr)
             self._anim.start_frame_animation(context, zoom, [pan_x, pan_y])
+        elif end[0] < start[0]:
+            _zoom_out_to_bounds(bounds, area_ptr)
         else:
             _frame_to_bounds(bounds, area_ptr)
         return True

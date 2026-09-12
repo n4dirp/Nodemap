@@ -1890,7 +1890,7 @@ def _draw_list_h_scrollbar(
 
     gpu.state.blend_set("ALPHA")
 
-    bar_offset = int((SCROLLBAR_INSET - 1) * ui_scale)
+    bar_offset = int((SCROLLBAR_INSET - 2) * ui_scale)
     v_reserve = (int(SCROLLBAR_THICKNESS_HOVER) + 0 * bar_offset) if geo.get("scroll_max", 0.0) > 0 else 0
 
     track_x = geo["pill_x"] + bar_offset
