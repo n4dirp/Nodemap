@@ -34,7 +34,7 @@ CONTENT_PADDING: int = 6
 # Single knob for the space between UI elements (search bar to type list,
 # type list to button row). Offsets from the exterior border stay on
 # CONTENT_PADDING above.
-ELEMENT_GAP: int = 4
+ELEMENT_GAP: int = 5
 
 # Single knob for the gap between the minimap and the editor region edges.
 # Breadcrumb and asset-shelf offsets derive from this plus their fixed heights.

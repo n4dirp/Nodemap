@@ -3,7 +3,15 @@
 from dataclasses import dataclass
 from typing import Any
 
-from ..core.buttons import BUTTON_ORDER, BUTTONS, ButtonKind, _cull_frame_ids, _row_radii
+from ..core.buttons import (
+    BUTTON_ORDER,
+    BUTTONS,
+    ButtonKind,
+    _cull_frame_ids,
+    _row_hover_geometry,
+    _row_radii,
+    _row_xs,
+)
 from ..core.constants import (
     BUTTON_HOVER_ALPHA,
     BUTTON_MARGIN,
@@ -242,14 +250,15 @@ def _row_geometry(
     ui_scale: float,
     list_placement: str,
     list_width: float,
-) -> tuple[float, float, float]:
+) -> tuple[int, int, int]:
     """Return ``(top_y, size, drag_x)`` for the button row.
 
     The row sits on the top edge, except in the top-list placement where it
     sits just below the list strip. The drag handle anchors to the right
-    padding edge.
+    padding edge. The button size snaps to whole pixels so shared row edges
+    coincide exactly instead of drifting by a rounding fraction.
     """
-    size = BUTTON_SIZE * ui_scale
+    size = round(BUTTON_SIZE * ui_scale)
     margin = BUTTON_MARGIN * ui_scale
     if list_placement == "TOP" and list_width > 0:
         # Vertical layout: the row sits just below the top list strip,
@@ -318,9 +327,9 @@ def _layout_buttons(
 
     rects: dict[str, Rect] = {}
     count = len(kept)
+    row_origins = _row_xs(row_right_x, count, size)
     for button_index, button_id in enumerate(kept):
-        x = round(row_right_x - (count - 1 - button_index) * size)
-        rects[button_id] = (x, top_y, size, size)
+        rects[button_id] = (row_origins[button_index], top_y, size, size)
 
     if list_x is not None:
         rects["LIST"] = (list_x, top_y, size, size)
@@ -442,20 +451,9 @@ def _paint_buttons(
                 # Only the row's external corners round, inner corners stay square.
                 hover_radius = max(2.0, theme.fill_radius - 1)
                 button_index = order_index.get(button_id, -1)
-                is_first = button_index == 0
-                is_last = button_index == len(layout.frame_order) - 1
-                if is_first:
-                    hover_radii = (hover_radius, 0.0, 0.0, hover_radius)
-                    hover_x = button_x + 1
-                    hover_width = button_w - 1
-                elif is_last:
-                    hover_radii = (0.0, hover_radius, hover_radius, 0.0)
-                    hover_x = button_x
-                    hover_width = button_w - 1
-                else:
-                    hover_radii = (0.0, 0.0, 0.0, 0.0)
-                    hover_x = button_x
-                    hover_width = button_w
+                hover_x, hover_width, hover_radii = _row_hover_geometry(
+                    button_x, button_w, button_index, len(layout.frame_order), hover_radius
+                )
                 _draw_filled_rounded_rect_varying(
                     hover_x, button_y + 1, hover_width, button_h - 2, hover_radii, fill_color, mvp=mvp
                 )

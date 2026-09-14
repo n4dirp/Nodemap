@@ -337,7 +337,7 @@ def _draw_moving_border(
     else:
         if not hovered_minimap:
             border_color = _alpha_mul(border_color, 0.2 * master_alpha)
-        _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, 1.5 * ui_scale, mvp=mvp)
+        _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, 0.5 * ui_scale, mvp=mvp)
 
     if snapped and (snap_sides := _snap_sides_for(position)):
         snap_color = _alpha_mul(colors["active_view_color"], master_alpha)

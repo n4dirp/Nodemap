@@ -192,8 +192,8 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.329, 0.329, 0.329, 1.0)),
         "scroll_inner": _theme_rgba("user_interface.wcol_scroll.inner", (0.133, 0.133, 0.133, 0.0)),
         # Roundness
-        "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
-        "regular_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
-        "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
+        "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 12,
+        "regular_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.4) * 12,
+        "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.4) * 12,
     }
     return result

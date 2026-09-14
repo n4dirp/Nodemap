@@ -128,6 +128,35 @@ def _visible_button_ids(settings) -> list[str]:
     ]
 
 
+def _row_xs(row_right_x: float, count: int, size: int) -> list[int]:
+    """Return integer x origins for a right-anchored row of *count* buttons.
+
+    A single rounded origin with integer steps keeps every shared edge at the
+    exact same pixel, so neighboring borders coincide instead of overlapping
+    or leaving a fractional gap. Pure helper with no Blender dependency.
+    """
+    if count <= 0:
+        return []
+    origin_x = round(row_right_x - (count - 1) * size)
+    return [origin_x + button_index * size for button_index in range(count)]
+
+
+def _row_hover_geometry(
+    button_x: float, button_w: float, index: int, count: int, hover_radius: float
+) -> tuple[float, float, tuple[float, float, float, float]]:
+    """Return ``(hover_x, hover_width, radii)`` for a combined-row button overlay.
+
+    The overlay insets one pixel on both sides so it never paints over the
+    row's border strokes; only the row's external corners round. Pure helper
+    with no Blender dependency.
+    """
+    if index == 0:
+        return (button_x + 1, button_w - 2, (hover_radius, 0.0, 0.0, hover_radius))
+    if index == count - 1:
+        return (button_x + 1, button_w - 2, (0.0, hover_radius, hover_radius, 0.0))
+    return (button_x + 1, button_w - 2, (0.0, 0.0, 0.0, 0.0))
+
+
 def _row_radii(index: int, count: int, radius: float) -> tuple[float, float, float, float]:
     """Return per-corner radii for a combined-row button (Blender align style).
 

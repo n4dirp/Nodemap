@@ -1751,7 +1751,7 @@ def _draw_list_text(
             ui_scale,
         )
 
-        base_text_start_x = search_text_x + icon_margin * ui_scale
+        base_text_start_x = search_text_x + icon_margin
         search_text_start_x = base_text_start_x
         caret_x = round(base_text_start_x)
 
