@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import TYPE_CHECKING
 
@@ -29,24 +30,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(base_package)
 
-# Smooth-drag spring feel tuned to the 1.5.0 FAST preset. Inertia decays the
-# released view velocity each tick until it falls below the stop speed. The
-# drag follow fraction and per-tick move cap grow with the remaining target
-# magnitude; both are normalized by the real frame delta against the legacy
-# 60Hz reference rate so the per-second catch-up matches 1.5.0 while heavy
-# redraws (big trees at low fps) do not stretch the lag.
+# Smooth-drag follow uses frame-rate independent exponential damping. Inertia
+# decays the released view velocity each tick until it falls below the stop
+# speed. Each drag tick applies a fixed fraction ``1 - exp(-LAMBDA * dt)`` of
+# the remaining target, so the per-second catch-up is identical at any timer
+# rate and heavy redraws (big trees at low fps) do not stretch the lag.
 _INERTIA_DECAY: float = 0.92
 _INERTIA_STOP_SPEED: float = 0.5
 _DRAG_MAX_FRAME_DT: float = 0.25
-_DRAG_REF_FPS: float = 60.0
-_DRAG_FOLLOW_SCALE: float = 200.0
-_DRAG_FOLLOW_BASE: float = 0.25
-_DRAG_FOLLOW_GAIN: float = 0.55
-_DRAG_FOLLOW_MAX: float = 0.8
-_DRAG_MOVE_BASE: float = 120.0
-_DRAG_MOVE_GAIN: float = 0.15
-_DRAG_MOVE_MAX: float = 800.0
+_DRAG_DT_MIN: float = 0.001
+_DRAG_DT_MAX: float = 0.10
+_DRAG_LAMBDA: float = 14.0
 _ANIM_FINISH_EPS: float = 0.5
+
+
+def _drag_alpha(dt: float, rate: float = _DRAG_LAMBDA) -> float:
+    """Return the drag catch-up fraction for a frame delta of *dt* seconds.
+
+    Pure: exponential damping ``1 - exp(-rate * dt)`` clamped to [0, 1], so
+    the view covers the same share of the remaining distance per second at
+    any tick rate. Non-positive deltas apply nothing.
+    """
+    if dt <= 0.0:
+        return 0.0
+    return min(1.0 - math.exp(-rate * dt), 1.0)
 
 
 class AnimationController:
@@ -290,12 +297,12 @@ class AnimationController:
                 _clamp_pan_to_viewport(op._space, op._region, op._state)
 
     def apply_smooth_drag(self, context: Context) -> None:
-        """Chase the drag target with a spring-like follow.
+        """Chase the drag target with exponential damping.
 
-        The follow fraction and per-tick move cap grow with the remaining
-        target magnitude, so a fast sweep on a large tree accelerates to catch
-        the cursor. Both are also normalized by the real frame delta, so heavy
-        redraws (big trees at low fps) do not stretch the lag.
+        Each tick applies the fraction ``1 - exp(-LAMBDA * dt)`` of the
+        remaining target, so the per-second catch-up is identical at any
+        tick rate and there is a single int() quantization point in
+        ``_take_pan`` instead of magnitude-split micro-steps.
         """
         op = self._op
         if not self.drag_active:
@@ -305,20 +312,10 @@ class AnimationController:
         if dt <= 0.0 or dt > _DRAG_MAX_FRAME_DT:
             dt = PAN_ANIM_INTERVAL
         self._last_drag_tick = now
-        # Reference the legacy 60Hz tick so the per-second catch-up matches
-        # 1.5.0 at any timer rate; no lower clamp so 100Hz ticks take smaller
-        # steps instead of over-applying the follow fraction.
-        ticks = dt * _DRAG_REF_FPS
-
-        magnitude = (self.drag_target[0] ** 2 + self.drag_target[1] ** 2) ** 0.5
-        raw = magnitude / _DRAG_FOLLOW_SCALE
-        follow = min(_DRAG_FOLLOW_BASE + raw * _DRAG_FOLLOW_GAIN, _DRAG_FOLLOW_MAX)
-        follow = 1.0 - (1.0 - follow) ** ticks
-        max_move = min(_DRAG_MOVE_BASE + magnitude * _DRAG_MOVE_GAIN, _DRAG_MOVE_MAX) * ticks
+        dt = min(max(dt, _DRAG_DT_MIN), _DRAG_DT_MAX)
+        follow = _drag_alpha(dt)
         dx = self.drag_target[0] * follow
         dy = self.drag_target[1] * follow
-        dx = max(min(dx, max_move), -max_move)
-        dy = max(min(dy, max_move), -max_move)
         self.drag_target[0] -= dx
         self.drag_target[1] -= dy
         pan_x, pan_y = self._take_pan(dx, dy)
