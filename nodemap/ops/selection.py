@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 from .. import __package__ as base_package
-from ..core.constants import BUTTON_SIZE
+from ..core.constants import BUTTON_SIZE, ELEMENT_GAP
 from ..core.helpers import _find_node_at, _get_node_dims, _get_ui_scale, get_addon_preferences
 from ..core.list_filter import (
     _ROW_CHILD,
@@ -401,9 +401,10 @@ def _scroll_list_to_row(
     if zone_rect is None:
         return False
     ui_scale = _get_ui_scale()
-    search_h = (BUTTON_SIZE - 1) * ui_scale if settings.show_search_bar else 0.0
+    search_h = BUTTON_SIZE * ui_scale if settings.show_search_bar else 0.0
+    search_gap = ELEMENT_GAP * ui_scale if settings.show_search_bar else 0.0
     row_pad_v = ui_scale
-    view_h = max(zone_rect[3] - search_h - 2 * row_pad_v - 1, row_h)
+    view_h = max(zone_rect[3] - search_h - search_gap - 2 * row_pad_v - ui_scale, row_h)
     scroll_max = max(0.0, row_count * row_h - view_h)
 
     scroll = state.list.scroll
@@ -764,8 +765,9 @@ def handle_list_toggle_all(
             zone_rect = state.list.list_zone_rect
             if zone_rect is not None:
                 ui_scale = _get_ui_scale()
-                search_h = (BUTTON_SIZE - 1) * ui_scale if settings.show_search_bar else 0.0
-                view_h = max(zone_rect[3] - search_h - 2 * ui_scale - 1, row_h)
+                search_h = BUTTON_SIZE * ui_scale if settings.show_search_bar else 0.0
+                search_gap = ELEMENT_GAP * ui_scale if settings.show_search_bar else 0.0
+                view_h = max(zone_rect[3] - search_h - search_gap - 3 * ui_scale, row_h)
                 scroll_max = max(0.0, len(new_rows) * row_h - view_h)
                 new_scroll = min(max(new_scroll, 0.0), scroll_max)
             state.list.scroll = new_scroll

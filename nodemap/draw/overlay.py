@@ -19,11 +19,10 @@ from ..core.constants import (
     BUTTON_SIZE,
     CONTENT_PADDING,
     CORNER_POSITIONS,
+    ELEMENT_GAP,
     FONT_SIZE,
     MIN_MAP_HEIGHT,
     MIN_MAP_WIDTH,
-    TYPE_LIST_LEFT_BUTTON_GAP,
-    TYPE_LIST_TOP_BUTTON_GAP,
 )
 from ..core.helpers import (
     _expand_bounds_margin,
@@ -418,12 +417,12 @@ def _draw_resize_handles(
         half_handle = thickness / 2.0
 
         if list_state.list_placement == "TOP":
-            x, y = zone_x, round(zone_y - TYPE_LIST_TOP_BUTTON_GAP * half_scale - half_handle)
+            x, y = zone_x, round(zone_y - ELEMENT_GAP * half_scale - half_handle)
             w, h = zone_w, thickness
         else:  # LEFT
             view = state.view
             zone_right = view.rect[0] + view.inner_padding + list_state.list_width - 2.0 * ui_scale
-            x, y = round(zone_right + TYPE_LIST_LEFT_BUTTON_GAP * half_scale - half_handle), zone_y
+            x, y = round(zone_right + ELEMENT_GAP * half_scale - half_handle), zone_y
             w, h = thickness, zone_h
 
         _draw_pill(x, y, w, h, fill_color, mvp=mvp)
@@ -869,7 +868,7 @@ def _layout_minimap_buttons(
         # placement.
         strip_h = min(state.list.list_width, map_h - 2 * CONTENT_PADDING * ui_scale)
         zone_bottom = map_y + map_h - CONTENT_PADDING * ui_scale - strip_h
-        top_y = round(zone_bottom - TYPE_LIST_TOP_BUTTON_GAP * ui_scale - button_size)
+        top_y = round(zone_bottom - ELEMENT_GAP * ui_scale - button_size)
     else:
         top_y = round(map_y + map_h - padding - button_margin - button_size)
 

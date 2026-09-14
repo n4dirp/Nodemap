@@ -7,10 +7,10 @@ import bpy
 
 from .. import __package__ as base_package
 from ..core.constants import (
+    ELEMENT_GAP,
     MAX_MAP_SCALE,
     MIN_MAP_SCALE,
     TYPE_LIST_ASPECT_THRESHOLD,
-    TYPE_LIST_TOP_BUTTON_GAP,
 )
 from ..core.helpers import _get_ui_scale, get_addon_preferences
 from ..core.state import MinimapState, _state
@@ -36,7 +36,7 @@ def _list_placement(map_w: float, map_h: float, position: str = "AUTO") -> str:
 
 def _list_top_inset(list_width: float, ui_scale: float) -> float:
     """Return the top inset reserved by the list strip."""
-    return TYPE_LIST_TOP_BUTTON_GAP * ui_scale + list_width
+    return ELEMENT_GAP * ui_scale + list_width
 
 
 def _get_map_content_rect_for_width(

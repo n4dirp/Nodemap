@@ -13,6 +13,7 @@ from mathutils import Matrix
 from ..core.constants import (
     BUTTON_SIZE,
     CONTENT_PADDING,
+    ELEMENT_GAP,
     LIST_COUNT_GAP,
     LIST_PAD_X,
     LIST_SWATCH,
@@ -1198,7 +1199,7 @@ def _compute_zone_geometry(
     zone_x = map_x + handle_pad
 
     if settings.show_search_bar:
-        search_h = (BUTTON_SIZE - 1) * ui_scale
+        search_h = BUTTON_SIZE * ui_scale
     else:
         search_h = 0.0
         state.list.search_focused = False
@@ -1218,35 +1219,48 @@ def _compute_zone_geometry(
         zone_y = round(map_y + map_h - zone_h - handle_pad)
     state.list.list_zone_rect = (zone_x, zone_y, zone_w, zone_h)
 
-    search_top = zone_y + zone_h - 1 * ui_scale
+    # Flush with the zone top: the same CONTENT_PADDING offset from the map
+    # edge as the header buttons and the list panel below.
+    search_top = zone_y + zone_h
     search_bottom = search_top - search_h
-    search_draw_h = max(0.0, search_h - row_gap)
+    # Match the minimap buttons: the pill is a full BUTTON_SIZE box with no
+    # row-gap shave, so its drawn box equals its hit rect.
+    search_draw_h = max(0.0, search_h)
     search_pad_v = round((search_draw_h - line_h) / 2.0) + 1 if search_h > 0 else 0
 
+    # The search pill floats above the panel: keep an ELEMENT_GAP space
+    # between its bottom edge and the list background so the minimap shows
+    # through. Without a search bar the panel still fills the whole zone.
+    search_gap = ELEMENT_GAP * ui_scale if search_h > 0 else 0.0
+    content_top = search_bottom - search_gap if search_h > 0 else zone_y + zone_h
+
     zone_radius = colors["node_roundness"] * ui_scale
+    panel_h = max(content_top - zone_y, 0.0)
 
-    _draw_filled_rounded_rect(
-        zone_x,
-        zone_y,
-        zone_w,
-        zone_h,
-        zone_radius,
-        _alpha_mul(colors["outliner_back"], master_alpha),
-        mvp=mvp,
-    )
+    if panel_h > 0:
+        _draw_filled_rounded_rect(
+            zone_x,
+            zone_y,
+            zone_w,
+            panel_h,
+            zone_radius,
+            _alpha_mul(colors["outliner_back"], master_alpha),
+            mvp=mvp,
+        )
 
-    _draw_rounded_rect_border(
-        zone_x,
-        zone_y,
-        zone_w,
-        zone_h,
-        zone_radius,
-        _alpha_mul(colors["background_border"], master_alpha),
-        0.5 * ui_scale,
-        mvp=mvp,
-    )
+        _draw_rounded_rect_border(
+            zone_x,
+            zone_y,
+            zone_w,
+            panel_h,
+            zone_radius,
+            _alpha_mul(colors["background_border"], master_alpha),
+            0.5 * ui_scale,
+            mvp=mvp,
+        )
 
-    view_top = search_bottom - row_pad_v + 1
+    # 1px breathing room between the panel top edge and the first row.
+    view_top = content_top - row_pad_v + 1 - ui_scale
     view_bottom = zone_y + row_pad_v + 1
     view_h = max(view_top - view_bottom, row_h)
 
@@ -1323,8 +1337,13 @@ def _compute_zone_geometry(
     pill_x = zone_x + 2 * ui_scale
     pill_w = zone_w - 4 * ui_scale
 
+    # The search pill is a standalone box flush with the zone edges, sharing
+    # the list panel's CONTENT_PADDING offset; rows keep the pill inset above.
+    search_x = zone_x
+    search_w = zone_w
+
     if settings.show_search_bar:
-        state.list.search_rect = (pill_x, search_bottom, pill_w, search_h)
+        state.list.search_rect = (search_x, search_bottom, search_w, search_h)
     else:
         state.list.search_rect = None
 
@@ -1332,18 +1351,20 @@ def _compute_zone_geometry(
 
     if settings.show_search_bar and state.list.search_query:
         clear_size = max(int(12 * ui_scale), int(search_h * 0.6))
-        clear_x = pill_x + pill_w - clear_size - 4 * ui_scale
+        clear_x = search_x + search_w - clear_size - 4 * ui_scale
         clear_y = round(search_bottom - 0.5 + (search_h - clear_size) / 2)
         state.list.search_clear_rect = (clear_x, clear_y, clear_size, clear_size)
     else:
         state.list.search_clear_rect = None
         state.list.search_clear_hovered = False
 
+    # Clips only the search section (fills and text); padded by 1px so the
+    # flush pill's border stroke is not cut at the zone edges.
     zone_scissor = (
-        int(zone_x + 1),
-        int(zone_y + 1),
-        max(0, int(zone_w - 2)),
-        max(0, int(zone_h - 2)),
+        int(search_x - 1),
+        int(search_bottom - 1),
+        max(0, int(search_w + 2)),
+        max(0, int(search_h + 2)),
     )
 
     view_scissor = (
@@ -1371,7 +1392,7 @@ def _compute_zone_geometry(
         "zone_h": zone_h,
         "search_draw_h": search_draw_h,
         "search_pad_v": search_pad_v,
-        "search_pill_y": search_bottom + row_gap_half,
+        "search_pill_y": search_bottom,
         "view_top": view_top,
         "view_bottom": view_bottom,
         "view_h": view_h,
@@ -1403,6 +1424,8 @@ def _compute_zone_geometry(
         "hover_color": hover_color,
         "pill_x": pill_x,
         "pill_w": pill_w,
+        "search_x": search_x,
+        "search_w": search_w,
         "search_text_x": search_text_x,
         "zone_scissor": zone_scissor,
         "view_scissor": view_scissor,
@@ -1453,6 +1476,8 @@ def _draw_list_fills(
 
     search_pill_y = geo["search_pill_y"]
     search_draw_h = geo["search_draw_h"]
+    search_x = geo["search_x"]
+    search_w = geo["search_w"]
     header_slot_bottom = geo["header_slot_bottom"]
     view_top = geo["view_top"]
     view_bottom = geo["view_bottom"]
@@ -1479,12 +1504,14 @@ def _draw_list_fills(
             if state.list.search_focused
             else _alpha_mul(colors["search_background"], master_alpha)
         )
-        fill(pill_x, search_pill_y, pill_w, search_draw_h, radius, pill_fill_color)
+        # Button-style fill radius (their fill uses radius * 1.5); the border
+        # below keeps the plain radius like the buttons do.
+        fill(search_x, search_pill_y, search_w, search_draw_h, radius * 1.5, pill_fill_color)
 
         border(
-            pill_x,
+            search_x,
             search_pill_y,
-            pill_w,
+            search_w,
             search_draw_h,
             radius,
             _alpha_mul(colors["search_text_outline"], master_alpha),

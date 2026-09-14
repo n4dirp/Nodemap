@@ -24,8 +24,17 @@ LIST_TOP_RESIZE_HALF_WIDTH: int = 5
 # ---------------------------------------------------------------------------
 # Single knob for the gap between the minimap frame and its content (node
 # area, type-list zone, edge pills). Scrollbars keep their own
-# SCROLLBAR_INSET/SCROLLBAR_THICKNESS metrics.
+# SCROLLBAR_INSET/SCROLLBAR_THICKNESS metrics. Spacing between the elements
+# themselves uses ELEMENT_GAP below.
 CONTENT_PADDING: int = 6
+
+# ---------------------------------------------------------------------------
+# Element gap
+# ---------------------------------------------------------------------------
+# Single knob for the space between UI elements (search bar to type list,
+# type list to button row). Offsets from the exterior border stay on
+# CONTENT_PADDING above.
+ELEMENT_GAP: int = 5
 
 # Single knob for the gap between the minimap and the editor region edges.
 # Breadcrumb and asset-shelf offsets derive from this plus their fixed heights.
@@ -102,10 +111,6 @@ TYPE_LIST_ROW_HEIGHT_OFFSET: float = 8.0
 # The type list moves from the left edge to the top edge once the minimap
 # height exceeds width multiplied by this ratio (auto position only).
 TYPE_LIST_ASPECT_THRESHOLD: float = 1.0
-# Gap in UI-scaled pixels between the top list strip and the button row below it.
-TYPE_LIST_TOP_BUTTON_GAP: float = 5.0
-# Gap in UI-scaled pixels between the left list zone edge and the button row.
-TYPE_LIST_LEFT_BUTTON_GAP: float = 5.0
 
 # ---------------------------------------------------------------------------
 # Animations
@@ -162,7 +167,7 @@ CULL_MARGIN_PX: float = BATCH_DRIFT_PX + 32.0
 # scaling the existing batches via the content matrix; rebuild once the scale
 # holds still for ZOOM_SETTLE_MS. The ratio window bounds how far a deferred
 # bake may drift before an immediate rebuild keeps culling/typography fresh.
-ZOOM_SETTLE_MS: float = 300.0
+ZOOM_SETTLE_MS: float = 180.0
 ZOOM_DEFER_RATIO_MIN: float = 0.25
 ZOOM_DEFER_RATIO_MAX: float = 0.75
 # Group node marker strip thickness in tree units: the baked thickness
