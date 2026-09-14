@@ -17,6 +17,8 @@ _FILL_SDF_SHADER: gpu.types.GPUShader | None = None
 _FILL_SDF_VARYING_SHADER: gpu.types.GPUShader | None = None
 _FILL_SDF_HOLE_SHADER: gpu.types.GPUShader | None = None
 _FILL_SDF_CLIP_SHADER: gpu.types.GPUShader | None = None
+_FILL_SDF_LINEAR_SHADER: gpu.types.GPUShader | None = None
+_FILL_SDF_VIGNETTE_SHADER: gpu.types.GPUShader | None = None
 _BORDER_SDF_SHADER: gpu.types.GPUShader | None = None
 _BORDER_SDF_VARYING_SIDES_SHADER: gpu.types.GPUShader | None = None
 _PILL_SHADER: gpu.types.GPUShader | None = None
@@ -45,6 +47,34 @@ void main() {
     float dist = sdRoundRect(vUv, halfSize, radius);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_FILL_FRAG_LINEAR_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float t = clamp(vUv.y / halfSize.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 colorMix = mix(colorBottom.rgb, colorTop.rgb, t);
+    float dist = sdRoundRect(vUv, halfSize, radius);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(colorMix, mix(colorBottom.a, colorTop.a, t) * alpha);
+}
+"""
+
+_FILL_FRAG_VIGNETTE_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float t = clamp(length(vUv / halfSize), 0.0, 1.0);
+    vec3 colorMix = mix(colorCenter.rgb, colorEdge.rgb, t);
+    float dist = sdRoundRect(vUv, halfSize, radius);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(colorMix, mix(colorCenter.a, colorEdge.a, t) * alpha);
 }
 """
 
@@ -401,6 +431,50 @@ def _get_sdf_fill_clip_shader() -> gpu.types.GPUShader:
         _FILL_SDF_CLIP_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _FILL_SDF_CLIP_SHADER
+
+
+def _get_sdf_linear_shader() -> gpu.types.GPUShader:
+    global _FILL_SDF_LINEAR_SHADER
+    if _FILL_SDF_LINEAR_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("fill_linear_iface")
+        vert_out.smooth("VEC2", "vUv")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "colorTop")
+        info.push_constant("VEC4", "colorBottom")
+        info.push_constant("VEC2", "halfSize")
+        info.push_constant("FLOAT", "radius")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_FILL_VERT_SRC)
+        info.fragment_source(_FILL_FRAG_LINEAR_SRC)
+        _FILL_SDF_LINEAR_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _FILL_SDF_LINEAR_SHADER
+
+
+def _get_sdf_vignette_shader() -> gpu.types.GPUShader:
+    global _FILL_SDF_VIGNETTE_SHADER
+    if _FILL_SDF_VIGNETTE_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("fill_vignette_iface")
+        vert_out.smooth("VEC2", "vUv")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "colorCenter")
+        info.push_constant("VEC4", "colorEdge")
+        info.push_constant("VEC2", "halfSize")
+        info.push_constant("FLOAT", "radius")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_FILL_VERT_SRC)
+        info.fragment_source(_FILL_FRAG_VIGNETTE_SRC)
+        _FILL_SDF_VIGNETTE_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _FILL_SDF_VIGNETTE_SHADER
 
 
 def _get_sdf_border_shader() -> gpu.types.GPUShader:
@@ -929,6 +1003,42 @@ def _draw_filled_rounded_rect(x, y, width, height, radius, color, mvp: Any = Non
     shader.bind()
     shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
     shader.uniform_float("color", _srgb_to_linear(color))
+    shader.uniform_float("halfSize", (half_w, half_h))
+    shader.uniform_float("radius", radius)
+    batch.draw(shader)
+
+
+def _draw_filled_rounded_rect_linear(x, y, width, height, radius, color_top, color_bottom, mvp: Any = None):
+    if width <= 0 or height <= 0:
+        return
+    radius = max(0, min(radius, width / 2, height / 2))
+
+    shader = _get_sdf_linear_shader()
+    half_w, half_h = width / 2, height / 2
+    batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
+
+    shader.bind()
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
+    shader.uniform_float("colorTop", _srgb_to_linear(color_top))
+    shader.uniform_float("colorBottom", _srgb_to_linear(color_bottom))
+    shader.uniform_float("halfSize", (half_w, half_h))
+    shader.uniform_float("radius", radius)
+    batch.draw(shader)
+
+
+def _draw_filled_rounded_rect_vignette(x, y, width, height, radius, color_center, color_edge, mvp: Any = None):
+    if width <= 0 or height <= 0:
+        return
+    radius = max(0, min(radius, width / 2, height / 2))
+
+    shader = _get_sdf_vignette_shader()
+    half_w, half_h = width / 2, height / 2
+    batch = _get_cached_quad_batch(shader, width, height, pad=0.0)
+
+    shader.bind()
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + half_w, y + half_h, mvp))
+    shader.uniform_float("colorCenter", _srgb_to_linear(color_center))
+    shader.uniform_float("colorEdge", _srgb_to_linear(color_edge))
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("radius", radius)
     batch.draw(shader)

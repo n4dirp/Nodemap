@@ -346,7 +346,7 @@ def _resolve_button_theme(colors: dict, master_alpha: float, ui_scale: float) ->
     radius = colors["node_roundness"] * ui_scale
     return ButtonTheme(
         radius=radius,
-        fill_radius=radius * 1.5,
+        fill_radius=radius * 1.4,
         border_width=0.5 * ui_scale,
         tool_bg=_alpha_mul(colors["tool_inner"], master_alpha),
         tool_border=_alpha_mul(colors["tool_outline"], master_alpha),

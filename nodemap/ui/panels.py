@@ -146,11 +146,18 @@ class NODEMAP_PT_popup(Panel):
             sub.active = settings.use_passepartout
             sub.prop(settings, "passepartout_alpha", text="")
 
-            row = col.row(align=True)
-            row.prop(settings, "use_custom_background", text="Background")
-            sub = row.row(align=True)
+            col = body.column()
+            col.label(text="Background")
+            col.row().prop(settings, "background_type", text="Type", expand=True)
+            col.prop(settings, "use_custom_background", text="Custom Colors")
+
+            sub = col.row(align=True)
             sub.active = settings.use_custom_background
-            sub.prop(settings, "background_color", text="")
+            if settings.background_type in {"LINEAR", "VIGNETTE"}:
+                sub.prop(settings, "high_gradient", text="High")
+                sub.prop(settings, "low_gradient", text="Low")
+            else:
+                sub.prop(settings, "high_gradient", text="Color")
 
 
 def draw_minimap_header_button(self, context):

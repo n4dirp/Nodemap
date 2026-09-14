@@ -137,9 +137,16 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
 
     theme_background = _theme_rgba("node_editor.space.back", (0.1, 0.1, 0.1, 1.0))
     if settings.use_custom_background:
-        background = tuple(settings.background_color)
+        background = tuple(settings.high_gradient)
+        background_low = tuple(settings.low_gradient)
     else:
         background = theme_background
+        background_low = (
+            theme_background[0] * 0.75,
+            theme_background[1] * 0.75,
+            theme_background[2] * 0.75,
+            theme_background[3],
+        )
 
     selected = _theme_rgba("user_interface.wcol_regular.text_sel", (0.28, 0.45, 0.7, 1.0))
     if settings.use_custom_viewport_fill:
@@ -149,6 +156,7 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
 
     result = {
         "background": background,
+        "background_low": background_low,
         "background_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
         "node_backdrop": _theme_rgba("node_editor.node_backdrop", (0.188, 0.188, 0.188, 1.0)),
         "node_selected": _theme_rgba("node_editor.node_selected", (0.929, 0.341, 0.0, 1.0)),

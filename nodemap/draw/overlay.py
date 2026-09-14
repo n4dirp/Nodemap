@@ -48,7 +48,6 @@ from ..core.theme import (
 )
 from ..geo.transforms import (
     _clamp_pan_to_viewport,
-    _get_map_content_rect,
     _get_minimap_transform,
     _get_visible_rect,
 )
@@ -58,6 +57,8 @@ from .gpu_draw import (
     _draw_dashes,
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_clipped,
+    _draw_filled_rounded_rect_linear,
+    _draw_filled_rounded_rect_vignette,
     _draw_filled_rounded_rect_with_hole,
     _draw_pill,
     _draw_rounded_rect_border,
@@ -286,17 +287,28 @@ def _draw_background(
     colors: dict,
     master_alpha: float,
     ui_scale: float,
+    settings: Any,
     mvp: Any = None,
-) -> tuple[tuple[float, float, float, float], float]:
+) -> float:
     """Draw the minimap backdrop rounded rect and border."""
 
     bg_color = _alpha_mul(colors["background"], master_alpha)
+    bg_low_color = _alpha_mul(colors["background_low"], master_alpha)
     panel_roundness = colors["panel_roundness"]
     shadow_offset = 1
     # border_color = _alpha_mul(colors["background_border"], master_alpha)
     border_width = 0.5 * ui_scale
 
-    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color, mvp=mvp)
+    if settings.background_type == "LINEAR":
+        _draw_filled_rounded_rect_linear(
+            map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color, bg_low_color, mvp=mvp
+        )
+    elif settings.background_type == "VIGNETTE":
+        _draw_filled_rounded_rect_vignette(
+            map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color, bg_low_color, mvp=mvp
+        )
+    else:
+        _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, bg_color, mvp=mvp)
     _draw_rounded_rect_border(
         map_x - shadow_offset,
         map_y - shadow_offset,
@@ -883,7 +895,9 @@ def draw_minimap() -> None:
     # of recomposing it per rect.
     base_mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
 
-    panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, mvp=base_mvp)
+    panel_roundness = _draw_background(
+        map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, settings, mvp=base_mvp
+    )
 
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]
@@ -952,7 +966,6 @@ def draw_minimap() -> None:
             colors,
             ui_scale,
             master_alpha,
-            content_rect=_get_map_content_rect(state),
             mvp=base_mvp,
         )
 

@@ -267,15 +267,46 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     use_custom_background: BoolProperty(
         name="Custom Background",
-        description="Use a custom background color instead of the Blender theme color",
+        description="Use custom background colors instead of the Blender theme color",
         default=True,
         update=_update_invalidate_batches,
     )
 
-    background_color: FloatVectorProperty(
-        name="Background Color",
-        description="Custom background color for the minimap overlay",
+    background_type: EnumProperty(
+        name="Background Style",
+        description="How to fill the minimap background",
+        items=[
+            ("SINGLE", "Single Color", "Fill the background with a flat color"),
+            (
+                "LINEAR",
+                "Linear Gradient",
+                "Blend the background from the high color at the top to the low color at the bottom",
+            ),
+            (
+                "VIGNETTE",
+                "Vignette",
+                "Blend the background from the high color in the center to the low color at the edges",
+            ),
+        ],
+        default="SINGLE",
+        update=_update_invalidate_batches,
+    )
+
+    high_gradient: FloatVectorProperty(
+        name="Gradient High",
+        description="Background color used at the top of a gradient or as the flat single color",
         default=(0.188, 0.188, 0.188, 1.0),
+        size=4,
+        min=0.0,
+        max=1.0,
+        subtype="COLOR_GAMMA",
+        update=_update_invalidate_batches,
+    )
+
+    low_gradient: FloatVectorProperty(
+        name="Gradient Low",
+        description="Background color used at the bottom or edges of a gradient",
+        default=(0.1, 0.1, 0.1, 1.0),
         size=4,
         min=0.0,
         max=1.0,
@@ -854,25 +885,34 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             return
         settings = self.settings
         group = layout.column()
-        col = group.column()
-        col.prop(settings, "opacity", text="Opacity")
-        row = col.row(align=True, heading="Colors")
-        row.prop(settings, "use_custom_viewport_fill", text="View Highlight")
-        sub = row.row(align=True)
-        sub.active = settings.use_custom_viewport_fill
-        sub.prop(settings, "viewport_fill_color", text="")
-        row = col.row(align=True)
+        group.prop(settings, "opacity", text="Opacity")
+        group.separator()
+
+        group.row().prop(settings, "background_type", text="Background Type", expand=True)
+        group.prop(settings, "use_custom_background", text="Custom Colors")
+        sub = group.column()
+        if settings.use_custom_background:
+            if settings.background_type in {"LINEAR", "VIGNETTE"}:
+                sub.prop(settings, "high_gradient", text="Gradient High")
+                sub.prop(settings, "low_gradient", text="Gradient Low")
+            else:
+                sub.prop(settings, "high_gradient", text="Color")
+
+        group.separator()
+
+        row = group.row(align=True)
         row.prop(settings, "use_passepartout", text="Passe-Partout")
         sub = row.row(align=True)
         sub.active = settings.use_passepartout
         sub.prop(settings, "passepartout_alpha", text="", slider=True)
-        row = col.row(align=True)
-        row.prop(settings, "use_custom_background", text="Background")
+
+        row = group.row()
+        row.prop(settings, "use_custom_viewport_fill", text="Custom View Highlight")
         sub = row.row(align=True)
-        sub.active = settings.use_custom_background
-        sub.prop(settings, "background_color", text="")
-        row = col.row(align=True)
-        row.prop(settings, "show_text_shadow", text="Text Shadows")
+        sub.active = settings.use_custom_viewport_fill
+        sub.prop(settings, "viewport_fill_color", text="")
+
+        group.prop(settings, "show_text_shadow", text="Text Shadows")
 
     def _draw_navigation(self, layout, context):
         """Draw the Navigation section for interaction and input mapping."""
@@ -906,8 +946,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         interaction_column.separator()
         interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
 
-        # interaction_column.separator()
-        # self._draw_key_modifiers(interaction_column)
+        interaction_column.separator()
+        self._draw_key_modifiers(interaction_column)
 
     def _draw_key_modifiers(self, column):
         """Draw the key-modifiers reference box."""
