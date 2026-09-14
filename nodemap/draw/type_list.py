@@ -50,7 +50,6 @@ from ..core.theme import (
 )
 from .batch_build import _create_quad_indices
 from .gpu_draw import (
-    _draw_filled_quad,
     _draw_filled_rounded_rect,
     _draw_pill,
     _draw_rounded_rect_border,
@@ -59,6 +58,9 @@ from .gpu_draw import (
 )
 
 _DEFAULT_ENTRY = ("", 0.0, 1)
+
+# Caret width in the search bar, in ui_scale units.
+_CARET_WIDTH: float = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +79,58 @@ def _scrollbar_thickness(ui_scale: float, active: bool = False) -> int:
     if not active:
         return thick
     return max(thick + 1, int(SCROLLBAR_THICKNESS_HOVER * ui_scale))
+
+
+def _scrollbar_track_color(colors: dict, master_alpha: float, active: bool) -> tuple:
+    """Return the scrollbar track fill, brightened while hovered or dragged."""
+    inner = colors["scroll_inner"]
+    alpha = (min(inner[3], 0.15) if not active else max(inner[3], 0.15)) * master_alpha
+    return (inner[0], inner[1], inner[2], alpha)
+
+
+def _draw_list_scrollbar_core(
+    track_x: float,
+    track_y: float,
+    track_len: float,
+    thumb_x: float,
+    thumb_y: float,
+    thumb_track_len: float,
+    visible_frac: float,
+    pos_frac: float,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+    active: bool,
+    horizontal: bool = False,
+    mvp: Any = None,
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+    """Draw a scrollbar track background and thumb, returning `(thumb_rect, track_rect)`.
+
+    ``track_len`` sizes the background along the scroll direction; the thumb
+    slides along ``(thumb_x, thumb_y, thumb_track_len)``.
+    """
+    gpu.state.blend_set("ALPHA")
+    thick = _scrollbar_thickness(ui_scale, active)
+    fill_color = _scrollbar_track_color(colors, master_alpha, active)
+
+    if horizontal:
+        _draw_filled_rounded_rect(track_x, track_y, track_len, thick, thick / 2.0, fill_color, mvp=mvp)
+    else:
+        _draw_filled_rounded_rect(track_x, track_y, thick, track_len, thick / 2.0, fill_color, mvp=mvp)
+
+    return _draw_scrollbar_thumb(
+        thumb_x,
+        thumb_y,
+        thumb_track_len,
+        visible_frac,
+        pos_frac,
+        colors,
+        master_alpha,
+        ui_scale,
+        horizontal=horizontal,
+        active=active,
+        mvp=mvp,
+    )
 
 
 def _draw_scrollbar_thumb(
@@ -352,8 +406,8 @@ def _type_list_cache_key(
         ui_scale,
         master_alpha,
         tuple(colors["node_backdrop"]),
-        tuple(colors["text"]),
-        tuple(colors["node_border"]),
+        tuple(colors["outliner_text"]),
+        tuple(colors["node_outline"]),
         palette,
     )
 
@@ -561,8 +615,8 @@ def _bake_list_glyph_batch(
     icon_col_x = swatch + swatch_gap
     swatch_col_x = icon_col_x if show_type_colors else 0.0
 
-    chevron_color = _srgb_to_linear(_alpha_mul(colors["text"], 0.6 * master_alpha))
-    swatch_border_color = _srgb_to_linear(_alpha_mul(colors["node_border"], 0.5 * master_alpha))
+    chevron_color = _srgb_to_linear(_alpha_mul(colors["outliner_text"], 0.8 * master_alpha))
+    swatch_border_color = _srgb_to_linear(_alpha_mul(colors["node_outline"], 0.5 * master_alpha))
     swatch_border_w = 0.25 * ui_scale
 
     pos: list = []
@@ -987,8 +1041,8 @@ def _draw_search_clear_button(
     clear_x, clear_y, clear_size, _ = rect
 
     icon_color = _alpha_mul(
-        colors["text"],
-        0.35 * master_alpha if not hovered else master_alpha,
+        colors["search_text"] if not hovered else colors["search_text_selected"],
+        master_alpha,
     )
 
     cx = round(clear_x + clear_size / 2)
@@ -1026,36 +1080,42 @@ def _draw_search_filter_icon(
     color,
     ui_scale: float,
 ) -> None:
-    """Draw a filled filter (funnel) icon for the search pill."""
+    """Minimal filter icon: three centered bars (wide, medium, narrow)."""
     cx = round(x + size / 2)
     cy = round(y + size / 2)
 
-    # Overall icon box
-    w = size * 0.8  # width of the rim / funnel mouth
-    h = size * 0.85  # overall height
+    # Whole-pixel geometry (values in comments are for size=12).
+    row_y = max(2, round(size / 3))  # row offset from center   (4)
+    half_top = max(2, round(size * 0.42))  # top bar half-width       (5)
+    half_mid = max(1, round(size * 0.25))  # middle bar half-width    (3)
+    half_bot = max(1, round(size * 0.083))  # bottom bar half-width    (1)
 
-    half_w = w / 2
-    top_y = -h / 2
-    bottom_y = h / 2
+    stroke = max(1.0, round(0.8 * ui_scale))
 
-    # Vertical proportions (fractions of total height), mirrored vertically
-    rim_h = h * 0.13  # thickness of the bottom rim
-    rim_top_y = bottom_y - rim_h
-    point_y = bottom_y - h * 0.62  # where the body meets the stem
-    stem_w = max(2.0 * ui_scale, w * 0.15)  # width of the stem
-    stem_radius = min(stem_w / 2, h * 0.03)
+    def _stroke(p0: tuple[float, float], p1: tuple[float, float]) -> None:
+        dx = p1[0] - p0[0]
+        dy = p1[1] - p0[1]
+        length = math.hypot(dx, dy)
+        if length <= 0:
+            return
+
+        matrix = Matrix.Translation(((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, 0.0)) @ Matrix.Rotation(
+            math.atan2(dy, dx), 4, "Z"
+        )
+        gpu.matrix.push()
+        try:
+            gpu.matrix.multiply_matrix(matrix)
+            _draw_filled_rounded_rect(-length / 2, -stroke / 2, length, stroke, stroke / 2, color)
+        finally:
+            gpu.matrix.pop()
 
     gpu.matrix.push()
     try:
         gpu.matrix.translate((cx, cy, 0.0))
 
-        _draw_filled_rounded_rect(-half_w, rim_top_y, w, rim_h, rim_h / 2, color)
-
-        _draw_filled_quad(
-            (-stem_w / 2, point_y), (stem_w / 2, point_y), (half_w, rim_top_y), (-half_w, rim_top_y), color
-        )
-
-        _draw_filled_rounded_rect(-stem_w / 2, top_y, stem_w, point_y - top_y, stem_radius, color)
+        _stroke((-half_top, row_y), (half_top, row_y))  # wide bar
+        _stroke((-half_mid, 0.0), (half_mid, 0.0))  # medium bar
+        _stroke((-half_bot, -row_y), (half_bot, -row_y))  # narrow bar
     finally:
         gpu.matrix.pop()
 
@@ -1171,7 +1231,7 @@ def _compute_zone_geometry(
         zone_w,
         zone_h,
         zone_radius,
-        _alpha_mul(colors["background"], master_alpha),
+        _alpha_mul(colors["outliner_back"], master_alpha),
         mvp=mvp,
     )
 
@@ -1189,10 +1249,6 @@ def _compute_zone_geometry(
     view_top = search_bottom - row_pad_v + 1
     view_bottom = zone_y + row_pad_v + 1
     view_h = max(view_top - view_bottom, row_h)
-
-    scroll_max = max(0.0, total_h - view_h)
-    state.list.scroll = min(max(state.list.scroll, 0.0), scroll_max)
-    state.list.scroll_max = scroll_max
 
     header_slot_bottom = {
         label: view_top + state.list.scroll + local_bottom for label, local_bottom in header_local_bottom.items()
@@ -1224,6 +1280,16 @@ def _compute_zone_geometry(
     state.list.h_scroll = min(max(state.list.h_scroll, 0.0), h_scroll_max)
     state.list.h_scroll_max = h_scroll_max
 
+    # The horizontal bar overlays the bottom of the view, so extend the
+    # vertical scroll range by its band while it is present; the last row
+    # can then scroll fully clear of it.
+    bar_inset = int(SCROLLBAR_INSET * ui_scale)
+    h_bar_reserve = int(SCROLLBAR_THICKNESS_HOVER) + 2 * bar_inset if h_scroll_max > 0 else 0
+
+    scroll_max = max(0.0, total_h - view_h + h_bar_reserve)
+    state.list.scroll = min(max(state.list.scroll, 0.0), scroll_max)
+    state.list.scroll_max = scroll_max
+
     if over_child >= over_plain and over_child >= over_count:
         h_view_w = child_avail
         h_content_w = widest_child
@@ -1236,15 +1302,15 @@ def _compute_zone_geometry(
 
     text_y_off = round((row_h - line_h) / 2)
 
-    text_color = _alpha_mul(colors["text"], master_alpha)
-    count_color = _alpha_mul(colors["text"], 0.5 * master_alpha)
-    selection_color = _alpha_mul(colors["node_selected"], master_alpha)
-    active_color = _alpha_mul(colors["indicator"], master_alpha)
-    match_color = _alpha_mul(colors["indicator"], master_alpha)
+    text_color = _alpha_mul(colors["outliner_text"], master_alpha)
+    count_color = _alpha_mul(colors["outliner_text"], 0.3 * master_alpha)
+    selection_color = _alpha_mul(colors["outliner_selected_object"], master_alpha)
+    active_color = _alpha_mul(colors["outliner_active_object"], master_alpha)
+    match_color = _alpha_mul(colors["outliner_match"], master_alpha)
 
-    selection_fill_color = _alpha_mul(colors["viewport_fill"], 0.2 * master_alpha)
-    active_fill_color = _alpha_mul(colors["viewport_fill"], 0.4 * master_alpha)
-    active_border_color = colors["viewport_fill"]
+    selection_fill_color = _alpha_mul(colors["outliner_selected_highlight"], master_alpha)
+    active_fill_color = _alpha_mul(colors["outliner_active"], master_alpha)
+    active_border_color = (1, 1, 1, 0.05 * master_alpha)
 
     tree_data = state.tree_data() or {}
     type_colors = tree_data.get("type_colors") or {}
@@ -1252,7 +1318,7 @@ def _compute_zone_geometry(
     type_selected_counts = tree_data.get("type_selected_counts") or {}
     type_active = tree_data.get("type_active_label")
 
-    hover_color = _alpha_mul(colors["text"], 0.03 * master_alpha)
+    hover_color = (1, 1, 1, 0.02 * master_alpha)
 
     pill_x = zone_x + 2 * ui_scale
     pill_w = zone_w - 4 * ui_scale
@@ -1400,7 +1466,7 @@ def _draw_list_fills(
     radius = colors["node_roundness"] * ui_scale
     active_border_w = 0.5 * ui_scale
 
-    band_color = (1.0, 1.0, 1.0, 0.003 * master_alpha)
+    row_alternate_color = _alpha_mul(colors["outliner_row_alternate"], 0.2 * master_alpha)
 
     hovered = state.list.hovered_type_label
     hovered_child = state.list.hovered_list_row
@@ -1408,24 +1474,12 @@ def _draw_list_fills(
     if settings.show_search_bar:
         gpu.state.scissor_set(*zone_scissor)
 
-        if state.list.search_focused:
-            fill(
-                pill_x,
-                search_pill_y,
-                pill_w,
-                search_draw_h,
-                radius,
-                (0.0, 0.0, 0.0, 0.6 * master_alpha),
-            )
-        else:
-            fill(
-                pill_x,
-                search_pill_y,
-                pill_w,
-                search_draw_h,
-                radius,
-                (0.0, 0.0, 0.0, 0.3 * master_alpha),
-            )
+        pill_fill_color = (
+            _alpha_mul(colors["search_background_selected"], master_alpha)
+            if state.list.search_focused
+            else _alpha_mul(colors["search_background"], master_alpha)
+        )
+        fill(pill_x, search_pill_y, pill_w, search_draw_h, radius, pill_fill_color)
 
         border(
             pill_x,
@@ -1433,7 +1487,7 @@ def _draw_list_fills(
             pill_w,
             search_draw_h,
             radius,
-            _alpha_mul(colors["background_border"], master_alpha),
+            _alpha_mul(colors["search_text_outline"], master_alpha),
             0.5 * ui_scale,
         )
 
@@ -1449,7 +1503,7 @@ def _draw_list_fills(
 
         while band_top - row_h < view_top and band_top > view_bottom:
             if top_idx & 1:
-                fill(pill_x, round(band_top - row_h + gap_half), pill_w, row_draw_h, 0.0, band_color)
+                fill(pill_x, round(band_top - row_h + gap_half), pill_w, row_draw_h, 0.0, row_alternate_color)
             band_top -= row_h
             top_idx -= 1
 
@@ -1543,7 +1597,9 @@ def _draw_list_fills(
         color = header_color(label, children, type_node_colors, type_colors, colors)
 
         line_color = (
-            _alpha_mul(color, master_alpha) if show_type_colors else _alpha_mul(colors["text"], 0.1 * master_alpha)
+            _alpha_mul(color, master_alpha)
+            if show_type_colors
+            else _alpha_mul(colors["outliner_text"], 0.1 * master_alpha)
         )
 
         child_count = len(children_get(label, ()))
@@ -1626,14 +1682,15 @@ def _draw_list_text(
     # only headers that draw a count next to their title get a narrower clip
     # rect; every other label lets the scissor do the clipping.
     content_left = int(geo["zone_x"])
-    row_clip_right = int(geo["zone_x"] + geo["zone_w"])
+    pad_right = LIST_PAD_X * ui_scale
+    row_clip_right = int(geo["zone_x"] + geo["zone_w"] - pad_right)
     base_label_x = geo["label_x"]
 
     clip_top = int(zone_y - row_h)
     clip_bottom = int(zone_y + zone_h + row_h)
 
     header_clip_left = content_left
-    header_clip_right = int(base_label_x + label_max_width)
+    header_clip_right = int(base_label_x + label_max_width - pad_right)
 
     count_clip_right = int(count_right + geo["widest_count"]) if show_counts else 0
 
@@ -1651,8 +1708,14 @@ def _draw_list_text(
 
         gpu.state.scissor_set(*zone_scissor)
 
-        icon_color = text_color if search_query else count_color
-        icon_size = search_draw_h * 0.55
+        search_text_color = (
+            _alpha_mul(colors["search_text_selected"], master_alpha)
+            if state.list.search_focused and search_query
+            else _alpha_mul(colors["search_text"], 0.3 * master_alpha)
+        )
+        icon_color = _alpha_mul(colors["search_text"], master_alpha)
+        icon_size = 10 * ui_scale  # search_draw_h * 1
+        icon_margin = 15 * ui_scale
         _draw_search_filter_icon(
             search_text_x,
             search_pill_y + (search_draw_h - icon_size) / 2,
@@ -1661,7 +1724,7 @@ def _draw_list_text(
             ui_scale,
         )
 
-        base_text_start_x = search_text_x + icon_size + 3 * ui_scale
+        base_text_start_x = search_text_x + icon_margin * ui_scale
         search_text_start_x = base_text_start_x
         caret_x = round(base_text_start_x)
 
@@ -1680,10 +1743,10 @@ def _draw_list_text(
             _draw_filled_rounded_rect(
                 caret_x,
                 round(search_pill_y),
-                max(2.0, 2.2 * ui_scale),
+                _CARET_WIDTH * ui_scale,
                 search_draw_h,
                 0.0,
-                _alpha_mul(geo["active_border_color"], master_alpha),
+                _alpha_mul(colors["regular_selected"], master_alpha),
                 mvp=mvp,
             )
 
@@ -1691,7 +1754,7 @@ def _draw_list_text(
 
         blf.clipping(font_id, int(base_text_start_x), clip_top, int(search_text_right), clip_bottom)
         blf.position(font_id, search_text_start_x, search_text_y, 0)
-        blf.color(font_id, *(text_color if search_query else count_color))
+        blf.color(font_id, *search_text_color)
         blf.draw(font_id, search_text)
 
         if clear_rect:
@@ -1823,48 +1886,31 @@ def _draw_list_scrollbar(
     if scroll_max <= 0 or total_h <= 0:
         return
 
-    gpu.state.blend_set("ALPHA")
+    bar_offset = int(SCROLLBAR_INSET * ui_scale)
+    h_reserve = (int(SCROLLBAR_THICKNESS_HOVER) + 2 * bar_offset) if geo.get("h_scroll_max", 0.0) > 0 else 0
 
-    _bar_inset = int(SCROLLBAR_INSET * ui_scale)
-    h_reserve = (int(SCROLLBAR_THICKNESS_HOVER) + 2 * _bar_inset) if geo.get("h_scroll_max", 0.0) > 0 else 0
-
-    track_x = round(geo["zone_x"] + geo["zone_w"] - SCROLLBAR_THICKNESS_HOVER - 1 * _bar_inset)
-    track_y = geo["zone_y"] + _bar_inset + h_reserve
-    track_h = max(geo["view_top"] - geo["zone_y"] - 2 * _bar_inset - h_reserve, 0.0)
-
-    if state.list.hovered_scrollbar:
-        hover_fill_color = (0, 0, 0, 0.1 * master_alpha)
-        _draw_filled_rounded_rect(
-            track_x,
-            track_y,
-            SCROLLBAR_THICKNESS_HOVER,
-            track_h,
-            SCROLLBAR_THICKNESS_HOVER / 2.0,
-            hover_fill_color,
-            mvp=mvp,
-        )
-
-    _bar_thickness, bar_offset = _get_scrollbar_style(ui_scale)
-
-    frac = state.list.scroll / scroll_max
     active = state.list.hovered_scrollbar or state.list.scrollbar_dragging
     thick = _scrollbar_thickness(ui_scale, active)
 
-    thumb_rect, track_rect = _draw_scrollbar_thumb(
-        round(geo["zone_x"] + geo["zone_w"] - thick - bar_offset),
+    track_x = round(geo["zone_x"] + geo["zone_w"] - thick - bar_offset)
+    track_y = geo["zone_y"] + h_reserve
+    track_h = max(geo["view_top"] - geo["zone_y"] - h_reserve, 0.0)
+
+    state.list.scrollbar_thumb, state.list.scrollbar_track = _draw_list_scrollbar_core(
+        track_x,
+        track_y,
+        track_h,
+        track_x,
         geo["zone_y"] + bar_offset + h_reserve,
-        (max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset - h_reserve, 0.0)),
+        max(geo["view_top"] - geo["zone_y"] - 2 * bar_offset - h_reserve, 0.0),
         geo["view_h"] / total_h,
-        1.0 - frac,
+        1.0 - state.list.scroll / scroll_max,
         colors,
         master_alpha,
         ui_scale,
-        active=active,
+        active,
         mvp=mvp,
     )
-
-    state.list.scrollbar_thumb = thumb_rect
-    state.list.scrollbar_track = track_rect
 
 
 def _draw_list_h_scrollbar(
@@ -1886,10 +1932,8 @@ def _draw_list_h_scrollbar(
     if h_scroll_max <= 0 or h_content_w <= 0 or h_view_w <= 0:
         return
 
-    gpu.state.blend_set("ALPHA")
-
     bar_offset = int((SCROLLBAR_INSET - 2) * ui_scale)
-    v_reserve = (int(SCROLLBAR_THICKNESS_HOVER) + 0 * bar_offset) if geo.get("scroll_max", 0.0) > 0 else 0
+    v_reserve = int(SCROLLBAR_THICKNESS_HOVER) if geo.get("scroll_max", 0.0) > 0 else 0
 
     track_x = geo["pill_x"] + bar_offset
     track_right = geo["pill_x"] + geo["pill_w"] - bar_offset - v_reserve
@@ -1898,37 +1942,24 @@ def _draw_list_h_scrollbar(
         return
     track_y = geo["view_bottom"] + bar_offset
 
-    if state.list.hovered_h_scrollbar:
-        hover_fill_color = (0, 0, 0, 0.1 * master_alpha)
-        _draw_filled_rounded_rect(
-            track_x,
-            track_y,
-            track_w,
-            SCROLLBAR_THICKNESS_HOVER,
-            SCROLLBAR_THICKNESS_HOVER / 2.0,
-            hover_fill_color,
-            mvp=mvp,
-        )
-
-    frac = state.list.h_scroll / h_scroll_max
     active = state.list.hovered_h_scrollbar or state.list.h_scrollbar_dragging
 
-    thumb_rect, track_rect = _draw_scrollbar_thumb(
+    state.list.h_scrollbar_thumb, state.list.h_scrollbar_track = _draw_list_scrollbar_core(
+        track_x,
+        track_y,
+        track_w,
         track_x,
         track_y,
         track_w,
         min(max(h_view_w / h_content_w, 0.0), 1.0),
-        frac,
+        state.list.h_scroll / h_scroll_max,
         colors,
         master_alpha,
         ui_scale,
+        active,
         horizontal=True,
-        active=active,
         mvp=mvp,
     )
-
-    state.list.h_scrollbar_thumb = thumb_rect
-    state.list.h_scrollbar_track = track_rect
 
 
 # ---------------------------------------------------------------------------

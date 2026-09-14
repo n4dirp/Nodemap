@@ -7,8 +7,8 @@ import bpy
 
 from .. import __package__ as base_package
 from ..core.constants import (
-    MAX_FRAME_ZOOM,
-    MIN_FRAME_ZOOM,
+    MAX_MAP_SCALE,
+    MIN_MAP_SCALE,
     TYPE_LIST_ASPECT_THRESHOLD,
     TYPE_LIST_TOP_BUTTON_GAP,
 )
@@ -75,6 +75,21 @@ def _get_map_content_rect(minimap_state: MinimapState) -> tuple[float, float, fl
     framing and panning never place tree content behind the list.
     """
     return _get_map_content_rect_for_width(minimap_state, minimap_state.list.list_width)
+
+
+def _clamp_minimap_zoom(zoom: float, base_scale: float) -> float:
+    """Clamp a minimap ``user_zoom`` to the node-anchored absolute scale range.
+
+    Convert ``MIN_MAP_SCALE``/``MAX_MAP_SCALE`` (pixels per tree unit) into
+    zoom multipliers by dividing by ``base_scale`` so the usable range is
+    independent of tree size. Zooms of 1.0 or higher are always permitted so
+    framing the whole tree is never blocked.
+    """
+    if base_scale <= 0:
+        return zoom
+    zoom_min = min(MIN_MAP_SCALE / base_scale, 1.0)
+    zoom_max = max(MAX_MAP_SCALE / base_scale, 1.0)
+    return max(zoom_min, min(zoom, zoom_max))
 
 
 def _preserve_view_for_list_width(
@@ -169,9 +184,9 @@ def _preserve_view_for_list_width(
         req_zoom_w = (new_inner_w / target_w) / new_base
         req_zoom_h = (new_inner_h / target_h) / new_base
         new_zoom = min(req_zoom_w, req_zoom_h)
-        # Clamp like elsewhere (0.1..20) and keep at least 1 for
+        # Clamp to the node-anchored scale range and cap at 1 for
         # frame_all style (don't magnify small trees).
-        new_zoom = max(MIN_FRAME_ZOOM, min(new_zoom, MAX_FRAME_ZOOM))
+        new_zoom = _clamp_minimap_zoom(new_zoom, new_base)
         if new_zoom > 1.0:
             new_zoom = 1.0
         new_scale = new_base * new_zoom
@@ -190,7 +205,7 @@ def _preserve_view_for_list_width(
             scale_ratio = new_inner_w / max(old_inner_w, 1.0)
         new_scale = old_scale * scale_ratio
         new_zoom = new_scale / new_base
-        new_zoom = max(MIN_FRAME_ZOOM, min(new_zoom, MAX_FRAME_ZOOM))
+        new_zoom = _clamp_minimap_zoom(new_zoom, new_base)
         # Re-derive scale after clamp.
         new_scale = new_base * new_zoom
         # Preserve world center proportionally: pan scales with scale.

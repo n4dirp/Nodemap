@@ -276,6 +276,15 @@ def _get_node_label_lines(label: str, font_id: int, font_size: int, max_width: f
     return lines
 
 
+def _type_list_size(settings, placement: str) -> int:
+    """Return the type-list extent preference in pixels for a placement.
+
+    Top placement stores its extent in ``type_list_height``, left placement in
+    ``type_list_width``.
+    """
+    return settings.type_list_height if placement == "TOP" else settings.type_list_width
+
+
 def _get_type_list_width(
     settings,
     minimap_state,
@@ -286,10 +295,11 @@ def _get_type_list_width(
 ) -> float:
     """Return the type-list zone extent in pixels (0 when disabled).
 
-    The extent is driven by ``type_list_width`` in pixels, clamped to
-    ``TYPE_LIST_MIN_WIDTH`` and the map's reference axis minus the placement
-    reserve (width minus ``TYPE_LIST_RESERVE_LEFT`` in left placement, height
-    minus ``TYPE_LIST_RESERVE_TOP`` in top placement), and does not depend on
+    The extent is driven by ``type_list_width`` (``type_list_height`` in top
+    placement) in pixels, clamped to ``TYPE_LIST_MIN_WIDTH`` and the map's
+    reference axis minus the placement reserve (width minus
+    ``TYPE_LIST_RESERVE_LEFT`` in left placement, height minus
+    ``TYPE_LIST_RESERVE_TOP`` in top placement), and does not depend on
     content measurement; content clips or shows extra padding instead. Called
     before the map transform so node framing can reserve the zone.
     """
@@ -300,8 +310,8 @@ def _get_type_list_width(
     if not type_stats:
         return 0.0
 
-    raw_width = settings.type_list_width * ui_scale
     is_top = minimap_state.list.list_placement == "TOP" and map_h > 0
+    raw_width = _type_list_size(settings, "TOP" if is_top else "LEFT") * ui_scale
     reference_w = map_h if is_top else map_w
     reserve = TYPE_LIST_RESERVE_TOP if is_top else TYPE_LIST_RESERVE_LEFT
     max_w = max(0.0, reference_w - reserve * ui_scale)

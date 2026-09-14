@@ -77,7 +77,7 @@ def _is_bounds_stable_diff(old: tuple | None, current: tuple) -> bool:
 
 def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, master_alpha, ui_scale):
     """Compile tree data after the fingerprint settles, then force a redraw."""
-    include_selection = settings.show_node_outline or settings.highlight_selected_wires
+    include_selection = settings.show_node_outline or settings.show_wires_selected
     try:
         current_fingerprint = get_tree_fingerprint(node_tree, include_selection=include_selection)
     except (AttributeError, ReferenceError):
@@ -301,9 +301,9 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
         color_tag_cache[tag] = _theme_rgba(f"node_editor.{theme_attr}", colors["node_backdrop"])
 
     node_infos: list[dict] = []
-    default_socket_color = (*colors["wire"][:3], master_alpha)
+    default_socket_color = (*colors["wire_color"][:3], master_alpha)
     wire_alpha = master_alpha * wire_opacity_mult
-    default_wire_color = _alpha_mul(colors["wire"], wire_alpha)
+    default_wire_color = _alpha_mul(colors["wire_color"], wire_alpha)
     out_pos: dict[str, dict] = {}
     in_pos: dict[str, dict] = {}
     # Socket draw colors keyed by socket pointer, shared across nodes and
@@ -332,7 +332,6 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
         }
 
         if is_frame:
-            frame_alpha = 0.6 * master_alpha
             if show_node_colors:
                 if getattr(node, "use_custom_color", False):
                     custom_color = node.color
@@ -347,13 +346,12 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                     frame_color = color_tag_cache.get(tag, colors.get("frame_node", colors["node_backdrop"]))
             else:
                 frame_color = colors.get("frame_node", colors["node_backdrop"])
-            info["fill_color"] = _srgb_to_linear((frame_color[0], frame_color[1], frame_color[2], frame_alpha))
+            info["fill_color"] = _srgb_to_linear(_alpha_mul(frame_color, master_alpha))
 
             border_color = frame_color
             if node.select:
                 border_color = colors["node_active"] if node == active_node else colors["node_selected"]
-            frame_border_alpha = master_alpha if node.select else master_alpha * 0.9
-            info["border_color"] = _srgb_to_linear(_alpha_mul(border_color, frame_border_alpha))
+            info["border_color"] = _srgb_to_linear(_alpha_mul(border_color, master_alpha))
             info["frame_color"] = frame_color
             info["name"] = node.name
             info["node_r_base"] = NODE_ROUNDNESS_DEFAULT
@@ -399,19 +397,11 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                     type_active_label = label
 
             if node.mute:
-                bg_color = colors["background"]
-                info["fill_color"] = _srgb_to_linear(
-                    (
-                        node_color[0] * 0.15 + bg_color[0] * 0.85,
-                        node_color[1] * 0.15 + bg_color[1] * 0.85,
-                        node_color[2] * 0.15 + bg_color[2] * 0.85,
-                        node_color[3] * master_alpha,
-                    )
-                )
+                info["fill_color"] = _srgb_to_linear(_alpha_mul(node_color, MUTE_ALPHA * master_alpha))
             else:
                 info["fill_color"] = _srgb_to_linear(_alpha_mul(node_color, master_alpha))
 
-            border_color = colors["node_border"]
+            border_color = colors["node_outline"]
             if node.select:
                 border_color = colors["node_active"] if node == active_node else colors["node_selected"]
             border_alpha = master_alpha
@@ -434,7 +424,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
         if is_frame:
             frame_label = node.label
             if frame_label and show_frame_labels:
-                text_color = _alpha_mul(colors["label"], master_alpha)
+                text_color = _alpha_mul(colors["node_text"], master_alpha)
                 frame_rgba = info["frame_color"]
                 bg_label_color = _srgb_to_linear((frame_rgba[0], frame_rgba[1], frame_rgba[2], 0.4 * master_alpha))
                 info["frame_label"] = (frame_label, text_color, bg_label_color)
@@ -456,7 +446,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                         info["node_label_type"] = "initials"
                         info["node_label_text"] = initials
 
-                info["node_label_color"] = _alpha_mul(colors["label"], text_alpha * master_alpha)
+                info["node_label_color"] = _alpha_mul(colors["node_text"], text_alpha * master_alpha)
 
         node_infos.append(info)
 
@@ -674,7 +664,7 @@ def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, mas
                             label_text = initials if initials else label
                         if label_text:
                             mute_alpha = MUTE_ALPHA if getattr(node, "mute", False) else 1.0
-                            text_color = _alpha_mul(colors["label"], mute_alpha * master_alpha)
+                            text_color = _alpha_mul(colors["node_text"], mute_alpha * master_alpha)
                             reroute_labels_raw.append(
                                 {
                                     "text": label_text,
@@ -695,7 +685,7 @@ def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, mas
     # ------------------------------------------------------------------
     # Wire connections (using wire endpoints)
     # ------------------------------------------------------------------
-    show_wire_highlight = show_wires and settings.highlight_selected_wires
+    show_wire_highlight = show_wires and settings.show_wires_selected
     highlight_names = {node.name for node in nodes if node.select} if show_wire_highlight else None
     show_dashed = getattr(settings, "show_dashed_wires", True)
     if show_wires:
@@ -719,7 +709,7 @@ def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, mas
     # Wire opacity influences the highlight at 50% so dimmed wires dim their
     # highlight too (wire_opacity 0.0 → 50% of full, 1.0 → full).
     tree_data["wire_highlight_color"] = (
-        _alpha_mul(colors["node_active"], master_alpha * (0.5 + 0.5 * wire_opacity_mult))
+        _alpha_mul(colors["wire_selected"], master_alpha * (0.5 + 0.5 * wire_opacity_mult))
         if show_wire_highlight
         else None
     )

@@ -488,7 +488,10 @@ def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
     from ..core.state import suppress_update_callbacks
 
     with suppress_update_callbacks():
-        settings.type_list_width = new_px
+        if state.list.list_placement == "TOP":
+            settings.type_list_height = new_px
+        else:
+            settings.type_list_width = new_px
     # Preserve framing so the same world rect stays centered in the
     # reduced/expanded available width (100→75 keeps same relative pos).
     old_w = state.list.list_width

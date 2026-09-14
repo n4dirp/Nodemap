@@ -1,15 +1,16 @@
 """Provide minimap rendering in the Node Editor."""
 
 import logging
-import math
+
+# import math
 import time
 from typing import Any
 
 import blf
 import bpy
 import gpu
-from mathutils import Matrix
 
+# from mathutils import Matrix
 from .. import __package__ as base_package
 from ..core.constants import (
     BORDER_POSITIONS,
@@ -335,11 +336,11 @@ def _draw_moving_border(
         )
 
         # if not snapped:
-        #     border_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        #     border_color = _alpha_mul(colors["active_view_color"], master_alpha)
         _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
 
     if snapped and (snap_sides := _snap_sides_for(position)):
-        snap_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        snap_color = _alpha_mul(colors["active_view_color"], master_alpha)
         side_colors = {side: snap_color for side in snap_sides}
 
         if not side_colors:
@@ -395,8 +396,8 @@ def _draw_resize_handles(
     width_clamped = state.view.width_clamped
     height_clamped = state.view.height_clamped
 
-    color_base = _alpha_mul(colors["scroll_item"], master_alpha)
-    color_warn = _alpha_mul(colors["viewport_fill"], master_alpha)
+    color_base = _alpha_mul(colors["regular_text_selected"], 0.5 * master_alpha)
+    color_warn = _alpha_mul(colors["regular_selected"], master_alpha)
     thickness = 3.0 * ui_scale
 
     _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.2 * master_alpha), mvp=mvp)
@@ -516,7 +517,7 @@ def _draw_view_fill(
     if hole_width <= 0 or hole_height <= 0:
         return
 
-    fill_color = colors["viewport_fill"]
+    fill_color = colors["active_view_color"]
     fill_color = _alpha_mul(fill_color, 0.1 * master_alpha)
     node_roundness = colors.get("node_roundness", 2.0) * ui_scale
 
@@ -579,8 +580,9 @@ def _draw_viewport_overlay(
     hole_height = view_top - view_bottom
 
     # Darkened overlay
-    if settings.show_viewport_overlay:
-        overlay_color = settings.viewport_overlay_color
+    if settings.use_passepartout:
+        background = colors["background"]
+        overlay_color = (background[0], background[1], background[2], settings.passepartout_alpha)
         overlay = _alpha_mul(overlay_color, master_alpha)
 
         scissor_temporarily_disabled = scissor_active
@@ -611,7 +613,7 @@ def _draw_viewport_overlay(
 
     # Outline the viewport extent when it overlaps the minimap
     if hole_width > 0 and hole_height > 0:
-        outline_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+        outline_color = _alpha_mul(colors["active_view_color"], master_alpha)
         border_width = 1.5 * ui_scale
 
         _draw_rounded_rect_border(view_x, view_y, view_w, view_h, node_roundness, outline_color, border_width, mvp=mvp)
@@ -640,7 +642,7 @@ def _draw_node_count(
     text_x = round(map_x + map_w - text_w - padding)
     text_y = round(map_y + padding)
 
-    text_color = _alpha_mul(colors["text"], master_alpha)
+    text_color = _alpha_mul(colors["node_text"], master_alpha)
 
     _draw_text_with_shadow(font_id, info_text, text_x, text_y, text_color, font_size, settings.show_text_shadow)
 
@@ -773,46 +775,25 @@ def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale:
     _draw_filled_rounded_rect(center_box_x, center_box_y, center_box_w, center_box_h, 1.5 * ui_scale, color, mvp=mvp)
 
 
-def _paint_list_toggle_icon(
-    x: float, y: float, size: float, color, ui_scale: float, active: bool = False, mvp: Any = None
-) -> None:
+def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw the list-toggle icon: three horizontal bars, or an X when active."""
     stroke_thickness = max(1, int(1.5 * ui_scale))
-    if not active:
-        bar_width = size * 0.5
-        bar_gap = 2.0 * ui_scale
-        bar_x = x + (size - bar_width) / 2
-        bar_y = y + (size - (3 * stroke_thickness + 2 * bar_gap)) / 2 - 0.5
+    bar_width = size * 0.5
+    bar_gap = 2.0 * ui_scale
+    bar_x = x + (size - bar_width) / 2
+    bar_y = y + (size - (3 * stroke_thickness + 2 * bar_gap)) / 2 - 0.5
 
-        for bar_index in range(3):
-            _draw_filled_rounded_rect(
-                bar_x,
-                bar_y + bar_index * (stroke_thickness + bar_gap),
-                bar_width,
-                stroke_thickness,
-                stroke_thickness * 0.5,
-                color,
-                mvp=mvp,
-            )
-        return
-
-    # Active state: an X crossing two diagonal rounded bars about the center.
-    arm_length = size * 0.25
-    center_x = x + size / 2
-    center_y = y + size / 2
-
-    gpu.matrix.push()
-    try:
-        gpu.matrix.translate((center_x, center_y))
-        for rotation_sign in (-1, 1):
-            gpu.matrix.push()
-            gpu.matrix.multiply_matrix(Matrix.Rotation(math.radians(rotation_sign * 45.0), 4, "Z"))
-            _draw_filled_rounded_rect(
-                -arm_length, -stroke_thickness / 2.0, 2 * arm_length, stroke_thickness, stroke_thickness / 2.0, color
-            )
-            gpu.matrix.pop()
-    finally:
-        gpu.matrix.pop()
+    for bar_index in range(3):
+        _draw_filled_rounded_rect(
+            bar_x,
+            bar_y + bar_index * (stroke_thickness + bar_gap),
+            bar_width,
+            stroke_thickness,
+            stroke_thickness * 0.5,
+            color,
+            mvp=mvp,
+        )
+    return
 
 
 _BUTTON_ICONS = {
@@ -958,29 +939,31 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
     visible_button_ids = _get_visible_minimap_buttons(settings)
     rects = _layout_minimap_buttons(state, visible_button_ids, map_x, map_y, map_w, map_h, padding, ui_scale, settings)
     radius = colors["node_roundness"] * ui_scale
-    bg_color = _alpha_mul(colors["background"], master_alpha)
-    border_color = _alpha_mul(colors["background_border"], master_alpha)
+    fill_radius = radius * 1.5
+    tool_text = _alpha_mul(colors["tool_text"], master_alpha)
+    tool_text_selected = _alpha_mul(colors["tool_text_selected"], master_alpha)
+
+    tool_bg = _alpha_mul(colors["tool_inner"], master_alpha)
+    tool_border = _alpha_mul(colors["tool_outline"], master_alpha)
+    tool_pressed = _alpha_mul(colors["tool_selected"], master_alpha)
+    regular_bg = _alpha_mul(colors["regular_inner"], master_alpha)
+    regular_text = _alpha_mul(colors["regular_text"], master_alpha)
+    regular_text_selected = _alpha_mul(colors["regular_text_selected"], master_alpha)
+    regular_selected = _alpha_mul(colors["regular_selected"], master_alpha)
+    regular_border = _alpha_mul(colors["regular_outline"], master_alpha)
     border_width = 0.5 * ui_scale
+
     # Move-grip drag handle is available whenever interactive mode is on, which
     # is the mode that enables repositioning the map.
     if "DRAG" in rects and settings.use_interactive:
         drag_x, drag_y, drag_size = rects["DRAG"]
         drag_h = BUTTON_SIZE * ui_scale
-        _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color, mvp=mvp)
-        _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, border_color, border_width, mvp=mvp)
-        is_pressed = state.buttons.pressed_button_id == "DRAG"
-        is_hovered = (not is_pressed) and state.buttons.hovered_button_id == "DRAG"
-        if is_pressed or is_hovered:
-            drag_fill = (
-                _alpha_mul(colors["viewport_fill"], master_alpha)
-                if is_pressed
-                else _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
-            )
-            _draw_filled_rounded_rect(
-                drag_x + 1, drag_y + 1, drag_size - 2, drag_h - 2, max(2.0, radius - 1), drag_fill, mvp=mvp
-            )
-        icon_color = _alpha_mul(colors["text"], master_alpha)
-        _paint_grip_icon(drag_x, drag_y, drag_h, icon_color, ui_scale, mvp=mvp)
+        drag_pressed = state.buttons.pressed_button_id == "DRAG"
+        drag_bg = regular_selected if drag_pressed else regular_bg
+        _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, fill_radius, drag_bg, mvp=mvp)
+        _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, regular_border, border_width, mvp=mvp)
+        drag_icon = regular_text_selected if drag_pressed else regular_text
+        _paint_grip_icon(drag_x, drag_y, drag_h, drag_icon, ui_scale, mvp=mvp)
         state.buttons.rects["DRAG"] = (drag_x, drag_y, drag_size, drag_h)
 
     if not visible_button_ids:
@@ -1017,14 +1000,14 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
                 radii = (0.0, radius, radius, 0.0)
             else:
                 radii = (0.0, 0.0, 0.0, 0.0)
-            _draw_filled_rounded_rect_varying(button_x, button_y, button_size, button_size, radii, bg_color, mvp=mvp)
+            _draw_filled_rounded_rect_varying(button_x, button_y, button_size, button_size, radii, tool_bg, mvp=mvp)
             _draw_rounded_rect_border_varying_sides(
                 button_x,
                 button_y,
                 button_size,
                 button_size,
                 radii,
-                border_color,
+                tool_border,
                 border_width,
                 skip_left=button_index > 0,
                 mvp=mvp,
@@ -1034,20 +1017,27 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
         if button_id not in rects:
             continue
         button_x, button_y, button_size = rects[button_id]
-        if button_id == "LIST" or not is_combined:
-            _draw_filled_rounded_rect(button_x, button_y, button_size, button_size, radius, bg_color, mvp=mvp)
-            _draw_rounded_rect_border(
-                button_x, button_y, button_size, button_size, radius, border_color, border_width, mvp=mvp
-            )
         is_pressed = state.buttons.pressed_button_id == button_id
         is_hovered = (not is_pressed) and state.buttons.hovered_button_id == button_id
-        icon_color = _alpha_mul(colors["text"], master_alpha)
-        if is_pressed or is_hovered:
-            fill_color = (
-                _alpha_mul(colors["viewport_fill"], master_alpha)
-                if is_pressed
-                else _alpha_mul(colors["text"], BUTTON_HOVER_ALPHA * master_alpha)
+        if button_id == "LIST":
+            # The type-list toggle acts as an on/off indicator: it shows the
+            # selected color whenever the list is open.
+            button_fill = regular_selected if settings.show_type_list else regular_bg
+            button_border = regular_border
+            pressed_fill = regular_selected
+            icon_color = regular_text_selected if (settings.show_type_list or is_pressed) else regular_text
+        else:
+            button_fill = tool_bg
+            button_border = tool_border
+            pressed_fill = tool_pressed
+            icon_color = tool_text_selected if is_pressed else tool_text
+        if button_id == "LIST" or not is_combined:
+            _draw_filled_rounded_rect(button_x, button_y, button_size, button_size, fill_radius, button_fill, mvp=mvp)
+            _draw_rounded_rect_border(
+                button_x, button_y, button_size, button_size, radius, button_border, border_width, mvp=mvp
             )
+        if is_pressed or is_hovered:
+            fill_color = pressed_fill if is_pressed else (1, 1, 1, BUTTON_HOVER_ALPHA * master_alpha)
             if is_combined and button_id != "LIST":
                 # Per-corner radii (top-left, top-right, bottom-right, bottom-left):
                 # only the row's external corners round, inner corners stay square.
@@ -1087,7 +1077,6 @@ def _draw_minimap_buttons(map_x, map_y, map_w, map_h, padding, colors, ui_scale,
                 button_size,
                 icon_color,
                 ui_scale,
-                active=bool(settings and settings.show_type_list),
                 mvp=mvp,
             )
         else:
@@ -1102,7 +1091,7 @@ def _redraw_pressed_move_grip(
 
     While the map is being moved, `_draw_moving_border` lays a translucent black
     rect over the whole map *after* the buttons are drawn, which would smother
-    the grip's pressed fill. Repainting the grip last keeps its viewport_fill
+    the grip's pressed fill. Repainting the grip last keeps its active_view_color
     press state and icon visible while dragging.
     """
     if state.buttons.pressed_button_id != "DRAG":
@@ -1113,15 +1102,15 @@ def _redraw_pressed_move_grip(
     drag_x, drag_y, drag_size, drag_h = rect
     radius = colors["node_roundness"] * ui_scale
     border_width = 0.5 * ui_scale
-    bg_color = _alpha_mul(colors["background"], master_alpha)
-    border_color = _alpha_mul(colors["background_border"], master_alpha)
+    bg_color = _alpha_mul(colors["regular_inner"], master_alpha)
+    border_color = _alpha_mul(colors["regular_outline"], master_alpha)
     _draw_filled_rounded_rect(drag_x, drag_y, drag_size, drag_h, radius, bg_color, mvp=mvp)
     _draw_rounded_rect_border(drag_x, drag_y, drag_size, drag_h, radius, border_color, border_width, mvp=mvp)
-    press_color = _alpha_mul(colors["viewport_fill"], master_alpha)
+    press_color = _alpha_mul(colors["regular_selected"], master_alpha)
     _draw_filled_rounded_rect(
         drag_x + 1, drag_y + 1, drag_size - 2, drag_h - 2, max(2.0, radius - 1), press_color, mvp=mvp
     )
-    icon_color = _alpha_mul(colors["text"], master_alpha)
+    icon_color = _alpha_mul(colors["regular_text_selected"], master_alpha)
     _paint_grip_icon(drag_x, drag_y, drag_h, icon_color, ui_scale, mvp=mvp)
 
 
@@ -1148,7 +1137,7 @@ def _draw_marquee(
     rect_h = abs(end[1] - start[1])
     if rect_w < 1 or rect_h < 1:
         return
-    base_color = colors["viewport_fill"]
+    base_color = colors["active_view_color"]
     fill_color = _alpha_mul(base_color, 0.05 * master_alpha)
     border_color = _alpha_mul(base_color, master_alpha)
     border_width = 0.5 * ui_scale
@@ -1231,7 +1220,7 @@ def draw_minimap() -> None:
     visible = _get_visible_rect(space, region)
 
     show_borders = settings.show_node_outline
-    include_selection = show_borders or settings.highlight_selected_wires
+    include_selection = show_borders or settings.show_wires_selected
     current_fingerprint, raw_bounds, content_count, selected_bounds = _get_tree_snapshot(node_tree, include_selection)
     if raw_bounds[2] - raw_bounds[0] <= 0 or raw_bounds[3] - raw_bounds[1] <= 0:
         return
@@ -1430,7 +1419,7 @@ def draw_minimap() -> None:
         highlight_border,
         wire_curvature,
         wire_thickness,
-        node_border=colors["node_border"],
+        node_outline=colors["node_outline"],
     )
 
     try:
@@ -1462,25 +1451,25 @@ def draw_minimap() -> None:
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]
 
-    _draw_view_fill(
-        space,
-        region,
-        map_x,
-        map_y,
-        map_w,
-        map_h,
-        map_anchor_x,
-        map_anchor_y,
-        scale,
-        tree_center_x,
-        tree_center_y,
-        colors,
-        panel_roundness,
-        master_alpha,
-        ui_scale,
-        visible,
-        mvp=base_mvp,
-    )
+    # _draw_view_fill(
+    #     space,
+    #     region,
+    #     map_x,
+    #     map_y,
+    #     map_w,
+    #     map_h,
+    #     map_anchor_x,
+    #     map_anchor_y,
+    #     scale,
+    #     tree_center_x,
+    #     tree_center_y,
+    #     colors,
+    #     panel_roundness,
+    #     master_alpha,
+    #     ui_scale,
+    #     visible,
+    #     mvp=base_mvp,
+    # )
 
     content_draw.draw_content_batches(
         state,

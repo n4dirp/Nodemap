@@ -141,16 +141,11 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     else:
         background = theme_background
 
-    text_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
-    label_color = _theme_rgba("node_editor.space.text", (1.0, 1.0, 1.0, 1.0))
-    if settings.use_custom_text:
-        text_color = label_color = tuple(settings.text_color)
-
-    selected = _theme_rgba("user_interface.wcol_regular.ThemeWidgetColors.inner_sel", (0.28, 0.45, 0.7, 1.0))
+    selected = _theme_rgba("user_interface.wcol_regular.text_sel", (0.28, 0.45, 0.7, 1.0))
     if settings.use_custom_viewport_fill:
-        viewport_fill = tuple(settings.viewport_fill_color)
+        active_view_color = tuple(settings.viewport_fill_color)
     else:
-        viewport_fill = selected
+        active_view_color = selected
 
     result = {
         "background": background,
@@ -158,15 +153,45 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "node_backdrop": _theme_rgba("node_editor.node_backdrop", (0.4, 0.4, 0.4, 1.0)),
         "node_selected": _theme_rgba("node_editor.node_selected", (0.28, 0.45, 0.7, 1.0)),
         "node_active": _theme_rgba("node_editor.node_active", (1.0, 1.0, 1.0, 1.0)),
-        "node_border": _theme_rgba("node_editor.node_outline", (1.0, 1.0, 1.0, 0.149)),
-        "wire": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
-        "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
+        "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 1.0, 1.0, 0.149)),
+        "node_text": _theme_rgba("node_editor.space.text", (0.902, 0.902, 0.902, 1.0)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
-        "viewport_fill": viewport_fill,
-        "selected": selected,
-        "text": text_color,
-        "label": label_color,
+        # Wire
+        "wire_color": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
+        "wire_selected": _theme_rgba("node_editor.wire_select", (1.0, 1.0, 1.0, 0.7)),
+        "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
+        "active_view_color": active_view_color,
+        # Regular
+        "regular_inner": _theme_rgba("user_interface.wcol_regular.inner", (0.28, 0.45, 0.7, 1.0)),
+        "regular_selected": _theme_rgba("user_interface.wcol_regular.inner_sel", (0.28, 0.45, 0.7, 1.0)),
+        "regular_outline": _theme_rgba("user_interface.wcol_regular.outline", (0.09, 0.09, 0.09, 1.0)),
+        "regular_text": _theme_rgba("user_interface.wcol_regular.text", (1.0, 1.0, 1.0, 1.0)),
+        "regular_text_selected": _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0)),
+        # Search
+        "search_background": _theme_rgba("user_interface.wcol_text.inner", (0.114, 0.114, 0.114, 1.0)),
+        "search_background_selected": _theme_rgba("user_interface.wcol_text.inner_sel", (0.094, 0.094, 0.094, 1.0)),
+        "search_text_outline": _theme_rgba("user_interface.wcol_text.outline", (0.902, 0.902, 0.902, 1.0)),
+        "search_text": _theme_rgba("user_interface.wcol_text.text", (0.902, 0.902, 0.902, 1.0)),
+        "search_text_selected": _theme_rgba("user_interface.wcol_text.text_sel", (1.0, 1.0, 1.0, 1.0)),
+        # Tool
+        "tool_inner": _theme_rgba("user_interface.wcol_tool.inner", (1.0, 0.0, 0.0, 0.75)),
+        "tool_selected": _theme_rgba("user_interface.wcol_tool.inner_sel", (1.0, 0.0, 0.0, 0.75)),
+        "tool_outline": _theme_rgba("user_interface.wcol_tool.outline", (1.0, 0.0, 0.0, 0.75)),
+        "tool_text": _theme_rgba("user_interface.wcol_tool.text", (1.0, 0.0, 0.0, 0.75)),
+        "tool_text_selected": _theme_rgba("user_interface.wcol_tool.text_sel", (1.0, 0.0, 0.0, 0.75)),
+        # outliner
+        "outliner_back": _theme_rgba("outliner.space.back", (0.0, 0.0, 0.5, 1.0)),
+        "outliner_text": _theme_rgba("outliner.space.text", (0.9, 0.9, 0.9, 1.0)),
+        "outliner_match": _theme_rgba("outliner.match", (0.0, 1.0, 0.0, 1.0)),
+        "outliner_selected_highlight": _theme_rgba("outliner.selected_highlight", (0.5, 0.4, 0.2, 1.0)),
+        "outliner_active": _theme_rgba("outliner.active", (0.5, 1.0, 0.3, 1.0)),
+        "outliner_selected_object": _theme_rgba("outliner.selected_object", (0.5, 0.4, 0.2, 1.0)),
+        "outliner_active_object": _theme_rgba("outliner.active_object", (0.5, 1.0, 0.3, 1.0)),
+        "outliner_row_alternate": _theme_rgba("outliner.row_alternate", (1.0, 0.0, 1.0, 0.015)),
+        # scroll
         "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),
+        "scroll_inner": _theme_rgba("user_interface.wcol_scroll.inner", (0.133, 0.133, 0.133, 0.0)),
+        # Panel
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
     }

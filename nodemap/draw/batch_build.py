@@ -623,7 +623,7 @@ def _ensure_minimap_batches(
     highlight_border=None,
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
-    node_border: tuple | None = None,
+    node_outline: tuple | None = None,
 ):
     """Bake content batches in map-local space, rebuilding only when stale."""
     shared = minimap_state.shared
@@ -901,7 +901,8 @@ def _ensure_minimap_batches(
             int(wire_curvature),
             wire_thickness,
             filter_names,
-            _alpha_mul(node_border, 0.6 * master_alpha) if show_borders and node_border else None,
+            show_borders,
+            _alpha_mul(node_outline, master_alpha) if node_outline else None,
         )
         minimap_state.cache.wire_key = wire_key
         minimap_state.cache.wire_scale = bake_scale
@@ -997,6 +998,7 @@ def _rebuild_wire_marker_batches(
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
     filter_names: frozenset[str] | None = None,
+    show_borders: bool = True,
     marker_border_color: tuple | None = None,
 ) -> None:
     """Bake wire batches and group markers."""
@@ -1160,7 +1162,7 @@ def _rebuild_wire_marker_batches(
                     linear,
                     half_size=(half_w, half_h),
                 )
-        if marker_border_color and marker_items:
+        if show_borders and marker_border_color and marker_items:
             border = _srgb_to_linear(marker_border_color)
             for _color, geometry in marker_items:
                 for marker_baked_x, marker_baked_y, marker_len in geometry:

@@ -85,9 +85,9 @@ class NODEMAP_PT_popup(Panel):
         if body:
             body.active = settings.show_wires
             flow = body.grid_flow(row_major=True, columns=2, align=False)
-            flow.prop(settings, "highlight_selected_wires", text="Highlights")
+            flow.prop(settings, "show_wires_selected", text="Selections")
             flow.prop(settings, "show_wire_color", text="Wire Colors")
-            flow.prop(settings, "show_dashed_wires", text="Dashed Wires")
+            flow.prop(settings, "show_dashed_wires", text="Dashes")
             flow.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
             row = flow.row()
@@ -141,22 +141,16 @@ class NODEMAP_PT_popup(Panel):
             sub.prop(settings, "viewport_fill_color", text="")
 
             row = col.row(align=True)
-            row.prop(settings, "show_viewport_overlay", text="View Dimming")
+            row.prop(settings, "use_passepartout", text="Passe-Partout")
             sub = row.row(align=True)
-            sub.active = settings.show_viewport_overlay
-            sub.prop(settings, "viewport_overlay_color", text="")
+            sub.active = settings.use_passepartout
+            sub.prop(settings, "passepartout_alpha", text="")
 
             row = col.row(align=True)
             row.prop(settings, "use_custom_background", text="Background")
             sub = row.row(align=True)
             sub.active = settings.use_custom_background
             sub.prop(settings, "background_color", text="")
-
-            row = col.row(align=True)
-            row.prop(settings, "use_custom_text", text="Text Color")
-            sub = row.row(align=True)
-            sub.active = settings.use_custom_text
-            sub.prop(settings, "text_color", text="")
 
 
 def draw_minimap_header_button(self, context):

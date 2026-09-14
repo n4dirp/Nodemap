@@ -55,9 +55,16 @@ BORDER_POSITIONS: frozenset[str] = frozenset({"TOP_BORDER", "BOTTOM_BORDER", "LE
 # ---------------------------------------------------------------------------
 # Framing / zoom
 # ---------------------------------------------------------------------------
-MIN_FRAME_ZOOM: float = 0.3
-MAX_FRAME_ZOOM: float = 10.0
+# Editor marquee/selection framing treats MAX_FRAME_ZOOM as an absolute
+# pixels-per-unit cap; minimap zoom uses MAX_MAP_SCALE/MIN_MAP_SCALE below.
+MAX_FRAME_ZOOM: float = 20.0
 EDITOR_FIT_MARGIN: float = 0.15
+
+# Absolute minimap zoom limits in pixels per tree unit, anchored to a
+# default-width (140-unit) node so the usable range does not depend on tree
+# size: at the max a node measures 280px, at the min about 3px.
+MAX_MAP_SCALE: float = 2.0
+MIN_MAP_SCALE: float = 0.02
 
 # Wheel zoom steps the view by this factor per notch.
 WHEEL_ZOOM_IN: float = 1.15
@@ -77,7 +84,7 @@ TYPE_LIST_MIN_WIDTH: float = 72.0
 LIST_PAD_X: float = 6.0
 LIST_SWATCH: float = 10.0
 LIST_SWATCH_GAP: float = 5.0
-LIST_COUNT_GAP: float = 0.0
+LIST_COUNT_GAP: float = 4.0
 SCROLLBAR_HIT_PAD: float = 6.0
 TYPE_LIST_ANIM_DURATION: float = 0.08
 EMPTY_FINGERPRINT: tuple = (0, 0.0, "", 0, 0, 0, 0.0, 0.0, 0, 0)
@@ -87,7 +94,7 @@ SCROLLBAR_THICKNESS: float = 3.0
 SCROLLBAR_THICKNESS_HOVER: float = 6.0
 SCROLLBAR_INSET: float = 2.0
 SCROLLBAR_MIN_THUMB: float = 9.0
-SCROLLBAR_ALPHA: float = 0.65
+SCROLLBAR_ALPHA: float = 0.2
 TYPE_LIST_ANIM_AWAIT_TIMEOUT: float = 1.0
 TYPE_LIST_MIN_LABEL_W: float = 32.0
 TYPE_LIST_ROW_HEIGHT_OFFSET: float = 8.0
@@ -174,4 +181,4 @@ SOCKET_PILL_SIZE_MULTIPLIER: float = 3.0
 # Node rendering
 # ---------------------------------------------------------------------------
 NODE_ROUNDNESS_DEFAULT: float = 2.0
-MUTE_ALPHA: float = 0.35
+MUTE_ALPHA: float = 0.4

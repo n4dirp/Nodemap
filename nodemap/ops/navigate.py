@@ -15,7 +15,6 @@ from ..core.constants import (
     INERTIA_PAN_MIN_SPEED,
     INERTIA_PAN_VELOCITY_SCALE,
     MAX_FRAME_ZOOM,
-    MIN_FRAME_ZOOM,
     SCROLLBAR_HIT_PAD,
     SMOOTH_DAMP_STILL,
     TYPE_LIST_FONT_ID,
@@ -29,6 +28,7 @@ from ..core.helpers import (
     _get_node_tree_bounds,
     _get_safe_bounds,
     _get_ui_scale,
+    _type_list_size,
     clamp_free_rect,
     get_addon_preferences,
     redraw_ui,
@@ -50,6 +50,7 @@ from ..geo.framing import (
     frame_view,
 )
 from ..geo.transforms import (
+    _clamp_minimap_zoom,
     _clamp_pan_to_viewport,
     _compute_map_transform,
     _get_minimap_transform,
@@ -1215,10 +1216,8 @@ class NODEMAP_OT_navigate(Operator):
             self._reset_gesture()
             return {"PASS_THROUGH"}
         # --- Press ---
-        # Synthetic follow-ups (CLICK) carry no new user intent: only PRESS
-        # and DOUBLE_CLICK may arm a gesture, so a stray CLICK can never
-        # leave a pending drag or click behind for a later release to fire.
-        if event.value not in ("PRESS", "DOUBLE_CLICK"):
+
+        if event.value not in ("PRESS"):
             self._was_in_minimap = False
             self._drag_start = None
             self._reset_gesture()
@@ -1250,7 +1249,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
                 self._list_width_start_y = self._mouse_y
-                self._list_width_start_px = settings.type_list_width
+                self._list_width_start_px = _type_list_size(settings, state.list.list_placement)
                 # The top strip is resized vertically.
                 cursor = "MOVE_Y" if state.list.list_placement == "TOP" else _CURSOR_MAP[divider_resize_handle]
                 context.window.cursor_modal_set(cursor)
@@ -1499,11 +1498,9 @@ class NODEMAP_OT_navigate(Operator):
             self._drag_start = None
             self._reset_gesture()
             return {"PASS_THROUGH"}
+
         # --- Press ---
-        # Synthetic follow-ups (CLICK) carry no new user intent: only PRESS
-        # and DOUBLE_CLICK may arm a gesture, so a stray CLICK can never
-        # leave a pending drag or click behind for a later release to fire.
-        if event.value not in ("PRESS", "DOUBLE_CLICK"):
+        if event.value not in ("PRESS"):
             self._was_in_minimap = False
             self._drag_start = None
             self._reset_gesture()
@@ -1528,7 +1525,7 @@ class NODEMAP_OT_navigate(Operator):
                 self._redraw_ui()
                 self._list_width_start_x = self._mouse_x
                 self._list_width_start_y = self._mouse_y
-                self._list_width_start_px = settings.type_list_width
+                self._list_width_start_px = _type_list_size(settings, state.list.list_placement)
                 # The top strip is resized vertically.
                 cursor = "MOVE_Y" if state.list.list_placement == "TOP" else _CURSOR_MAP[divider_handle_r]
                 context.window.cursor_modal_set(cursor)
@@ -1838,14 +1835,13 @@ class NODEMAP_OT_navigate(Operator):
                     except RuntimeError:
                         pass
                 else:
-                    new_zoom = max(MIN_FRAME_ZOOM, min(effective_zoom * zoom_delta, MAX_FRAME_ZOOM))
-
                     transform = _get_minimap_transform(state)
                     tree_coord = _tree_from_region(self._mouse_x, self._mouse_y, transform)
 
                     if transform[2] > 0 and tree_coord is not None:
                         _, _, scale, tree_center_x, tree_center_y = transform
-                        base_scale = scale / state.view.user_zoom
+                        base_scale = scale / max(state.view.user_zoom, 1e-6)
+                        new_zoom = _clamp_minimap_zoom(effective_zoom * zoom_delta, base_scale)
                         hit_tx, hit_ty = tree_coord
                         pan_x, pan_y = state.view.pan
 

@@ -2,7 +2,7 @@
 
 import bpy
 
-from ..core.constants import CONTENT_PADDING, EDITOR_FIT_MARGIN, MAX_FRAME_ZOOM, MIN_FRAME_ZOOM
+from ..core.constants import CONTENT_PADDING, EDITOR_FIT_MARGIN, MAX_FRAME_ZOOM
 from ..core.helpers import (
     _expand_bounds_margin,
     _get_node_dims,
@@ -12,6 +12,7 @@ from ..core.helpers import (
 )
 from ..core.state import _state
 from .transforms import (
+    _clamp_minimap_zoom,
     _compute_base_map_geom,
     _compute_map_transform,
     _get_visible_rect,
@@ -107,9 +108,9 @@ def _compute_frame_to_bounds_targets(
     """Compute target zoom and pan to frame the given bounds without applying them.
 
     The bounds are zoomed to entirely fill the minimap. The zoom is clamped
-    to ``MIN_FRAME_ZOOM``/``MAX_FRAME_ZOOM`` so tiny marquees cannot magnify
-    excessively and huge ones cannot shrink below the minimum. Return
-    ``(zoom, pan_x, pan_y)``.
+    to the node-anchored scale range so tiny marquees cannot magnify a node
+    past a fixed pixel size and huge ones cannot shrink the map below the
+    minimum resolution. Return ``(zoom, pan_x, pan_y)``.
     """
     minimap_state = _state(area_ptr)
 
@@ -118,7 +119,7 @@ def _compute_frame_to_bounds_targets(
     target_w = max(target_bounds[2] - target_bounds[0], 1.0)
     target_h = max(target_bounds[3] - target_bounds[1], 1.0)
     zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h))
-    zoom = max(MIN_FRAME_ZOOM, min(zoom, MAX_FRAME_ZOOM))
+    zoom = _clamp_minimap_zoom(zoom, base_scale)
 
     target_cx = (target_bounds[0] + target_bounds[2]) / 2
     target_cy = (target_bounds[1] + target_bounds[3]) / 2
@@ -217,7 +218,7 @@ def _compute_frame_selected_targets(
         zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(
             (min_x - margin, min_y - margin, max_x + margin, max_y + margin), area_ptr
         )
-        return min(zoom, MAX_FRAME_ZOOM), pan_x, pan_y
+        return zoom, pan_x, pan_y
 
     pan_x, pan_y = _compute_center_pan((min_x + max_x) / 2, (min_y + max_y) / 2, area_ptr)
     return None, pan_x, pan_y

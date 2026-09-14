@@ -7,7 +7,7 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProp
 from bpy.types import AddonPreferences, PropertyGroup
 
 from .. import __package__ as base_package
-from ..core.constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH, TYPE_LIST_MIN_WIDTH
+from ..core.constants import FONT_SIZE, MIN_MAP_HEIGHT, MIN_MAP_WIDTH, TYPE_LIST_MIN_WIDTH
 from ..core.helpers import get_addon_preferences
 from ..core.state import _suppress_update
 from .panels import NODEMAP_PT_presets
@@ -275,30 +275,12 @@ class NODEMAP_PG_settings(PropertyGroup):
     background_color: FloatVectorProperty(
         name="Background Color",
         description="Custom background color for the minimap overlay",
-        default=(0.157, 0.157, 0.157, 1.0),
+        default=(0.188, 0.188, 0.188, 1.0),
         size=4,
         min=0.0,
         max=1.0,
         subtype="COLOR_GAMMA",
         update=_update_invalidate_batches,
-    )
-
-    use_custom_text: BoolProperty(
-        name="Custom Text Color",
-        description="Override the Blender theme text color with a custom color",
-        default=False,
-        update=_update_invalidate_all,
-    )
-
-    text_color: FloatVectorProperty(
-        name="Text Color",
-        description="Custom text color for minimap labels and the type list",
-        default=(1.0, 1.0, 1.0, 1.0),
-        size=4,
-        min=0.0,
-        max=1.0,
-        subtype="COLOR_GAMMA",
-        update=_update_invalidate_all,
     )
 
     show_text_shadow: BoolProperty(
@@ -308,20 +290,21 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    show_viewport_overlay: BoolProperty(
-        name="Viewport Overlay",
+    use_passepartout: BoolProperty(
+        name="Passe-Partout",
         description="Show darkened overlay with viewport cutout in the minimap",
         default=True,
+        update=_update_invalidate_batches,
     )
 
-    viewport_overlay_color: FloatVectorProperty(
-        name="Viewport Overlay Color",
-        description="Color of the viewport overlay",
-        default=(0.0, 0.0, 0.0, 0.4),
-        size=4,
+    passepartout_alpha: FloatProperty(
+        name="Dimming",
+        description="Opacity of the dimming applied around the active view",
+        default=0.4,
         min=0.0,
         max=1.0,
-        subtype="COLOR_GAMMA",
+        precision=3,
+        update=_update_invalidate_batches,
     )
 
     use_custom_viewport_fill: BoolProperty(
@@ -423,7 +406,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         default=True,
         update=_update_invalidate_all,
     )
-    highlight_selected_wires: BoolProperty(
+    show_wires_selected: BoolProperty(
         name="Highlight Selected Wires",
         description="Draw wires connected to selected nodes in the theme selection color",
         default=True,
@@ -535,7 +518,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     type_list_font_size: IntProperty(
         name="Type List Font Size",
         description="Font size for the node-type list entries (pixels)",
-        default=10,
+        default=FONT_SIZE,
         min=8,
         max=20,
         update=_update_invalidate_all,
@@ -543,7 +526,17 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     type_list_width: IntProperty(
         name="Type List Width",
-        description="Size of the node-type list in pixels (height when the list is on top)",
+        description="Width of the node-type list in pixels (left placement)",
+        default=160,
+        min=int(TYPE_LIST_MIN_WIDTH),
+        max=10000,
+        subtype="PIXEL",
+        update=_update_invalidate_batches,
+    )
+
+    type_list_height: IntProperty(
+        name="Type List Height",
+        description="Height of the node-type list in pixels (top placement)",
         default=160,
         min=int(TYPE_LIST_MIN_WIDTH),
         max=10000,
@@ -844,7 +837,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         row = col.row(align=True)
         row.prop(settings, "show_wire_color", text="Wire Colors")
         row.prop(settings, "show_dashed_wires", text="Dashed Fields")
-        row.prop(settings, "highlight_selected_wires", text="Highlight Selection")
+        row.prop(settings, "show_wires_selected", text="Selected Wires")
         sub = col.column(heading="Noodle Curving")
         row = sub.row(align=True, heading="")
         row.prop(settings, "use_custom_noodle_curving", text="")
@@ -869,20 +862,15 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = settings.use_custom_viewport_fill
         sub.prop(settings, "viewport_fill_color", text="")
         row = col.row(align=True)
-        row.prop(settings, "show_viewport_overlay", text="View Dimming")
+        row.prop(settings, "use_passepartout", text="Passe-Partout")
         sub = row.row(align=True)
-        sub.active = settings.show_viewport_overlay
-        sub.prop(settings, "viewport_overlay_color", text="")
+        sub.active = settings.use_passepartout
+        sub.prop(settings, "passepartout_alpha", text="", slider=True)
         row = col.row(align=True)
         row.prop(settings, "use_custom_background", text="Background")
         sub = row.row(align=True)
         sub.active = settings.use_custom_background
         sub.prop(settings, "background_color", text="")
-        row = col.row(align=True)
-        row.prop(settings, "use_custom_text", text="Text Color")
-        sub = row.row(align=True)
-        sub.active = settings.use_custom_text
-        sub.prop(settings, "text_color", text="")
         row = col.row(align=True)
         row.prop(settings, "show_text_shadow", text="Text Shadows")
 
@@ -917,8 +905,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "right_drag_action", text="Right Drag")
         interaction_column.separator()
         interaction_column.row().prop(settings, "scroll_wheel_mode", expand=True)
-        interaction_column.separator()
-        self._draw_key_modifiers(interaction_column)
+
+        # interaction_column.separator()
+        # self._draw_key_modifiers(interaction_column)
 
     def _draw_key_modifiers(self, column):
         """Draw the key-modifiers reference box."""
