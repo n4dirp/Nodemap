@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from ..core.buttons import BUTTON_ORDER, BUTTONS, ButtonKind, _cull_frame_ids, _row_radii
 from ..core.constants import (
     BUTTON_HOVER_ALPHA,
     BUTTON_MARGIN,
@@ -10,7 +11,7 @@ from ..core.constants import (
     CONTENT_PADDING,
     ELEMENT_GAP,
 )
-from ..core.state import _MINIMAP_BUTTONS, MinimapState, Rect
+from ..core.state import MinimapState, Rect
 from ..core.theme import _alpha_mul
 from ..geo.transforms import _get_map_content_rect
 from .gpu_draw import (
@@ -199,14 +200,6 @@ def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: fl
     return
 
 
-_BUTTON_ICONS = {
-    "ALL": _paint_frame_all_icon,
-    "VIEW": _paint_frame_view_icon,
-    "SELECTED": _paint_frame_selected_icon,
-    "LIST": _paint_list_toggle_icon,
-}
-
-
 def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw a move grip icon: two rows of four dots (like a drag handle)."""
     dot_size = 1.0 * ui_scale
@@ -229,15 +222,15 @@ def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float, mv
             )
 
 
-def _visible_button_ids(settings) -> list[str]:
-    """Return ids of enabled minimap buttons in draw order."""
-    if not settings.use_interactive:
-        return []
-    visible = [button_id for button_id, pref_attr in _MINIMAP_BUTTONS if getattr(settings, pref_attr, True)]
-    # Frame Selected is meaningless with Follow View (the viewport drives framing).
-    if settings.use_follow_view:
-        visible = [button_id for button_id in visible if button_id != "SELECTED"]
-    return visible
+_ICONS = {
+    "ALL": _paint_frame_all_icon,
+    "VIEW": _paint_frame_view_icon,
+    "SELECTED": _paint_frame_selected_icon,
+    "LIST": _paint_list_toggle_icon,
+    "DRAG": _paint_grip_icon,
+}
+
+assert all(button_def.icon in _ICONS for button_def in BUTTONS.values()), "Button registry icon missing a painter"
 
 
 def _row_geometry(
@@ -271,44 +264,6 @@ def _row_geometry(
     return top_y, size, drag_x
 
 
-def _cull_frame_ids(
-    frame_ids: list[str],
-    row_right_x: float,
-    button_size: float,
-    map_left_limit: float,
-    list_right: float | None,
-    gap: float,
-    priority: tuple[str, ...],
-) -> list[str]:
-    """Return the frame ids that fit without overflowing or overlapping.
-
-    When space is tight, hide buttons progressively in *priority* order.
-    Pure helper with no Blender dependency.
-    """
-    # Work on a copy so culling never affects the caller's order.
-    kept = list(frame_ids)
-    while kept:
-        count = len(kept)
-        row_left_x = row_right_x - (count - 1) * button_size if count else row_right_x
-        # 1) row would overflow left padding
-        row_overflows_left = row_left_x < map_left_limit
-        # 2) row would overlap the list toggle (with clearance)
-        row_overlaps_left_chrome = list_right is not None and row_left_x < list_right + gap
-        if not row_overflows_left and not row_overlaps_left_chrome:
-            break
-        # Hide next priority button that is still visible.
-        to_hide: str | None = None
-        for candidate in priority:
-            if candidate in kept:
-                to_hide = candidate
-                break
-        if to_hide is None:
-            # Fallback: hide leftmost (first in current order).
-            to_hide = kept[0]
-        kept = [button_id for button_id in kept if button_id != to_hide]
-    return kept
-
-
 def _layout_buttons(
     state: MinimapState,
     visible_ids: list[str],
@@ -334,11 +289,13 @@ def _layout_buttons(
         map_x, map_y, map_w, map_h, padding, ui_scale, state.list.list_placement, state.list.list_width
     )
     gap = padding
-    show_move = bool(getattr(settings, "show_move_button", True)) and bool(getattr(settings, "use_interactive", False))
+    show_move = "DRAG" in visible_ids
 
     # Frame buttons sit left of the drag handle, or flush to the right
     # padding edge when the move button is hidden.
-    frame_ids = [button_id for button_id in visible_ids if button_id != "LIST"]
+    frame_ids = [
+        button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "frame" and button_id in visible_ids
+    ]
     row_right_x = round(drag_x - gap - size) if show_move else drag_x
 
     # List toggle at the top-left, sliding right of an open type-list zone.
@@ -348,7 +305,7 @@ def _layout_buttons(
         if state.list.list_width > 0:
             list_x = max(list_x, round(_get_map_content_rect(state)[0] + BUTTON_MARGIN * ui_scale))
 
-    priority = tuple(button_id for button_id, _pref_attr in _MINIMAP_BUTTONS if button_id != "LIST")
+    priority = tuple(button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "frame")
     kept = _cull_frame_ids(
         frame_ids,
         row_right_x,
@@ -395,29 +352,11 @@ def _resolve_button_theme(colors: dict, master_alpha: float, ui_scale: float) ->
     )
 
 
-def _row_radii(index: int, count: int, radius: float) -> tuple[float, float, float, float]:
-    """Return per-corner radii for a combined-row button (Blender align style).
-
-    Only the row's external corners round; inner corners stay square. Order
-    is top-left, top-right, bottom-right, bottom-left.
-    """
-    if index == 0:
-        return (radius, 0.0, 0.0, radius)
-    if index == count - 1:
-        return (0.0, radius, radius, 0.0)
-    return (0.0, 0.0, 0.0, 0.0)
-
-
 def _paint_button_icon(
     button_id: str, x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None
 ) -> None:
     """Paint the glyph for a button id at its rect origin."""
-    if button_id == "LIST":
-        _paint_list_toggle_icon(x, y, size, color, ui_scale, mvp=mvp)
-    elif button_id == "DRAG":
-        _paint_grip_icon(x, y, size, color, ui_scale, mvp=mvp)
-    else:
-        _BUTTON_ICONS[button_id](x, y, size, color, ui_scale, mvp=mvp)
+    _ICONS[BUTTONS[button_id].icon](x, y, size, color, ui_scale, mvp=mvp)
 
 
 def _paint_buttons(
@@ -443,32 +382,31 @@ def _paint_buttons(
             return
         targets = [only_id]
     else:
-        targets = []
-        # Move-grip drag handle is available whenever interactive mode is on.
-        if "DRAG" in rects and settings.use_interactive:
-            targets.append("DRAG")
-        targets.extend(layout.frame_order)
-        if "LIST" in rects:
-            targets.append("LIST")
+        targets = [button_id for button_id in BUTTON_ORDER if button_id in rects]
 
     if only_id is None and layout.combined:
         # Draw each frame button as its own box, edge-to-edge with no gap.
         # Only the external corners round, inner corners meet square; each
         # button's border is drawn on its own rect, so neighboring borders
         # coincide at the seam and every interior is equally inset.
-        # Buttons that have a left neighbor skip their left border stroke:
-        # two coincident strokes would stack into a heavy 2px seam, so the
-        # seam line is emitted once by the neighbor's right border only.
+        # Fills use the wider radius to keep anti-aliased edges smooth while
+        # borders keep the base radius. Buttons that have a left neighbor
+        # skip their left border stroke: two coincident strokes would stack
+        # into a heavy 2px seam, so the seam line is emitted once by the
+        # neighbor's right border only.
         for button_index, button_id in enumerate(layout.frame_order):
             button_x, button_y, button_w, button_h = rects[button_id]
-            radii = _row_radii(button_index, len(layout.frame_order), theme.radius)
-            _draw_filled_rounded_rect_varying(button_x, button_y, button_w, button_h, radii, theme.tool_bg, mvp=mvp)
+            fill_radii = _row_radii(button_index, len(layout.frame_order), theme.fill_radius)
+            border_radii = _row_radii(button_index, len(layout.frame_order), theme.radius)
+            _draw_filled_rounded_rect_varying(
+                button_x, button_y, button_w, button_h, fill_radii, theme.tool_bg, mvp=mvp
+            )
             _draw_rounded_rect_border_varying_sides(
                 button_x,
                 button_y,
                 button_w,
                 button_h,
-                radii,
+                border_radii,
                 theme.tool_border,
                 theme.border_width,
                 skip_left=button_index > 0,
@@ -477,22 +415,17 @@ def _paint_buttons(
 
     order_index = {button_id: index for index, button_id in enumerate(layout.frame_order)}
     for button_id in targets:
+        button_def = BUTTONS.get(button_id)
         button_x, button_y, button_w, button_h = rects[button_id]
         is_pressed = state.buttons.pressed_button_id == button_id
         is_hovered = (not is_pressed) and state.buttons.hovered_button_id == button_id
-        standalone = button_id in ("DRAG", "LIST") or not layout.combined
-        if button_id == "DRAG":
-            box_fill = theme.regular_bg
+        standalone = (button_def.group != "frame" if button_def else True) or not layout.combined
+        if button_def is not None and button_def.kind == ButtonKind.REGULAR:
+            toggled = bool(button_def.toggle_attr and getattr(settings, button_def.toggle_attr, False))
+            box_fill = theme.regular_selected if toggled else theme.regular_bg
             box_border = theme.regular_border
             pressed_fill = theme.regular_selected
-            icon_color = theme.regular_text_selected if is_pressed else theme.regular_text
-        elif button_id == "LIST":
-            # The type-list toggle acts as an on/off indicator: it shows the
-            # selected color whenever the list is open.
-            box_fill = theme.regular_selected if settings.show_type_list else theme.regular_bg
-            box_border = theme.regular_border
-            pressed_fill = theme.regular_selected
-            icon_color = theme.regular_text_selected if (settings.show_type_list or is_pressed) else theme.regular_text
+            icon_color = theme.regular_text_selected if (toggled or is_pressed) else theme.regular_text
         else:
             box_fill = theme.tool_bg
             box_border = theme.tool_border
@@ -507,7 +440,7 @@ def _paint_buttons(
             fill_color = pressed_fill if is_pressed else (1, 1, 1, BUTTON_HOVER_ALPHA * master_alpha)
             if not standalone:
                 # Only the row's external corners round, inner corners stay square.
-                hover_radius = max(2.0, theme.radius - 1)
+                hover_radius = max(2.0, theme.fill_radius - 1)
                 button_index = order_index.get(button_id, -1)
                 is_first = button_index == 0
                 is_last = button_index == len(layout.frame_order) - 1
@@ -532,7 +465,7 @@ def _paint_buttons(
                     button_y + 1,
                     button_w - 2,
                     button_h - 2,
-                    max(2.0, theme.radius - 1),
+                    max(2.0, theme.fill_radius - 1),
                     fill_color,
                     mvp=mvp,
                 )

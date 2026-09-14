@@ -12,6 +12,7 @@ import gpu
 
 # from mathutils import Matrix
 from .. import __package__ as base_package
+from ..core.buttons import _visible_button_ids
 from ..core.constants import (
     BORDER_POSITIONS,
     CONTENT_PADDING,
@@ -65,7 +66,6 @@ from .minimap_buttons import (
     _layout_buttons,
     _paint_buttons,
     _resolve_button_theme,
-    _visible_button_ids,
 )
 from .tree_compile import (
     _debounced_compile,

@@ -8,6 +8,7 @@ import bpy
 from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 
 from .. import __package__ as base_package
+from ..core.buttons import BUTTONS, PressStyle
 from ..core.constants import (
     CONTENT_PADDING,
     DOCK_DWELL_MS,
@@ -813,9 +814,7 @@ class NODEMAP_OT_navigate(Operator):
 
             case "T":
                 if event.value == "PRESS" and in_minimap and not (event.ctrl or event.shift or event.alt):
-                    settings.show_type_list = not settings.show_type_list
-                    start_list_width_animation(state, settings)
-                    self._redraw_ui()
+                    self._toggle_regular_button(settings, state, "LIST")
                     return {"RUNNING_MODAL"}
                 return {"PASS_THROUGH"}
 
@@ -1235,7 +1234,8 @@ class NODEMAP_OT_navigate(Operator):
                 self._start_move(context, state, settings)
                 return {"RUNNING_MODAL"}
             armed_button_id = _frame_button_at(self._mouse_x, self._mouse_y, state)
-            if armed_button_id:
+            armed_def = BUTTONS.get(armed_button_id) if armed_button_id else None
+            if armed_def is not None and armed_def.press_style == PressStyle.CLICK:
                 self._armed_button = armed_button_id
                 state.buttons.pressed_button_id = armed_button_id
                 self._redraw_ui()
@@ -1720,9 +1720,14 @@ class NODEMAP_OT_navigate(Operator):
                 # The list toggle slides horizontally while the type-list zone
                 # width animates, so a hit-test during that window can land on the
                 # button's transient position and leave a stale highlight once it
-                # has moved away from the cursor. Drop only the LIST hover here;
-                # the other buttons keep their normal hover.
-                if new_btn == "LIST" and (state.list.anim_active or state.list.dragging_width is not None):
+                # has moved away from the cursor. Drop only the left-group hover
+                # here; the other buttons keep their normal hover.
+                hovered_def = BUTTONS.get(new_btn) if new_btn else None
+                if (
+                    hovered_def is not None
+                    and hovered_def.group == "left"
+                    and (state.list.anim_active or state.list.dragging_width is not None)
+                ):
                     new_btn = None
                 if old_btn != new_btn:
                     state.buttons.hovered_button_id = new_btn
@@ -1865,6 +1870,16 @@ class NODEMAP_OT_navigate(Operator):
         except RuntimeError:
             pass
 
+    def _toggle_regular_button(self, settings, state: MinimapState, button_id: str) -> None:
+        """Toggle the boolean behind a REGULAR button and refresh the UI."""
+        button_def = BUTTONS.get(button_id)
+        if button_def is None or button_def.toggle_attr is None:
+            return
+        setattr(settings, button_def.toggle_attr, not getattr(settings, button_def.toggle_attr, False))
+        if button_def.list_animation:
+            start_list_width_animation(state, settings)
+        self._redraw_ui()
+
     def _activate_armed_button(self, context: Context, settings) -> None:
         """Release the armed minimap button; run its action when still under the cursor."""
         button_id = self._armed_button
@@ -1881,11 +1896,14 @@ class NODEMAP_OT_navigate(Operator):
             and button_y <= self._mouse_y <= button_y + button_height
         ):
             return
-        if button_id == "LIST":
-            settings.show_type_list = not settings.show_type_list
-            start_list_width_animation(state, settings)
-            self._redraw_ui()
-        self._dispatch_frame_action(context, settings, button_id)
+        button_def = BUTTONS.get(button_id)
+        if button_def is None:
+            return
+        if button_def.toggle_attr is not None:
+            self._toggle_regular_button(settings, state, button_id)
+            return
+        if button_def.action is not None:
+            self._dispatch_frame_action(context, settings, button_def.action)
 
     def _dispatch_frame_action(self, context: Context, settings, button_id: str, scope: str = "BOTH") -> None:
         """Run a frame action directly, or eased via animation when smooth pan applies.
