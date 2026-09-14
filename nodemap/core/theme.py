@@ -135,7 +135,7 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     """Fetch theme color palette for the minimap drawing."""
     settings = get_addon_preferences().settings
 
-    theme_background = _theme_rgba("node_editor.space.back", (0.4, 0.4, 0.4, 0.95))
+    theme_background = _theme_rgba("node_editor.space.back", (0.1, 0.1, 0.1, 1.0))
     if settings.use_custom_background:
         background = tuple(settings.background_color)
     else:
@@ -150,49 +150,50 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
     result = {
         "background": background,
         "background_border": _theme_rgba("user_interface.wcol_toolbar_item.outline", (1.0, 1.0, 1.0, 0.08)),
-        "node_backdrop": _theme_rgba("node_editor.node_backdrop", (0.4, 0.4, 0.4, 1.0)),
-        "node_selected": _theme_rgba("node_editor.node_selected", (0.28, 0.45, 0.7, 1.0)),
+        "node_backdrop": _theme_rgba("node_editor.node_backdrop", (0.188, 0.188, 0.188, 1.0)),
+        "node_selected": _theme_rgba("node_editor.node_selected", (0.929, 0.341, 0.0, 1.0)),
         "node_active": _theme_rgba("node_editor.node_active", (1.0, 1.0, 1.0, 1.0)),
         "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 1.0, 1.0, 0.149)),
         "node_text": _theme_rgba("node_editor.space.text", (0.902, 0.902, 0.902, 1.0)),
-        "frame_node": _theme_rgba("node_editor.frame_node", (0.22, 0.22, 0.22, 0.85)),
+        "frame_node": _theme_rgba("node_editor.frame_node", (0.059, 0.059, 0.059, 0.8)),
         # Wire
-        "wire_color": _theme_rgba("node_editor.wire_inner", (0.45, 0.45, 0.45, 0.5)),
+        "wire_color": _theme_rgba("node_editor.wire_inner", (0.55, 0.55, 0.55, 1.0)),
         "wire_selected": _theme_rgba("node_editor.wire_select", (1.0, 1.0, 1.0, 0.7)),
         "indicator": _theme_rgba("view_3d.object_active", (1.0, 0.63, 0.16, 1.0)),
         "active_view_color": active_view_color,
         # Regular
-        "regular_inner": _theme_rgba("user_interface.wcol_regular.inner", (0.28, 0.45, 0.7, 1.0)),
+        "regular_inner": _theme_rgba("user_interface.wcol_regular.inner", (0.329, 0.329, 0.329, 1.0)),
         "regular_selected": _theme_rgba("user_interface.wcol_regular.inner_sel", (0.28, 0.45, 0.7, 1.0)),
-        "regular_outline": _theme_rgba("user_interface.wcol_regular.outline", (0.09, 0.09, 0.09, 1.0)),
-        "regular_text": _theme_rgba("user_interface.wcol_regular.text", (1.0, 1.0, 1.0, 1.0)),
+        "regular_outline": _theme_rgba("user_interface.wcol_regular.outline", (0.239, 0.239, 0.239, 1.0)),
+        "regular_text": _theme_rgba("user_interface.wcol_regular.text", (0.902, 0.902, 0.902, 1.0)),
         "regular_text_selected": _theme_rgba("user_interface.wcol_regular.text_sel", (1.0, 1.0, 1.0, 1.0)),
         # Search
         "search_background": _theme_rgba("user_interface.wcol_text.inner", (0.114, 0.114, 0.114, 1.0)),
         "search_background_selected": _theme_rgba("user_interface.wcol_text.inner_sel", (0.094, 0.094, 0.094, 1.0)),
-        "search_text_outline": _theme_rgba("user_interface.wcol_text.outline", (0.902, 0.902, 0.902, 1.0)),
+        "search_text_outline": _theme_rgba("user_interface.wcol_text.outline", (0.239, 0.239, 0.239, 1.0)),
         "search_text": _theme_rgba("user_interface.wcol_text.text", (0.902, 0.902, 0.902, 1.0)),
         "search_text_selected": _theme_rgba("user_interface.wcol_text.text_sel", (1.0, 1.0, 1.0, 1.0)),
         # Tool
-        "tool_inner": _theme_rgba("user_interface.wcol_tool.inner", (1.0, 0.0, 0.0, 0.75)),
-        "tool_selected": _theme_rgba("user_interface.wcol_tool.inner_sel", (1.0, 0.0, 0.0, 0.75)),
-        "tool_outline": _theme_rgba("user_interface.wcol_tool.outline", (1.0, 0.0, 0.0, 0.75)),
-        "tool_text": _theme_rgba("user_interface.wcol_tool.text", (1.0, 0.0, 0.0, 0.75)),
-        "tool_text_selected": _theme_rgba("user_interface.wcol_tool.text_sel", (1.0, 0.0, 0.0, 0.75)),
+        "tool_inner": _theme_rgba("user_interface.wcol_tool.inner", (0.329, 0.329, 0.329, 1.0)),
+        "tool_selected": _theme_rgba("user_interface.wcol_tool.inner_sel", (0.28, 0.45, 0.7, 1.0)),
+        "tool_outline": _theme_rgba("user_interface.wcol_tool.outline", (0.239, 0.239, 0.239, 1.0)),
+        "tool_text": _theme_rgba("user_interface.wcol_tool.text", (0.902, 0.902, 0.902, 1.0)),
+        "tool_text_selected": _theme_rgba("user_interface.wcol_tool.text_sel", (1.0, 0.0, 0.0, 1.0)),
         # outliner
-        "outliner_back": _theme_rgba("outliner.space.back", (0.0, 0.0, 0.5, 1.0)),
-        "outliner_text": _theme_rgba("outliner.space.text", (0.9, 0.9, 0.9, 1.0)),
-        "outliner_match": _theme_rgba("outliner.match", (0.0, 1.0, 0.0, 1.0)),
-        "outliner_selected_highlight": _theme_rgba("outliner.selected_highlight", (0.5, 0.4, 0.2, 1.0)),
-        "outliner_active": _theme_rgba("outliner.active", (0.5, 1.0, 0.3, 1.0)),
+        "outliner_back": _theme_rgba("outliner.space.back", (0.157, 0.157, 0.157, 1.0)),
+        "outliner_text": _theme_rgba("outliner.space.text", (0.765, 0.765, 0.765, 1.0)),
+        "outliner_match": _theme_rgba("outliner.match", (0.2, 0.498, 0.2, 1.0)),
+        "outliner_selected_highlight": _theme_rgba("outliner.selected_highlight", (0.114, 0.192, 0.302, 1.0)),
+        "outliner_active": _theme_rgba("outliner.active", (0.2, 0.302, 0.502, 1.0)),
         "outliner_selected_object": _theme_rgba("outliner.selected_object", (0.5, 0.4, 0.2, 1.0)),
-        "outliner_active_object": _theme_rgba("outliner.active_object", (0.5, 1.0, 0.3, 1.0)),
-        "outliner_row_alternate": _theme_rgba("outliner.row_alternate", (1.0, 0.0, 1.0, 0.015)),
+        "outliner_active_object": _theme_rgba("outliner.active_object", (0.914, 0.416, 0.0, 1.0)),
+        "outliner_row_alternate": _theme_rgba("outliner.row_alternate", (1.0, 0.0, 1.0, 0.016)),
         # scroll
-        "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.35, 0.35, 0.35, 0.75)),
+        "scroll_item": _theme_rgba("user_interface.wcol_scroll.item", (0.329, 0.329, 0.329, 1.0)),
         "scroll_inner": _theme_rgba("user_interface.wcol_scroll.inner", (0.133, 0.133, 0.133, 0.0)),
-        # Panel
+        # Roundness
         "panel_roundness": _theme_float("user_interface.panel_roundness", 0.4) * 15,
+        "regular_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
         "node_roundness": _theme_float("user_interface.wcol_regular.roundness", 0.2) * 10,
     }
     return result

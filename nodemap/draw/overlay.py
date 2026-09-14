@@ -324,6 +324,7 @@ def _draw_moving_border(
     ui_scale,
     moving,
     snapped,
+    hovered_minimap,
     position,
     mvp: Any = None,
 ):
@@ -334,10 +335,11 @@ def _draw_moving_border(
         _draw_filled_rounded_rect(
             map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.4 * master_alpha), mvp=mvp
         )
-
-        # if not snapped:
-        #     border_color = _alpha_mul(colors["active_view_color"], master_alpha)
         _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
+    else:
+        if not hovered_minimap:
+            border_color = _alpha_mul(border_color, 0.2 * master_alpha)
+        _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, 0.5 * ui_scale, mvp=mvp)
 
     if snapped and (snap_sides := _snap_sides_for(position)):
         snap_color = _alpha_mul(colors["active_view_color"], master_alpha)
@@ -1138,14 +1140,14 @@ def _draw_marquee(
     if rect_w < 1 or rect_h < 1:
         return
     base_color = colors["active_view_color"]
-    fill_color = _alpha_mul(base_color, 0.05 * master_alpha)
+    fill_color = _alpha_mul(base_color, 0.02 * master_alpha)
     border_color = _alpha_mul(base_color, master_alpha)
     border_width = 0.5 * ui_scale
 
     _draw_filled_rounded_rect_clipped(
         rect_x, rect_y, rect_w, rect_h, 0.0, fill_color, map_x, map_y, map_w, map_h, panel_roundness, mvp=mvp
     )
-    _draw_rounded_rect_border(rect_x, rect_y, rect_w, rect_h, 0.0, _alpha_mul(border_color, 0.3), border_width, mvp=mvp)
+    _draw_rounded_rect_border(rect_x, rect_y, rect_w, rect_h, 0.0, _alpha_mul(border_color, 0.2), border_width, mvp=mvp)
 
     points = [
         (rect_x, rect_y, 0.0),
@@ -1435,19 +1437,6 @@ def draw_minimap() -> None:
 
     panel_roundness = _draw_background(map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, mvp=base_mvp)
 
-    dragging = (
-        state.view.moving
-        or state.interaction.pressed
-        or state.interaction.resize_active is not None
-        or state.list.dragging_width is not None
-        or state.list.scrollbar_dragging
-    )
-    if state.interaction.hovered_minimap or dragging:
-        highlight_color = (1.0, 1.0, 1.0, 0.03 * master_alpha)
-        _draw_rounded_rect_border(
-            map_x, map_y, map_w, map_h, panel_roundness, highlight_color, 0.5 * ui_scale, mvp=base_mvp
-        )
-
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]
 
@@ -1581,6 +1570,14 @@ def draw_minimap() -> None:
             map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, panel_roundness, state, mvp=base_mvp
         )
 
+        dragging = (
+            state.view.moving
+            or state.interaction.pressed
+            or state.interaction.resize_active is not None
+            or state.list.dragging_width is not None
+            or state.list.scrollbar_dragging
+        )
+        hovered_minimap = state.interaction.hovered_minimap or dragging
         _draw_moving_border(
             map_x,
             map_y,
@@ -1592,6 +1589,7 @@ def draw_minimap() -> None:
             ui_scale,
             state.view.moving,
             state.view.snapped,
+            hovered_minimap,
             settings.current_position,
             mvp=base_mvp,
         )
