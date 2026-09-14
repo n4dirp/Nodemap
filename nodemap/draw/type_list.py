@@ -195,15 +195,26 @@ def _draw_minimap_scrollbars(
     colors,
     ui_scale,
     master_alpha,
+    content_rect: tuple[float, float, float, float] | None = None,
     mvp: Any = None,
 ):
-    """Draw horizontal/vertical minimap scrollbar thumbs when zoomed in."""
-    inner_l = map_x + padding
-    inner_r = map_x + map_w - padding
-    inner_b = map_y + padding
-    inner_t = map_y + map_h - padding
-    inner_w = map_w - 2 * padding
-    inner_h = map_h - 2 * padding
+    """Draw horizontal/vertical minimap scrollbar thumbs when zoomed in.
+
+    ``content_rect`` is the node content area ``(left, bottom, width, height)``
+    after the type-list zone is reserved; the visible math must match the area
+    the map transform frames, so the bars track it instead of the whole map.
+    """
+    if content_rect is not None:
+        inner_l, inner_b, inner_w, inner_h = content_rect
+        inner_r = inner_l + inner_w
+        inner_t = inner_b + inner_h
+    else:
+        inner_l = map_x + padding
+        inner_r = map_x + map_w - padding
+        inner_b = map_y + padding
+        inner_t = map_y + map_h - padding
+        inner_w = map_w - 2 * padding
+        inner_h = map_h - 2 * padding
 
     bbox_l, bbox_b, bbox_r, bbox_t = content_bounds
     bbox_w = bbox_r - bbox_l
