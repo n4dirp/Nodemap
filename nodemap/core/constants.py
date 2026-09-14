@@ -34,7 +34,7 @@ CONTENT_PADDING: int = 6
 # Single knob for the space between UI elements (search bar to type list,
 # type list to button row). Offsets from the exterior border stay on
 # CONTENT_PADDING above.
-ELEMENT_GAP: int = 5
+ELEMENT_GAP: int = 4
 
 # Single knob for the gap between the minimap and the editor region edges.
 # Breadcrumb and asset-shelf offsets derive from this plus their fixed heights.
@@ -117,13 +117,13 @@ TYPE_LIST_ASPECT_THRESHOLD: float = 1.0
 # ---------------------------------------------------------------------------
 # Smooth-drag, inertia, and frame/editor animations tick at this rate; the
 # pan-speed preference then spreads them over a whole number of frames.
-PAN_ANIM_FPS: float = 60.0
+PAN_ANIM_FPS: float = 100.0
 PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
 
 # Fixed animation duration in frames for click-to-pan (fast snap).
 # Tuned to the 1.5.0 FAST preset: 12 frames at 60Hz (0.2s) maps to 20
 # frames at the current 100Hz tick rate for the same wall-clock duration.
-PAN_FRAMES: float = 10.0
+PAN_FRAMES: float = 8.0
 
 # Minimum animation duration in frames so close pans stay visible instead of
 # collapsing to a single tick.
@@ -149,7 +149,7 @@ INERTIA_PAN_DECAY: float = 0.85
 FONT_SIZE: int = 11
 BUTTON_SIZE: int = 20
 BUTTON_MARGIN: int = 0
-BUTTON_HOVER_ALPHA: float = 0.02
+BUTTON_HOVER_ALPHA: float = 0.05
 
 # Minimap area kept free of the type list: left placement reserves horizontal
 # space, top placement reserves vertical space.
