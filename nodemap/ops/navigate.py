@@ -548,6 +548,8 @@ class NODEMAP_OT_navigate(Operator):
     _list_search_clear_pressed: bool = False
     _search_blur_consumed: bool = False
     _context_menu_button: str | None = None
+    # Right-click armed on the filter (search) bar: opens the list button menu.
+    _context_menu_search: bool = False
     _list_mmb_dragging: bool = False
     _list_mmb_drag_start: tuple[int, int] | None = None
     _list_last_row_index: int = -1
@@ -1404,6 +1406,14 @@ class NODEMAP_OT_navigate(Operator):
                 if state is not None and _frame_button_at(self._mouse_x, self._mouse_y, state) == context_menu_button:
                     self._open_button_context_menu(context, context_menu_button)
                 return {"RUNNING_MODAL"}
+            if self._context_menu_search:
+                self._context_menu_search = False
+                if state is not None and (
+                    _over_search_zone(self._mouse_x, self._mouse_y, state)
+                    or _frame_button_at(self._mouse_x, self._mouse_y, state) == "LIST"
+                ):
+                    self._open_button_context_menu(context, "LIST")
+                return {"RUNNING_MODAL"}
             if self._list_width_dragging:
                 self._list_width_dragging = False
                 state.list.dragging_width = None
@@ -1515,6 +1525,10 @@ class NODEMAP_OT_navigate(Operator):
             if context_button_id:
                 self._reset_gesture()
                 self._context_menu_button = context_button_id
+                return {"RUNNING_MODAL"}
+            if _over_search_zone(self._mouse_x, self._mouse_y, state):
+                self._reset_gesture()
+                self._context_menu_search = True
                 return {"RUNNING_MODAL"}
             self._anim.cancel_smooth(context)
             ui_scale = _get_ui_scale()
@@ -2417,6 +2431,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
         self._context_menu_button = None
+        self._context_menu_search = False
         self._reset_gesture()
         self._list_last_row_index = -1
         self._list_width_dragging = False
@@ -2468,6 +2483,7 @@ class NODEMAP_OT_navigate(Operator):
         self._list_search_clear_pressed = False
         self._search_blur_consumed = False
         self._context_menu_button = None
+        self._context_menu_search = False
         self._reset_gesture()
         self._list_last_row_index = -1
         self._list_width_dragging = False

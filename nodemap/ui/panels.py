@@ -151,7 +151,7 @@ class NODEMAP_PT_popup(Panel):
             col.row().prop(settings, "background_type", text="Type", expand=True)
             col.prop(settings, "use_custom_background", text="Custom Colors")
 
-            sub = col.row(align=True)
+            sub = col.row()
             sub.active = settings.use_custom_background
             if settings.background_type in {"LINEAR", "VIGNETTE"}:
                 sub.prop(settings, "high_gradient", text="High")

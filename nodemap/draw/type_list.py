@@ -195,15 +195,25 @@ def _draw_minimap_scrollbars(
     colors,
     ui_scale,
     master_alpha,
+    content_rect: tuple[float, float, float, float] | None = None,
     mvp: Any = None,
 ):
-    """Draw horizontal/vertical minimap scrollbar thumbs when zoomed in."""
-    inner_l = map_x + padding
-    inner_r = map_x + map_w - padding
-    inner_b = map_y + padding
-    inner_t = map_y + map_h - padding
-    inner_w = map_w - 2 * padding
-    inner_h = map_h - 2 * padding
+    """Draw horizontal/vertical minimap scrollbar thumbs when zoomed in.
+
+    ``content_rect`` is the reduced node content area ``(left, bottom, width,
+    height)`` already reserved for the type-list zone; both bars confine their
+    tracks and thumb math to it. When ``None``, fall back to the full map inner
+    rect.
+    """
+    if content_rect is None:
+        inner_l = map_x + padding
+        inner_b = map_y + padding
+        inner_w = map_w - 2 * padding
+        inner_h = map_h - 2 * padding
+    else:
+        inner_l, inner_b, inner_w, inner_h = content_rect
+    inner_r = inner_l + inner_w
+    inner_t = inner_b + inner_h
 
     bbox_l, bbox_b, bbox_r, bbox_t = content_bounds
     bbox_w = bbox_r - bbox_l
@@ -1239,6 +1249,15 @@ def _compute_zone_geometry(
 
     if panel_h > 0:
         _draw_filled_rounded_rect(
+            zone_x + zone_radius,
+            zone_y - 1,
+            zone_w - 2 * zone_radius,
+            1,
+            0,
+            (0, 0, 0, 0.15 * master_alpha),
+            mvp=mvp,
+        )
+        _draw_filled_rounded_rect(
             zone_x,
             zone_y,
             zone_w,
@@ -1496,8 +1515,18 @@ def _draw_list_fills(
     hovered = state.list.hovered_type_label
     hovered_child = state.list.hovered_list_row
 
-    if settings.show_search_bar:
+    if settings.show_search_bar and search_draw_h > 0:
         gpu.state.scissor_set(*zone_scissor)
+
+        _draw_filled_rounded_rect(
+            search_x + radius,
+            search_pill_y - 1,
+            search_w - 2 * radius,
+            1,
+            0,
+            (0, 0, 0, 0.15 * master_alpha),
+            mvp=mvp,
+        )
 
         pill_fill_color = (
             _alpha_mul(colors["search_background_selected"], master_alpha)

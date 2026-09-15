@@ -393,7 +393,20 @@ def _paint_buttons(
     else:
         targets = [button_id for button_id in BUTTON_ORDER if button_id in rects]
 
+    shadow_color = (0, 0, 0, 0.15 * master_alpha)
     if only_id is None and layout.combined:
+        row_x = rects[layout.frame_order[0]][0]
+        row_y = rects[layout.frame_order[0]][1]
+        row_w = len(layout.frame_order) * layout.size
+        _draw_filled_rounded_rect(
+            row_x + theme.radius,
+            row_y - 1,
+            row_w - 2 * theme.radius,
+            1,
+            0,
+            shadow_color,
+            mvp=mvp,
+        )
         # Draw each frame button as its own box, edge-to-edge with no gap.
         # Only the external corners round, inner corners meet square; each
         # button's border is drawn on its own rect, so neighboring borders
@@ -423,6 +436,20 @@ def _paint_buttons(
             )
 
     order_index = {button_id: index for index, button_id in enumerate(layout.frame_order)}
+    for button_id in targets:
+        button_def = BUTTONS.get(button_id)
+        standalone = (button_def.group != "frame" if button_def else True) or not layout.combined
+        if standalone:
+            button_x, button_y, button_w = rects[button_id][:3]
+            _draw_filled_rounded_rect(
+                button_x + theme.radius,
+                button_y - 1,
+                button_w - 2 * theme.radius,
+                1,
+                0,
+                shadow_color,
+                mvp=mvp,
+            )
     for button_id in targets:
         button_def = BUTTONS.get(button_id)
         button_x, button_y, button_w, button_h = rects[button_id]

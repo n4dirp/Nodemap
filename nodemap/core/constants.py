@@ -121,9 +121,7 @@ PAN_ANIM_FPS: float = 100.0
 PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
 
 # Fixed animation duration in frames for click-to-pan (fast snap).
-# Tuned to the 1.5.0 FAST preset: 12 frames at 60Hz (0.2s) maps to 20
-# frames at the current 100Hz tick rate for the same wall-clock duration.
-PAN_FRAMES: float = 8.0
+PAN_FRAMES: float = 15.0
 
 # Minimum animation duration in frames so close pans stay visible instead of
 # collapsing to a single tick.

@@ -7,7 +7,7 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProp
 from bpy.types import AddonPreferences, PropertyGroup
 
 from .. import __package__ as base_package
-from ..core.constants import FONT_SIZE, MIN_MAP_HEIGHT, MIN_MAP_WIDTH, TYPE_LIST_MIN_WIDTH
+from ..core.constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH, TYPE_LIST_MIN_WIDTH
 from ..core.helpers import get_addon_preferences
 from ..core.state import _suppress_update
 from .panels import NODEMAP_PT_presets
@@ -288,7 +288,7 @@ class NODEMAP_PG_settings(PropertyGroup):
                 "Blend the background from the high color in the center to the low color at the edges",
             ),
         ],
-        default="SINGLE",
+        default="LINEAR",
         update=_update_invalidate_batches,
     )
 
@@ -549,7 +549,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     type_list_font_size: IntProperty(
         name="Type List Font Size",
         description="Font size for the node-type list entries (pixels)",
-        default=FONT_SIZE,
+        default=11,
         min=8,
         max=20,
         update=_update_invalidate_all,

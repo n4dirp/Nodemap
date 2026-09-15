@@ -48,6 +48,7 @@ from ..core.theme import (
 )
 from ..geo.transforms import (
     _clamp_pan_to_viewport,
+    _get_map_content_rect,
     _get_minimap_transform,
     _get_visible_rect,
 )
@@ -966,6 +967,7 @@ def draw_minimap() -> None:
             colors,
             ui_scale,
             master_alpha,
+            content_rect=_get_map_content_rect(state),
             mvp=base_mvp,
         )
 
