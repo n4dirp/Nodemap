@@ -32,16 +32,32 @@ logger = logging.getLogger(base_package)
 
 # Smooth-drag follow uses frame-rate independent exponential damping. Inertia
 # decays the released view velocity each tick until it falls below the stop
-# speed. Each drag tick applies a fixed fraction ``1 - exp(-LAMBDA * dt)`` of
-# the remaining target, so the per-second catch-up is identical at any timer
-# rate and heavy redraws (big trees at low fps) do not stretch the lag.
+# speed. Each drag tick applies the fraction ``1 - exp(-rate * dt)`` of the
+# remaining target, so the per-second catch-up is identical at any timer
+# rate and heavy redraws (big trees at low fps) do not stretch the lag. The
+# rate grows with the remaining distance plus recent speed, so slow drags
+# stay smooth while rapid or far drags catch up faster.
 _INERTIA_DECAY: float = 0.92
 _INERTIA_STOP_SPEED: float = 0.5
 _DRAG_MAX_FRAME_DT: float = 0.25
 _DRAG_DT_MIN: float = 0.001
 _DRAG_DT_MAX: float = 0.10
 _DRAG_LAMBDA: float = 14.0
+_DRAG_BOOST_GAIN: float = 0.4
+_DRAG_LAMBDA_MAX: float = 32.0
 _ANIM_FINISH_EPS: float = 0.5
+
+
+def _drag_rate(dist: float) -> float:
+    """Return the drag catch-up rate for remaining distance *dist* in pixels.
+
+    Pure: base rate plus a square-root boost, clamped to the maximum, so
+    small corrections keep the smooth base feel while rapid or far drags
+    chase harder without snapping.
+    """
+    if dist <= 0.0:
+        return _DRAG_LAMBDA
+    return min(_DRAG_LAMBDA + _DRAG_BOOST_GAIN * math.sqrt(dist), _DRAG_LAMBDA_MAX)
 
 
 def _drag_alpha(dt: float, rate: float = _DRAG_LAMBDA) -> float:
@@ -297,12 +313,14 @@ class AnimationController:
                 _clamp_pan_to_viewport(op._space, op._region, op._state)
 
     def apply_smooth_drag(self, context: Context) -> None:
-        """Chase the drag target with exponential damping.
+        """Chase the drag target with distance-adaptive exponential damping.
 
-        Each tick applies the fraction ``1 - exp(-LAMBDA * dt)`` of the
+        Each tick applies the fraction ``1 - exp(-rate * dt)`` of the
         remaining target, so the per-second catch-up is identical at any
         tick rate and there is a single int() quantization point in
-        ``_take_pan`` instead of magnitude-split micro-steps.
+        ``_take_pan`` instead of magnitude-split micro-steps. The rate grows
+        with the remaining distance plus recent speed, so far or rapid drags
+        accelerate while small corrections keep the smooth base feel.
         """
         op = self._op
         if not self.drag_active:
@@ -313,7 +331,9 @@ class AnimationController:
             dt = PAN_ANIM_INTERVAL
         self._last_drag_tick = now
         dt = min(max(dt, _DRAG_DT_MIN), _DRAG_DT_MAX)
-        follow = _drag_alpha(dt)
+        dist = math.hypot(self.drag_target[0], self.drag_target[1])
+        speed = math.hypot(self.smooth_velocity[0], self.smooth_velocity[1])
+        follow = _drag_alpha(dt, _drag_rate(dist + speed))
         dx = self.drag_target[0] * follow
         dy = self.drag_target[1] * follow
         self.drag_target[0] -= dx
