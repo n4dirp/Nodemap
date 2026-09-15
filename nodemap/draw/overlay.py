@@ -70,12 +70,13 @@ from .minimap_buttons import (
     _paint_buttons,
     _resolve_button_theme,
 )
+from .scrollbar import _draw_minimap_scrollbars
 from .tree_compile import (
     _debounced_compile,
     _is_bounds_stable_diff,
     _is_move_only_diff,
 )
-from .type_list import _draw_minimap_scrollbars, _draw_type_list, _step_list_width
+from .type_list import _draw_type_list, _step_list_width
 
 logger = logging.getLogger(base_package)
 
