@@ -688,10 +688,10 @@ class NODEMAP_AddonPreferences(AddonPreferences):
     settings: PointerProperty(type=NODEMAP_PG_settings)
 
     show_general: BoolProperty(default=True)
-    show_layout: BoolProperty(default=True)
-    show_objects: BoolProperty(default=True)
-    show_theme: BoolProperty(default=True)
-    show_navigation: BoolProperty(default=True)
+    show_layout: BoolProperty(default=False)
+    show_objects: BoolProperty(default=False)
+    show_theme: BoolProperty(default=False)
+    show_navigation: BoolProperty(default=False)
     show_performance: BoolProperty(default=False)
     show_development: BoolProperty(default=False)
 
@@ -718,20 +718,15 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.use_property_split = True
         layout.use_property_decorate = False
 
-        self._draw_general(layout, context)
-        # layout.separator(type="LINE")
-        self._draw_layout(layout.box())
-        # layout.separator(type="LINE")
-        self._draw_objects(layout.box())
-        # layout.separator(type="LINE")
-        self._draw_theme(layout.box())
-        # layout.separator(type="LINE")
-        self._draw_navigation(layout.box(), context)
-        # layout.separator()
-        # layout.separator(type="LINE")
-        self._draw_performance(layout.box())
-        # layout.separator(type="LINE")
-        self._draw_development(layout.box())
+        col = layout.column(align=True)
+
+        self._draw_general(col, context)
+        self._draw_layout(col.box())
+        self._draw_objects(col.box())
+        self._draw_theme(col.box())
+        self._draw_navigation(col.box(), context)
+        self._draw_performance(col.box())
+        self._draw_development(col.box())
 
     def _section_header(self, layout, prop, title):
         """Draw the toggle header row for a collapsible section."""
@@ -746,7 +741,6 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             emboss=False,
         )
         row.label(text=title)
-        # return row
 
     def _draw_general(self, layout, context):
         """Draw the General section with the presets header."""
@@ -757,7 +751,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         NODEMAP_PT_presets.draw_panel_header(row)
 
         layout.prop(settings, "show_by_default", text="Show in New Editors")
+        layout.separator()
         self._draw_shortcuts(layout, context)
+        layout.separator()
 
     def _draw_layout(self, layout):
         """Draw the Layout section for docking and size."""
@@ -952,21 +948,15 @@ class NODEMAP_AddonPreferences(AddonPreferences):
     def _draw_key_modifiers(self, column):
         """Draw the key-modifiers reference box."""
         split = column.split(factor=0.4)
+
         row = split.row(align=True)
         row.alignment = "RIGHT"
-        row.label(text="")
-        box = split.box()
+        box = split.box().column(align=True)
         box.active = False
-        box.label(text="Modifiers", icon="INFO")
-        row = box.row(align=True)
-        row.separator(factor=2.0)
-        flow = row.column_flow(columns=2, align=True)
-        flow.label(text="Shift Drag Frame Region", icon="DOT")
-        flow.label(text="Ctrl Drag Pan View", icon="DOT")
-        flow.label(text="Alt Drag Frame Region (Editor)", icon="DOT")
-        flow.label(text="Shift Click Extend", icon="DOT")
-        flow.label(text="Ctrl Click Toggle selection", icon="DOT")
-        flow.label(text="Alt Scroll Toggle Zoom", icon="DOT")
+        box.label(text="Ctrl Drag: Pan View")
+        box.label(text="Shift Drag: Frame Region (Minimap)")
+        box.label(text="Alt Drag: Frame Region (Editor)")
+        box.label(text="Alt Scroll: Toggle Zoom")
 
     def _draw_shortcuts(self, layout, context):
         """Draw the Shortcuts section reflecting the user keymap."""

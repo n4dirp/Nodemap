@@ -354,7 +354,7 @@ def _draw_moving_border(
         _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, 0.5 * ui_scale, mvp=mvp)
 
     if snapped and (snap_sides := _snap_sides_for(position)):
-        snap_color = _alpha_mul(colors["active_view_color"], master_alpha)
+        snap_color = _alpha_mul(colors["regular_selected"], master_alpha)
         side_colors = {side: snap_color for side in snap_sides}
 
         if not side_colors:
