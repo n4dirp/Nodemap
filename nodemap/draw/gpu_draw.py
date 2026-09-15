@@ -27,6 +27,7 @@ _BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_NOODLE_SHADER: gpu.types.GPUShader | None = None
+_BATCH_ICON_SHADER: gpu.types.GPUShader | None = None
 _LINE_STRIP_SHADER: gpu.types.GPUShader | None = None
 
 _BATCH_CACHE: dict[tuple, Any] = {}
@@ -295,6 +296,27 @@ void main() {
     float dist = max(outer, -inner);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(vColor.rgb, vColor.a * alpha);
+}
+"""
+
+_BATCH_ICON_VERT_SRC = """
+void main() {
+    vUv = uv;
+    vHalfSize = halfSize;
+    vRadius = radius;
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_BATCH_ICON_FRAG_SRC = """
+float sdRoundRect(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+void main() {
+    float dist = sdRoundRect(vUv, vHalfSize, vRadius);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+    fragColor = vec4(color.rgb, color.a * alpha);
 }
 """
 
@@ -652,6 +674,30 @@ def _get_batch_rect_border_shader() -> gpu.types.GPUShader:
         _BATCH_RECT_BORDER_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _BATCH_RECT_BORDER_SHADER
+
+
+def _get_batch_icon_shader() -> gpu.types.GPUShader:
+    """Return a batched rounded-rect shader with a uniform (per-draw) color."""
+    global _BATCH_ICON_SHADER
+    if _BATCH_ICON_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("batch_icon_iface")
+        vert_out.smooth("VEC2", "vUv")
+        vert_out.smooth("VEC2", "vHalfSize")
+        vert_out.smooth("FLOAT", "vRadius")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_in(2, "VEC2", "halfSize")
+        info.vertex_in(3, "FLOAT", "radius")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_BATCH_ICON_VERT_SRC)
+        info.fragment_source(_BATCH_ICON_FRAG_SRC)
+        _BATCH_ICON_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _BATCH_ICON_SHADER
 
 
 def _get_batch_noodle_shader() -> gpu.types.GPUShader:
@@ -1348,4 +1394,70 @@ def _draw_pill_border(x, y, width, height, color, line_width=1.0):
     shader.uniform_float("halfSize", (half_w, half_h))
     shader.uniform_float("lineWidth", line_width)
 
+    batch.draw(shader)
+
+
+# ---------------------------------------------------------------------------
+# Icon batch: single-draw-call glyphs for button/search icons
+# ---------------------------------------------------------------------------
+
+_ICON_BATCH_CACHE: dict[tuple, Any] = {}
+
+
+def _rects_to_verts(rects: tuple) -> tuple:
+    """Convert axis-aligned ``(dx, dy, w, h, r)`` rects to icon batch vertex data."""
+    pos: list = []
+    uv: list = []
+    half_sizes: list = []
+    radii: list = []
+    for dx, dy, w, h, r in rects:
+        hw, hh = w / 2, h / 2
+        pos.extend([(dx, dy, 0.0), (dx + w, dy, 0.0), (dx + w, dy + h, 0.0), (dx, dy + h, 0.0)])
+        uv.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
+        half_sizes.extend([(hw, hh)] * 4)
+        radii.extend([r] * 4)
+    return tuple(pos), tuple(uv), tuple(half_sizes), tuple(radii)
+
+
+def _build_icon_batch(pos: tuple, uv: tuple, half_sizes: tuple, radii: tuple) -> Any:
+    """Build a GPU batch from pre-computed icon vertex data (local coords)."""
+    shader = _get_batch_icon_shader()
+    n = len(pos) // 4
+    indices: list[tuple[int, int, int]] = []
+    for i in range(n):
+        base = i * 4
+        indices.append((base, base + 1, base + 2))
+        indices.append((base + 2, base + 3, base))
+    return batch_for_shader(
+        shader,
+        "TRIS",
+        {"pos": pos, "uv": uv, "halfSize": half_sizes, "radius": radii},
+        indices=indices,
+    )
+
+
+def _draw_icon_batch(
+    cache_key: tuple,
+    pos: tuple,
+    uv: tuple,
+    half_sizes: tuple,
+    radii: tuple,
+    x: float,
+    y: float,
+    color,
+    mvp: Any = None,
+) -> None:
+    """Draw a cached icon batch translated to screen ``(x, y)`` with *color*."""
+    if not pos:
+        return
+    shader = _get_batch_icon_shader()
+    batch = _ICON_BATCH_CACHE.get(cache_key)
+    if batch is None:
+        if len(_ICON_BATCH_CACHE) >= 64:
+            _ICON_BATCH_CACHE.clear()
+        batch = _build_icon_batch(pos, uv, half_sizes, radii)
+        _ICON_BATCH_CACHE[cache_key] = batch
+    shader.bind()
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x, y, mvp))
+    shader.uniform_float("color", _srgb_to_linear(color))
     batch.draw(shader)

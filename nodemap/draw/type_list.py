@@ -52,10 +52,12 @@ from ..core.theme import (
 from .batch_build import _create_quad_indices
 from .gpu_draw import (
     _draw_filled_rounded_rect,
+    _draw_icon_batch,
     _draw_pill,
     _draw_rounded_rect_border,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
+    _rects_to_verts,
 )
 
 _DEFAULT_ENTRY = ("", 0.0, 1)
@@ -1056,32 +1058,38 @@ def _draw_search_clear_button(
         master_alpha,
     )
 
-    cx = round(clear_x + clear_size / 2)
-    cy = round(clear_y + clear_size / 2)
-
+    cx = clear_size / 2
+    cy = clear_size / 2
     stroke = max(1.0, 0.8 * ui_scale)
-    length = clear_size * 1.0
+    length = clear_size
 
-    gpu.matrix.push()
-    try:
-        gpu.matrix.translate((cx, cy, 0.0))
+    hw = length / 2
+    hh = stroke / 2
+    pos: list = []
+    uv: list = []
+    half_sizes: list = []
+    radii: list = []
 
-        for angle in (45.0, -45.0):
-            gpu.matrix.push()
-            try:
-                gpu.matrix.multiply_matrix(Matrix.Rotation(math.radians(angle), 4, "Z"))
-                _draw_filled_rounded_rect(
-                    -length / 2,
-                    -stroke / 2,
-                    length,
-                    stroke,
-                    0.0,
-                    icon_color,
-                )
-            finally:
-                gpu.matrix.pop()
-    finally:
-        gpu.matrix.pop()
+    for angle_deg in (45.0, -45.0):
+        angle = math.radians(angle_deg)
+        cos_a = math.cos(angle)
+        sin_a = math.sin(angle)
+        for lx, ly in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)):
+            pos.append((cos_a * lx - sin_a * ly + cx, sin_a * lx + cos_a * ly + cy, 0.0))
+        uv.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
+        half_sizes.extend([(hw, hh)] * 4)
+        radii.extend([0.0] * 4)
+
+    _draw_icon_batch(
+        ("CLEAR", clear_size, ui_scale),
+        tuple(pos),
+        tuple(uv),
+        tuple(half_sizes),
+        tuple(radii),
+        clear_x,
+        clear_y,
+        icon_color,
+    )
 
 
 def _draw_search_filter_icon(
@@ -1092,43 +1100,23 @@ def _draw_search_filter_icon(
     ui_scale: float,
 ) -> None:
     """Minimal filter icon: three centered bars (wide, medium, narrow)."""
-    cx = round(x + size / 2)
-    cy = round(y + size / 2)
+    cx = size / 2
+    cy = size / 2
 
-    # Whole-pixel geometry (values in comments are for size=12).
-    row_y = max(2, round(size / 3))  # row offset from center   (4)
-    half_top = max(2, round(size * 0.42))  # top bar half-width       (5)
-    half_mid = max(1, round(size * 0.25))  # middle bar half-width    (3)
-    half_bot = max(1, round(size * 0.083))  # bottom bar half-width    (1)
-
+    row_y = max(2, round(size / 3))
+    half_top = max(2, round(size * 0.42))
+    half_mid = max(1, round(size * 0.25))
+    half_bot = max(1, round(size * 0.083))
     stroke = max(1.0, round(0.8 * ui_scale))
+    r = stroke / 2
 
-    def _stroke(p0: tuple[float, float], p1: tuple[float, float]) -> None:
-        dx = p1[0] - p0[0]
-        dy = p1[1] - p0[1]
-        length = math.hypot(dx, dy)
-        if length <= 0:
-            return
-
-        matrix = Matrix.Translation(((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, 0.0)) @ Matrix.Rotation(
-            math.atan2(dy, dx), 4, "Z"
-        )
-        gpu.matrix.push()
-        try:
-            gpu.matrix.multiply_matrix(matrix)
-            _draw_filled_rounded_rect(-length / 2, -stroke / 2, length, stroke, stroke / 2, color)
-        finally:
-            gpu.matrix.pop()
-
-    gpu.matrix.push()
-    try:
-        gpu.matrix.translate((cx, cy, 0.0))
-
-        _stroke((-half_top, row_y), (half_top, row_y))  # wide bar
-        _stroke((-half_mid, 0.0), (half_mid, 0.0))  # medium bar
-        _stroke((-half_bot, -row_y), (half_bot, -row_y))  # narrow bar
-    finally:
-        gpu.matrix.pop()
+    rects = (
+        (cx - half_top, cy + row_y - r, half_top * 2, stroke, r),
+        (cx - half_mid, cy - r, half_mid * 2, stroke, r),
+        (cx - half_bot, cy - row_y - r, half_bot * 2, stroke, r),
+    )
+    pos, uv, hs, radii = _rects_to_verts(rects)
+    _draw_icon_batch(("FILTER", size, ui_scale), pos, uv, hs, radii, x, y, color)
 
 
 # ---------------------------------------------------------------------------

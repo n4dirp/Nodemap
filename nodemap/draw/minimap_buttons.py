@@ -25,8 +25,10 @@ from ..geo.transforms import _get_map_content_rect
 from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_varying,
+    _draw_icon_batch,
     _draw_rounded_rect_border,
     _draw_rounded_rect_border_varying_sides,
+    _rects_to_verts,
 )
 
 
@@ -62,61 +64,22 @@ class ButtonTheme:
 def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw the frame-all corner brackets icon."""
     inset = 5 * ui_scale
-    stroke_thickness = max(1, int(1.5 * ui_scale))
-    arm_length = size * 0.15
+    t = max(1, int(1.5 * ui_scale))
+    arm = size * 0.15
+    r = t * 0.5
 
-    # Top-left bracket
-    _draw_filled_rounded_rect(
-        x + inset, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
+    rects = (
+        (inset, inset, arm, t, r),
+        (inset, inset, t, arm, r),
+        (size - inset - arm, inset, arm, t, r),
+        (size - inset - t, inset, t, arm, r),
+        (inset, size - inset - t, arm, t, r),
+        (inset, size - inset - arm, t, arm, r),
+        (size - inset - arm, size - inset - t, arm, t, r),
+        (size - inset - t, size - inset - arm, t, arm, r),
     )
-    _draw_filled_rounded_rect(
-        x + inset, y + inset, stroke_thickness, arm_length, stroke_thickness * 0.5, color, mvp=mvp
-    )
-    # Top-right bracket
-    _draw_filled_rounded_rect(
-        x + size - inset - arm_length, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
-    )
-    _draw_filled_rounded_rect(
-        x + size - inset - stroke_thickness,
-        y + inset,
-        stroke_thickness,
-        arm_length,
-        stroke_thickness * 0.5,
-        color,
-        mvp=mvp,
-    )
-    # Bottom-left bracket
-    _draw_filled_rounded_rect(
-        x + inset,
-        y + size - inset - stroke_thickness,
-        arm_length,
-        stroke_thickness,
-        stroke_thickness * 0.5,
-        color,
-        mvp=mvp,
-    )
-    _draw_filled_rounded_rect(
-        x + inset, y + size - inset - arm_length, stroke_thickness, arm_length, stroke_thickness * 0.5, color, mvp=mvp
-    )
-    # Bottom-right bracket
-    _draw_filled_rounded_rect(
-        x + size - inset - arm_length,
-        y + size - inset - stroke_thickness,
-        arm_length,
-        stroke_thickness,
-        stroke_thickness * 0.5,
-        color,
-        mvp=mvp,
-    )
-    _draw_filled_rounded_rect(
-        x + size - inset - stroke_thickness,
-        y + size - inset - arm_length,
-        stroke_thickness,
-        arm_length,
-        stroke_thickness * 0.5,
-        color,
-        mvp=mvp,
-    )
+    pos, uv, hs, radii = _rects_to_verts(rects)
+    _draw_icon_batch(("ALL", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
 
 
 def _paint_frame_view_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
@@ -138,96 +101,63 @@ def _paint_frame_view_icon(x: float, y: float, size: float, color, ui_scale: flo
 def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw the frame-selected rails and center box icon."""
     inset = 5 * ui_scale
-    stroke_thickness = max(1, int(1.5 * ui_scale))
-    arm_length = size * 0.15
+    t = max(1, int(1.5 * ui_scale))
+    arm = size * 0.15
+    r = t * 0.5
+    rail_h = size - 2 * inset
+    box = 2 * ui_scale
+    box_off = (size - box) / 2
 
-    # Left/right rails connecting top and bottom corners
-    _draw_filled_rounded_rect(
-        x + inset, y + inset, stroke_thickness, size - 2 * inset, stroke_thickness * 0.5, color, mvp=mvp
+    rects = (
+        (inset, inset, t, rail_h, r),
+        (size - inset - t, inset, t, rail_h, r),
+        (inset, inset, arm, t, r),
+        (size - inset - arm, inset, arm, t, r),
+        (inset, size - inset - t, arm, t, r),
+        (size - inset - arm, size - inset - t, arm, t, r),
+        (box_off, box_off, box, box, 1.5 * ui_scale),
     )
-    _draw_filled_rounded_rect(
-        x + size - inset - stroke_thickness,
-        y + inset,
-        stroke_thickness,
-        size - 2 * inset,
-        stroke_thickness * 0.5,
-        color,
-        mvp=mvp,
-    )
-    # Corner arms
-    _draw_filled_rounded_rect(
-        x + inset, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
-    )
-    _draw_filled_rounded_rect(
-        x + size - inset - arm_length, y + inset, arm_length, stroke_thickness, stroke_thickness * 0.5, color, mvp=mvp
-    )
-    _draw_filled_rounded_rect(
-        x + inset,
-        y + size - inset - stroke_thickness,
-        arm_length,
-        stroke_thickness,
-        stroke_thickness * 0.5,
-        color,
-        mvp=mvp,
-    )
-    _draw_filled_rounded_rect(
-        x + size - inset - arm_length,
-        y + size - inset - stroke_thickness,
-        arm_length,
-        stroke_thickness,
-        stroke_thickness * 0.5,
-        color,
-        mvp=mvp,
-    )
-
-    # Center box
-    center_box_w = center_box_h = 2 * ui_scale
-    center_box_x = x + (size - center_box_w) / 2
-    center_box_y = y + (size - center_box_h) / 2
-    _draw_filled_rounded_rect(center_box_x, center_box_y, center_box_w, center_box_h, 1.5 * ui_scale, color, mvp=mvp)
+    pos, uv, hs, radii = _rects_to_verts(rects)
+    _draw_icon_batch(("SELECTED", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
 
 
 def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
-    """Draw the list-toggle icon: three horizontal bars, or an X when active."""
-    stroke_thickness = max(1, int(1.5 * ui_scale))
-    bar_width = size * 0.5
-    bar_gap = 2.0 * ui_scale
-    bar_x = x + (size - bar_width) / 2
-    bar_y = y + (size - (3 * stroke_thickness + 2 * bar_gap)) / 2 - 0.5
+    """Draw the list-toggle icon: three horizontal bars."""
+    t = max(1, int(1.5 * ui_scale))
+    bar_w = size * 0.5
+    gap = 2.0 * ui_scale
+    bar_x = (size - bar_w) / 2
+    bar_y = (size - (3 * t + 2 * gap)) / 2 - 0.5
+    r = t * 0.5
 
-    for bar_index in range(3):
-        _draw_filled_rounded_rect(
-            bar_x,
-            bar_y + bar_index * (stroke_thickness + bar_gap),
-            bar_width,
-            stroke_thickness,
-            stroke_thickness * 0.5,
-            color,
-            mvp=mvp,
-        )
-    return
+    rects = (
+        (bar_x, bar_y, bar_w, t, r),
+        (bar_x, bar_y + t + gap, bar_w, t, r),
+        (bar_x, bar_y + 2 * (t + gap), bar_w, t, r),
+    )
+    pos, uv, hs, radii = _rects_to_verts(rects)
+    _draw_icon_batch(("LIST", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
 
 
 def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
     """Draw a move grip icon: two rows of four dots (like a drag handle)."""
-    dot_size = 1.0 * ui_scale
+    dot = 1.0 * ui_scale
     gap = 2.0 * ui_scale
-    column_gap = 2.0 * ui_scale
-    group_w = 4 * dot_size + 3 * column_gap
-    group_h = 2 * dot_size + gap
-    group_x = round(x + (size - group_w) / 2)
-    group_y = round(y + (size - group_h) / 2)
+    col_gap = 2.0 * ui_scale
+    group_w = 4 * dot + 3 * col_gap
+    group_h = 2 * dot + gap
+    gx = round((size - group_w) / 2)
+    gy = round((size - group_h) / 2)
+    r = dot / 2
+
+    rects = []
     for column in range(4):
         for row in range(2):
-            _draw_filled_rounded_rect(
-                round(group_x + column * (dot_size + column_gap)),
-                round(group_y + row * (dot_size + gap)),
-                dot_size,
-                dot_size,
-                dot_size / 2,
-                color,
-                mvp=mvp,
-            )
+            dx = round(gx + column * (dot + col_gap))
+            dy = round(gy + row * (dot + gap))
+            rects.append((dx, dy, dot, dot, r))
+    pos, uv, hs, radii = _rects_to_verts(tuple(rects))
+    _draw_icon_batch(("DRAG", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
 
 
 _ICONS = {
