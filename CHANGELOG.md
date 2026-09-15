@@ -3,30 +3,31 @@
 ## [2.0.0] [Unreleased]
 
 ### Added
-- Interactive node-type list (Shortcut: `T`)
-- Search bar to filter nodes by name (Shortcut: `Ctrl+F`)
-- Support for presets
-- **Frame Selected Nodes** button in the minimap
-- Improved minimap wire visualization, including selection highlighting, curved links, and dashed lines for field/modifier sockets
-- More theme customization options for colors and appearance
-- More flexible minimap positioning, with additional dock positions, a new Floating mode, and drag-and-snap support for editor borders and corners.
-- Group markers displayed beneath group nodes
-- Smooth animations for frame actions
-- Auto Zoom option to keep the minimap zoom stable when the node layout changes
+- Added an interactive type list (T) and a search bar to filter nodes (Ctrl+F)
+- Added presets that save and restore all nodemap options
+- Added new dock positions, a Floating mode, and drag-and-snap to editor borders
+- Added configurable left and right mouse drag actions, including Frame Region in the minimap or editor
+- Added a right-click menu on the minimap buttons to toggle their options
+- Added a Frame Selected Nodes button to the minimap
+- Improved wire visualization with selection highlighting, curved links, and dashes for field/modifier sockets
+- Added single-color, linear-gradient, and vignette backgrounds for the minimap
+- Added smooth animations for frame actions
+- Added Auto Zoom option to keep the minimap zoom stable when the node layout changes
+- Added group markers beneath group nodes
 
 ### Changed
-- Type list selections now apply on click instead of on release
-- Frame Selected now automatically adjusts the zoom to fit multiple nodes or a frame
-- Improved performance when working with large node graphs, and when multiple minimaps show the same node tree
-- Frame menu buttons animate like the minimap buttons when animations are on
-- Added per-tree minimap views, restoring the previous pan and zoom when returning to a node tree
-- All extension options are now available in the addon preferences
+- Improved performance on large graphs and when several minimaps share the same tree
+- Added per-tree minimap views that restore the previous pan and zoom
+- Moved all extension options to the addon preferences
+- Type list selections now apply on click instead of release
+- Frame Selected now adjusts the zoom to fit multiple nodes or a frame
+- Frame menu buttons now animate like the minimap buttons when animations are on
+- Improved minimap node labels to match the editor titles
 
 ### Fixed
-- Minimap node labels now match the node editor titles, showing image names and math operations instead of the generic type name
-- Selecting a node from the type list no longer triggers a full EEVEE material rebuild
-- Minimap redraws now affect only the Node Editor being interacted with instead of refreshing all open Node Editors
-- Scrollbars now appear only when nodes extend beyond the visible area
+- Fixed node selections triggering a full EEVEE material rebuild
+- Fixed minimap redraws refreshing all open Node Editors instead of only the interacted one
+- Fixed scrollbars showing even when nodes fit within the visible area
 
 ## [1.5.0] - 2026-08-14
 
