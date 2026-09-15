@@ -1041,7 +1041,7 @@ def _compute_zone_geometry(
             zone_y,
             zone_w,
             panel_h,
-            zone_radius,
+            zone_radius * 1.2,
             _alpha_mul(colors["outliner_back"], master_alpha),
             mvp=mvp,
         )

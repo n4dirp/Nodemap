@@ -141,12 +141,7 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         background_low = tuple(settings.low_gradient)
     else:
         background = theme_background
-        background_low = (
-            theme_background[0] * 0.75,
-            theme_background[1] * 0.75,
-            theme_background[2] * 0.75,
-            theme_background[3],
-        )
+        background_low = _color_contrast(theme_background, 0.6)
 
     selected = _theme_rgba("user_interface.wcol_regular.text_sel", (0.28, 0.45, 0.7, 1.0))
     if settings.use_custom_viewport_fill:

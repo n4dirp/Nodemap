@@ -119,15 +119,15 @@ class AddonLogFormatter(logging.Formatter):
 
 
 _CLICK_ACTION_ITEMS = [
-    ("PAN", "Pan View", "Center the view on the clicked location"),
+    ("PAN", "Center View", "Center the editor view on the clicked point"),
     ("SELECT", "Select Node", "Select the node under the cursor"),
-    ("SELECT_FRAME", "Select Node + Frame View", "Select the node and frame it in the editor"),
-    ("SELECT_PAN", "Select Node + Pan View", "Select the node and pan the view"),
+    ("SELECT_FRAME", "Select and Frame", "Select the node under the cursor and frame it in the editor"),
+    ("SELECT_PAN", "Select and Center", "Select the node under the cursor and center the editor view on it"),
 ]
 
 _DRAG_ACTION_ITEMS = [
-    ("CENTER_PAN", "Center Pan", "Center the view on the cursor and drag to pan it around that point"),
-    ("PAN", "Pan View", "Drag to pan the node editor view"),
+    ("CENTER_PAN", "Center and Pan", "Center the editor view on the cursor on press and follow it while dragging"),
+    ("PAN", "Pan View", "Drag to pan the editor view relative to the cursor movement"),
     (
         "FRAME_RECT",
         "Frame Region",
