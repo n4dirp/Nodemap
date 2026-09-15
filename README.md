@@ -45,6 +45,11 @@ Drag the generated `.zip` file into Blender to install it.
 | Minimap                    | `Ctrl+F`             | Reveal list and focus filter  |
 | Minimap                    | `Left Click`         | Pan the view                  |
 | Minimap                    | `Right Click`        | Select nodes and frame them   |
+| Minimap                    | `Left Drag`          | Center Pan*                   |
+| Minimap                    | `Right Drag`         | Frame Region*                 |
+| Minimap                    | `Ctrl + Drag`        | Pan the view                  |
+| Minimap                    | `Shift + Drag`       | Frame a region (Minimap)      |
+| Minimap                    | `Alt + Drag`         | Frame a region (Editor)       |
 | Minimap                    | `Middle Drag`        | Pan the minimap               |
 | Minimap                    | `Middle Scroll`      | Zoom minimap / Node Editor    |
 | Minimap                    | `Alt + Scroll`       | Temporarily swap zoom target  |
