@@ -904,6 +904,16 @@ def draw_minimap() -> None:
     scissor_state = _setup_scissor(map_x, map_y, map_w, map_h)
     scissor_was_active = scissor_state[0]
 
+    if visible:
+        view_x = round(map_anchor_x + (visible[0] - tree_center_x) * scale)
+        view_y = round(map_anchor_y + (visible[1] - tree_center_y) * scale)
+        view_w = round(max((visible[2] - visible[0]) * scale, 1.0))
+        view_h = round(max((visible[3] - visible[1]) * scale, 1.0))
+        tint_color = _alpha_mul(colors["active_view_color"], 0.05 * master_alpha)
+        _draw_filled_rounded_rect(
+            view_x, view_y, view_w, view_h, colors["node_roundness"] * ui_scale, tint_color, mvp=base_mvp
+        )
+
     content_draw.draw_content_batches(
         state,
         settings,

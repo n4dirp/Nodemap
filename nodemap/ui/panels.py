@@ -61,7 +61,7 @@ class NODEMAP_PT_popup(Panel):
             flow.prop(settings, "use_follow_view", text="Follow View")
             flow.prop(settings, "use_auto_zoom", text="Auto Zoom")
 
-        header, root_body = layout.panel("NODEMAP_PT_objects", default_closed=True)
+        header, root_body = layout.panel("NODEMAP_PT_objects", default_closed=False)
         header.label(text="Objects")
         if root_body:
             flow = root_body.grid_flow(row_major=True, columns=2, align=True)
@@ -80,53 +80,53 @@ class NODEMAP_PT_popup(Panel):
             # flow.prop(settings, "show_socket_indicators", text="Sockets")
             flow.prop(settings, "show_node_count", text="Node Count")
 
-        header, body = layout.panel("NODEMAP_PT_wires", default_closed=True)
-        header.prop(settings, "show_wires", text="Wires")
-        if body:
-            body.active = settings.show_wires
-            flow = body.grid_flow(row_major=True, columns=2, align=False)
-            flow.prop(settings, "show_wires_selected", text="Selections")
-            flow.prop(settings, "show_wire_color", text="Wire Colors")
-            flow.prop(settings, "show_dashed_wires", text="Dashes")
-            flow.prop(settings, "wire_opacity", text="Opacity", slider=True)
+            if settings.use_interactive:
+                header, body = layout.panel("NODEMAP_PT_buttons", default_closed=True)
+                header.label(text="Buttons")
+                if body:
+                    col = body.column()
+                    row = col.row()
+                    col = row.column(align=True)
+                    col.prop(settings, "show_frame_all_button", text="Frame All")
+                    col.prop(settings, "show_frame_view_button", text="Frame View")
+                    if not settings.use_follow_view:
+                        col.prop(settings, "show_frame_selected_button", text="Frame Selected")
 
-            row = flow.row()
-            row.prop(settings, "use_custom_noodle_curving", text="")
-            sub = row.row()
-            sub.active = settings.use_custom_noodle_curving
-            sub.prop(settings, "noodle_curving", text="Curving", slider=True)
-            flow.prop(settings, "wire_thickness", text="Thickness", slider=True)
+                    col = row.column()
+                    col.prop(settings, "show_list_toggle_button", text="List Toggle")
+                    col.prop(settings, "show_move_button", text="Move Handle")
 
-        if settings.use_interactive:
-            header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
-            header.prop(settings, "show_type_list", text="Type List")
+                header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
+                header.prop(settings, "show_type_list", text="Type List")
+                if body:
+                    body.active = settings.show_type_list
+                    flow = body.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+                    flow.prop(settings, "show_search_bar", text="Filter Bar")
+                    flow.prop(settings, "use_follow_active", text="Follow Active")
+                    sub = flow.row(align=True)
+                    sub.active = settings.show_node_colors
+                    sub.prop(settings, "show_type_colors", text="Type Colors")
+
+                    col = body.column()
+                    col.label(text="Position")
+                    col.row().prop(settings, "type_list_position", text="Position", expand=True)
+
+            header, body = layout.panel("NODEMAP_PT_wires", default_closed=True)
+            header.prop(settings, "show_wires", text="Wires")
             if body:
-                body.active = settings.show_type_list
-                flow = body.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
-                flow.prop(settings, "show_search_bar", text="Filter Bar")
-                flow.prop(settings, "use_follow_active", text="Follow Active")
-                sub = flow.row(align=True)
-                sub.active = settings.show_node_colors
-                sub.prop(settings, "show_type_colors", text="Type Colors")
+                body.active = settings.show_wires
+                flow = body.grid_flow(row_major=True, columns=2, align=False)
+                flow.prop(settings, "show_wires_selected", text="Selections")
+                flow.prop(settings, "show_wire_color", text="Wire Colors")
+                flow.prop(settings, "show_dashed_wires", text="Dashes")
+                flow.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
-                col = body.column()
-                col.label(text="Position")
-                col.row().prop(settings, "type_list_position", text="Position", expand=True)
-
-            header, body = layout.panel("NODEMAP_PT_buttons", default_closed=False)
-            header.label(text="Buttons")
-            if body:
-                col = body.column()
-                row = col.row()
-                col = row.column(align=True)
-                col.prop(settings, "show_frame_all_button", text="Frame All")
-                col.prop(settings, "show_frame_view_button", text="Frame View")
-                if not settings.use_follow_view:
-                    col.prop(settings, "show_frame_selected_button", text="Frame Selected")
-
-                col = row.column()
-                col.prop(settings, "show_list_toggle_button", text="List Toggle")
-                col.prop(settings, "show_move_button", text="Move Handle")
+                row = flow.row()
+                row.prop(settings, "use_custom_noodle_curving", text="")
+                sub = row.row()
+                sub.active = settings.use_custom_noodle_curving
+                sub.prop(settings, "noodle_curving", text="Curving", slider=True)
+                flow.prop(settings, "wire_thickness", text="Thickness", slider=True)
 
         header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
         header.label(text="Theme")
@@ -141,7 +141,7 @@ class NODEMAP_PT_popup(Panel):
             sub.prop(settings, "viewport_fill_color", text="")
 
             row = col.row(align=True)
-            row.prop(settings, "use_passepartout", text="Passe-Partout")
+            row.prop(settings, "use_passepartout", text="Passepartout")
             sub = row.row(align=True)
             sub.active = settings.use_passepartout
             sub.prop(settings, "passepartout_alpha", text="")

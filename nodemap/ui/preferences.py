@@ -329,11 +329,11 @@ class NODEMAP_PG_settings(PropertyGroup):
     )
 
     passepartout_alpha: FloatProperty(
-        name="Dimming",
+        name="Passepartout Opacity",
         description="Opacity of the dimming applied around the active view",
         default=0.4,
         min=0.0,
-        max=1.0,
+        max=0.9,
         precision=3,
         update=_update_invalidate_batches,
     )
@@ -897,7 +897,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group.separator()
 
         row = group.row(align=True)
-        row.prop(settings, "use_passepartout", text="Passe-Partout")
+        row.prop(settings, "use_passepartout", text="Passepartout")
         sub = row.row(align=True)
         sub.active = settings.use_passepartout
         sub.prop(settings, "passepartout_alpha", text="", slider=True)
