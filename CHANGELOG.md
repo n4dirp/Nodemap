@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.0] [Unreleased]
+## [2.0.0] - 2026-09-15
 
 ### Added
 - Added an interactive type list (T) and a search bar to filter nodes (Ctrl+F)
