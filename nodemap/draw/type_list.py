@@ -1325,7 +1325,7 @@ def _draw_list_fills(
                 search_w - 2,
                 search_draw_h - 2,
                 max(2.0, radius * 1.5 - 1),
-                (1, 1, 1, 0.0075 * master_alpha),
+                (1, 1, 1, 0.005 * master_alpha),
             )
 
         border(
