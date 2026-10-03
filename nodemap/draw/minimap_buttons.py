@@ -14,7 +14,6 @@ from ..core.buttons import (
 )
 from ..core.constants import (
     BUTTON_HOVER_ALPHA,
-    BUTTON_MARGIN,
     BUTTON_SIZE,
     CONTENT_PADDING,
     ELEMENT_GAP,
@@ -189,7 +188,6 @@ def _row_geometry(
     coincide exactly instead of drifting by a rounding fraction.
     """
     size = round(BUTTON_SIZE * ui_scale)
-    margin = BUTTON_MARGIN * ui_scale
     if list_placement == "TOP" and list_width > 0:
         # Vertical layout: the row sits just below the top list strip,
         # overlapping the map content filling the bottom, like the left
@@ -198,8 +196,8 @@ def _row_geometry(
         zone_bottom = map_y + map_h - CONTENT_PADDING * ui_scale - strip_h
         top_y = round(zone_bottom - ELEMENT_GAP * ui_scale - size)
     else:
-        top_y = round(map_y + map_h - padding - margin - size)
-    drag_x = round(map_x + map_w - padding - margin - size)
+        top_y = round(map_y + map_h - padding - size)
+    drag_x = round(map_x + map_w - padding - size)
     return top_y, size, drag_x
 
 
@@ -240,9 +238,9 @@ def _layout_buttons(
     # List toggle at the top-left, sliding right of an open type-list zone.
     list_x: float | None = None
     if "LIST" in visible_ids:
-        list_x = round(map_x + padding + BUTTON_MARGIN * ui_scale)
+        list_x = round(map_x + padding)
         if state.list.list_width > 0:
-            list_x = max(list_x, round(_get_map_content_rect(state)[0] + BUTTON_MARGIN * ui_scale))
+            list_x = max(list_x, round(_get_map_content_rect(state)[0]))
 
     priority = tuple(button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "frame")
     kept = _cull_frame_ids(

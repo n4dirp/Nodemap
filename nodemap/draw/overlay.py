@@ -909,7 +909,7 @@ def draw_minimap() -> None:
         view_y = round(map_anchor_y + (visible[1] - tree_center_y) * scale)
         view_w = round(max((visible[2] - visible[0]) * scale, 1.0))
         view_h = round(max((visible[3] - visible[1]) * scale, 1.0))
-        tint_color = _alpha_mul(colors["active_view_color"], 0.075 * master_alpha)
+        tint_color = _alpha_mul(colors["active_view_color"], 0.03 * master_alpha)
         _draw_filled_rounded_rect(
             view_x, view_y, view_w, view_h, colors["node_roundness"] * ui_scale, tint_color, mvp=base_mvp
         )

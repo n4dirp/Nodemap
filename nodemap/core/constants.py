@@ -121,11 +121,11 @@ PAN_ANIM_FPS: float = 100.0
 PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
 
 # Fixed animation duration in frames for click-to-pan (fast snap).
-PAN_FRAMES: float = 15.0
+PAN_FRAMES: float = 12.0
 
 # Minimum animation duration in frames so close pans stay visible instead of
 # collapsing to a single tick.
-PAN_MIN_FRAMES: float = PAN_FRAMES * 0.66
+PAN_MIN_FRAMES: float = PAN_FRAMES * 0.75
 
 # Inertia kicks in when a released drag ends above this velocity, matching
 # the 1.5.0 FAST feel; lower values glide on light flicks, higher values
