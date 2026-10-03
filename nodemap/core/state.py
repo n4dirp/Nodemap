@@ -104,6 +104,7 @@ class ListState:
     search_query: str = ""
     search_cursor: int = 0
     search_focused: bool = False
+    search_hovered: bool = False
     search_esc_armed: bool = False
     search_rect: Rect | None = None
     search_text_start_x: float = 0.0

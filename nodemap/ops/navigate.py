@@ -1691,6 +1691,10 @@ class NODEMAP_OT_navigate(Operator):
             if state.list.search_clear_hovered != over_clear:
                 state.list.search_clear_hovered = over_clear
                 self._redraw_ui()
+            over_search = _over_search_zone(self._mouse_x, self._mouse_y, state)
+            if state.list.search_hovered != over_search:
+                state.list.search_hovered = over_search
+                self._redraw_ui()
             if not state.list.search_focused:
                 in_list = _in_list_zone(self._mouse_x, self._mouse_y, state)
                 # The scrollbar gutter suppresses row hovers so the bar can
@@ -2234,6 +2238,7 @@ class NODEMAP_OT_navigate(Operator):
             state.list.scrollbar_dragging = False
             state.list.hovered_h_scrollbar = False
             state.list.h_scrollbar_dragging = False
+            state.list.search_hovered = False
             state.list.search_cursor = 0
             state.list.search_focused = False
             state.list.search_esc_armed = False
@@ -2470,6 +2475,7 @@ class NODEMAP_OT_navigate(Operator):
             self._state.interaction.hovered_node_id = None
             self._state.list.hovered_scrollbar = False
             self._state.list.scrollbar_dragging = False
+            self._state.list.search_hovered = False
             self._state.list.search_esc_armed = False
             self._state.interaction.marquee_active = False
             self._state.interaction.marquee_start = None

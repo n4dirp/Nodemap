@@ -930,6 +930,7 @@ def _clear_list_interaction(state: MinimapState) -> None:
     state.list.search_rect = None
     state.list.search_clear_rect = None
     state.list.search_clear_hovered = False
+    state.list.search_hovered = False
     state.list.visible_row_keys = []
     state.list.visible_row_index_map = {}
 
@@ -1315,6 +1316,17 @@ def _draw_list_fills(
         # Button-style fill radius (their fill uses radius * 1.5); the border
         # below keeps the plain radius like the buttons do.
         fill(search_x, search_pill_y, search_w, search_draw_h, radius * 1.5, pill_fill_color)
+
+        # Button-style hover fill, shown only while the box is not focused.
+        if state.list.search_hovered and not state.list.search_focused:
+            fill(
+                search_x + 1,
+                search_pill_y + 1,
+                search_w - 2,
+                search_draw_h - 2,
+                max(2.0, radius * 1.5 - 1),
+                (1, 1, 1, 0.0075 * master_alpha),
+            )
 
         border(
             search_x,

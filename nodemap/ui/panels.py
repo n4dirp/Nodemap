@@ -118,7 +118,7 @@ class NODEMAP_PT_popup(Panel):
                 flow = body.grid_flow(row_major=True, columns=2, align=False)
                 flow.prop(settings, "show_wires_selected", text="Selections")
                 flow.prop(settings, "show_wire_color", text="Wire Colors")
-                flow.prop(settings, "show_dashed_wires", text="Dashes")
+                flow.prop(settings, "show_dashed_wires", text="Dashed Wires")
                 flow.prop(settings, "wire_opacity", text="Opacity", slider=True)
 
                 row = flow.row()

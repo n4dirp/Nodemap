@@ -331,7 +331,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     passepartout_alpha: FloatProperty(
         name="Passepartout Opacity",
         description="Opacity of the dimming applied around the active view",
-        default=0.4,
+        default=0.3,
         min=0.0,
         max=0.9,
         precision=3,
