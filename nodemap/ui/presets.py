@@ -35,6 +35,7 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.use_snap_to_borders",
         "settings.show_node_count",
         "settings.show_frames",
+        "settings.show_zone_fills",
         "settings.show_node_outline",
         "settings.show_socket_indicators",
         "settings.show_reroutes",

@@ -57,7 +57,7 @@ class NODEMAP_PT_popup(Panel):
             flow.prop(settings, "use_interactive", text="Interactive Map")
             sub = flow.row(align=True)
             sub.active = settings.use_interactive
-            sub.prop(settings, "use_animations", text="Animations")
+            sub.prop(settings, "use_animations", text="Animation Effects")
             flow.prop(settings, "use_follow_view", text="Follow View")
             flow.prop(settings, "use_auto_zoom", text="Auto Zoom")
 

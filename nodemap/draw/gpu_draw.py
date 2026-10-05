@@ -27,6 +27,7 @@ _BATCH_PILL_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_SHADER: gpu.types.GPUShader | None = None
 _BATCH_RECT_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_NOODLE_SHADER: gpu.types.GPUShader | None = None
+_BATCH_POLY_SHADER: gpu.types.GPUShader | None = None
 _BATCH_ICON_SHADER: gpu.types.GPUShader | None = None
 _LINE_STRIP_SHADER: gpu.types.GPUShader | None = None
 
@@ -366,6 +367,19 @@ void main() {
         dashAlpha = 1.0 - smoothstep(dashData.x - 0.75, dashData.x + 0.75, phase);
     }
     fragColor = vec4(color.rgb, color.a * alpha * dashAlpha);
+}
+"""
+
+_BATCH_POLY_VERT_SRC = """
+void main() {
+    vColor = color;
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_BATCH_POLY_FRAG_SRC = """
+void main() {
+    fragColor = vColor;
 }
 """
 
@@ -728,6 +742,25 @@ def _get_batch_noodle_shader() -> gpu.types.GPUShader:
         _BATCH_NOODLE_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _BATCH_NOODLE_SHADER
+
+
+def _get_batch_poly_shader() -> gpu.types.GPUShader:
+    """Return a flat-color polygon shader (pos + color, no SDF)."""
+    global _BATCH_POLY_SHADER
+    if _BATCH_POLY_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("batch_poly_iface")
+        vert_out.smooth("VEC4", "vColor")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC4", "color")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_BATCH_POLY_VERT_SRC)
+        info.fragment_source(_BATCH_POLY_FRAG_SRC)
+        _BATCH_POLY_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _BATCH_POLY_SHADER
 
 
 def _get_cached_quad_batch(

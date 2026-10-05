@@ -178,6 +178,7 @@ class RenderCache:
     highlight_borders_batch: Any = None
     frames_fill_batch: Any = None
     frames_border_batch: Any = None
+    zone_fills_batch: Any = None
     node_labels: list[tuple[int, str, float, float, tuple[float, ...], float]] | None = None
     wire_batches: list | None = None
     wire_highlight_batch: Any = None
@@ -209,6 +210,7 @@ class RenderCache:
         "highlight_borders_batch",
         "frames_fill_batch",
         "frames_border_batch",
+        "zone_fills_batch",
         "node_labels",
         "wire_batches",
         "wire_highlight_batch",

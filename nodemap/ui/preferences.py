@@ -410,6 +410,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_all,
     )
 
+    show_zone_fills: BoolProperty(
+        name="Zone Fills",
+        description="Display background fills behind geometry node zone bodies",
+        default=True,
+        update=_update_invalidate_batches,
+    )
+
     show_frame_labels: BoolProperty(
         name="Show Frame Labels",
         description="Display labels above frame nodes in the minimap",
@@ -803,6 +810,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         settings = self.settings
         col = row.column(heading="Show")
         col.prop(settings, "show_frames", text="Frames")
+        col.prop(settings, "show_zone_fills", text="Zone Fills")
         col.prop(settings, "show_node_colors", text="Node Colors")
         col.prop(settings, "show_node_outline", text="Node Outline")
         col.prop(settings, "show_socket_indicators", text="Node Sockets")

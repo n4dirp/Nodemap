@@ -29,6 +29,7 @@ from ..core.theme import _alpha_mul, _srgb_to_linear
 from .gpu_draw import (
     _build_noodle_batch,
     _build_pill_batch,
+    _get_batch_poly_shader,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
@@ -603,6 +604,49 @@ def _bake_reroutes(ctx: "_BakeContext") -> None:
         ctx.state.cache.reroute_batch = None
 
 
+def _bake_zone_fills(ctx: "_BakeContext", show_zone_fills: bool, master_alpha: float) -> None:
+    """Bake the zone-body fill polygons (filleted convex hulls) as one batch.
+
+    Triangulates each hull as a fan from its first vertex so the shared edges
+    carry identical color and no center-line seams appear with the translucent
+    fill.
+    """
+    cache = ctx.state.cache
+    zone_fills = ctx.tree_data.get("zone_fills") if show_zone_fills else None
+    if not zone_fills:
+        cache.zone_fills_batch = None
+        return
+    pos: list[tuple[float, float, float]] = []
+    color_list: list[tuple[float, float, float, float]] = []
+    indices: list[tuple[int, int, int]] = []
+    for entry in zone_fills:
+        hull = entry.get("hull")
+        if not hull or len(hull) < 3:
+            continue
+        color = _alpha_mul(entry["color"], master_alpha)
+        baked = [((x - ctx.origin_x) * ctx.bake_scale, (y - ctx.origin_y) * ctx.bake_scale) for x, y in hull]
+        min_x = min(p[0] for p in baked)
+        max_x = max(p[0] for p in baked)
+        min_y = min(p[1] for p in baked)
+        max_y = max(p[1] for p in baked)
+        if max_x < ctx.cull_left or min_x > ctx.cull_right or max_y < ctx.cull_bottom or min_y > ctx.cull_top:
+            continue
+        base = len(pos)
+        pos.extend((px, py, 0.0) for px, py in baked)
+        color_list.extend([color] * len(baked))
+        for i in range(1, len(baked) - 1):
+            indices.append((base, base + i, base + i + 1))
+    if pos:
+        cache.zone_fills_batch = batch_for_shader(
+            _get_batch_poly_shader(),
+            "TRIS",
+            {"pos": pos, "color": color_list},
+            indices=indices,
+        )
+    else:
+        cache.zone_fills_batch = None
+
+
 def _ensure_minimap_batches(
     minimap_state: MinimapState,
     map_x,
@@ -624,6 +668,7 @@ def _ensure_minimap_batches(
     wire_curvature: int = 5,
     wire_thickness: float = 1.0,
     node_outline: tuple | None = None,
+    show_zone_fills: bool = True,
 ):
     """Bake content batches in map-local space, rebuilding only when stale."""
     shared = minimap_state.shared
@@ -643,6 +688,7 @@ def _ensure_minimap_batches(
         shared.position_version,
         round(ui_scale, 3),
         show_borders,
+        bool(show_zone_fills),
         bool(query and list_visible),
         minimap_state.list.hovered_type_label,
         minimap_state.interaction.hovered_node_id,
@@ -871,6 +917,7 @@ def _ensure_minimap_batches(
     _bake_rect(ctx, ctx.highlight_attr, _get_batch_rect_border_shader, "highlight_borders_batch", True)
     _bake_rect(ctx, ctx.frame_fill_attr, _get_batch_rect_shader, "frames_fill_batch", False)
     _bake_rect(ctx, ctx.frame_border_attr, _get_batch_rect_border_shader, "frames_border_batch", True)
+    _bake_zone_fills(ctx, show_zone_fills, master_alpha)
     minimap_state.cache.node_labels = node_labels
 
     # Sockets and reroutes — pills auto-hidden below the minimum scale;

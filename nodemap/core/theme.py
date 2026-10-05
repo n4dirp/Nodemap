@@ -5,6 +5,7 @@ from typing import Any
 
 import bpy
 
+from .constants import ZONE_THEME_DEFAULTS
 from .helpers import get_addon_preferences
 
 _COLOR_TAG_TO_THEME_ATTR: dict[str, str] = {
@@ -159,6 +160,22 @@ def _get_node_editor_theme_colors() -> dict[str, Any]:
         "node_outline": _theme_rgba("node_editor.node_outline", (1.0, 1.0, 1.0, 0.149)),
         "node_text": _theme_rgba("node_editor.space.text", (0.902, 0.902, 0.902, 1.0)),
         "frame_node": _theme_rgba("node_editor.frame_node", (0.059, 0.059, 0.059, 0.8)),
+        # Zone fills (linear; alpha is the theme fill strength)
+        "zone_simulation": _srgb_to_linear(
+            _theme_rgba("node_editor.simulation_zone", ZONE_THEME_DEFAULTS["GeometryNodeSimulationInput"])
+        ),
+        "zone_repeat": _srgb_to_linear(
+            _theme_rgba("node_editor.repeat_zone", ZONE_THEME_DEFAULTS["GeometryNodeRepeatInput"])
+        ),
+        "zone_foreach": _srgb_to_linear(
+            _theme_rgba(
+                "node_editor.foreach_geometry_element_zone",
+                ZONE_THEME_DEFAULTS["GeometryNodeForeachGeometryElementInput"],
+            )
+        ),
+        "zone_closure": _srgb_to_linear(
+            _theme_rgba("node_editor.closure_zone", ZONE_THEME_DEFAULTS["NodeClosureInput"])
+        ),
         # Wire
         "wire_color": _theme_rgba("node_editor.wire_inner", (0.55, 0.55, 0.55, 1.0)),
         "wire_selected": _theme_rgba("node_editor.wire_select", (1.0, 1.0, 1.0, 0.7)),

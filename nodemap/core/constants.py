@@ -185,3 +185,28 @@ SOCKET_PILL_SIZE_MULTIPLIER: float = 3.0
 # ---------------------------------------------------------------------------
 NODE_ROUNDNESS_DEFAULT: float = 2.0
 MUTE_ALPHA: float = 0.4
+
+# ---------------------------------------------------------------------------
+# Zone types
+# ---------------------------------------------------------------------------
+# Input -> output node bl_idname pairs that delimit a geometry-node zone body.
+ZONE_INPUT_BL_IDNAMES: dict[str, str] = {
+    "GeometryNodeSimulationInput": "GeometryNodeSimulationOutput",
+    "GeometryNodeRepeatInput": "GeometryNodeRepeatOutput",
+    "GeometryNodeForeachGeometryElementInput": "GeometryNodeForeachGeometryElementOutput",
+    "NodeClosureInput": "NodeClosureOutput",
+}
+
+# Zone fill shape (in widget-unit multiples, matching Blender's node_draw.cc).
+NODE_ZONE_PADDING: float = 1.0
+ZONE_FILLET_RADIUS: float = 0.2
+ZONE_FILLET_SEGMENTS: int = 5
+ZONE_IO_TRIM: float = 0.75
+
+# sRGB fallback values (Blender 5.3 default theme).
+ZONE_THEME_DEFAULTS: dict[str, tuple[float, float, float, float]] = {
+    "GeometryNodeSimulationInput": (0.400, 0.255, 0.384, 0.20),
+    "GeometryNodeRepeatInput": (0.463, 0.318, 0.184, 0.20),
+    "GeometryNodeForeachGeometryElementInput": (0.200, 0.322, 0.498, 0.20),
+    "NodeClosureInput": (0.490, 0.490, 0.227, 0.20),
+}

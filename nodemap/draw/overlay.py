@@ -884,6 +884,7 @@ def draw_minimap() -> None:
         wire_curvature,
         wire_thickness,
         node_outline=colors["node_outline"],
+        show_zone_fills=bool(settings.show_zone_fills),
     )
 
     try:

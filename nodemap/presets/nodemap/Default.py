@@ -14,6 +14,7 @@ settings.offset_y = 0
 settings.use_snap_to_borders = True
 settings.show_node_count = True
 settings.show_frames = True
+settings.show_zone_fills = True
 settings.show_node_outline = True
 settings.show_socket_indicators = True
 settings.show_reroutes = True

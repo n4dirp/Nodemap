@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Added Zone Fills to paint a rounded background behind geometry node zone bodies (simulation, repeat, for-each, and closure), with a Zone Fills toggle in the Objects options
+
 ## [2.0.0] - 2026-09-15
 
 ### Added

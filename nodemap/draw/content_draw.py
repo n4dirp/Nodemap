@@ -14,6 +14,7 @@ from .gpu_draw import (
     _draw_text_with_shadow,
     _get_batch_noodle_shader,
     _get_batch_pill_shader,
+    _get_batch_poly_shader,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
@@ -54,6 +55,19 @@ def _draw_layer_frames(state: MinimapState, settings: NODEMAP_PG_settings, mvp: 
         border_shader.bind()
         border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
         frames_border_batch.draw(border_shader)
+
+
+def _draw_layer_zone_fills(
+    state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]
+) -> None:
+    """Draw zone-body background fill polygons (behind frames and wires)."""
+    zone_fills_batch = state.cache.zone_fills_batch
+    if not (getattr(settings, "show_zone_fills", False) and zone_fills_batch):
+        return
+    shader = _get_batch_poly_shader()
+    shader.bind()
+    shader.uniform_float("ModelViewProjectionMatrix", mvp)
+    zone_fills_batch.draw(shader)
 
 
 def _draw_layer_wires(state: MinimapState, settings: NODEMAP_PG_settings, mvp: Any, params: dict[str, Any]) -> None:
@@ -217,6 +231,7 @@ def _draw_layer_labels(state: MinimapState, settings: NODEMAP_PG_settings, mvp: 
 
 _DRAW: dict[str, Callable] = {
     "frames": _draw_layer_frames,
+    "zone_fills": _draw_layer_zone_fills,
     "wires": _draw_layer_wires,
     "wire_highlight": _draw_layer_wire_highlight,
     "backdrops": _draw_layer_backdrops,

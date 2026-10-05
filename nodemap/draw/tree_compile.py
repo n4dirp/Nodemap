@@ -6,7 +6,7 @@ import time
 import bpy
 
 from .. import __package__ as base_package
-from ..core.constants import MUTE_ALPHA, NODE_ROUNDNESS_DEFAULT
+from ..core.constants import MUTE_ALPHA, NODE_ROUNDNESS_DEFAULT, ZONE_INPUT_BL_IDNAMES, ZONE_IO_TRIM
 from ..core.helpers import (
     _get_node_dims,
     _get_node_initials,
@@ -20,6 +20,7 @@ from ..core.theme import (
     _srgb_to_linear,
     _theme_rgba,
 )
+from ..geo.transforms import zone_outline
 from ..ui.preferences import TRACE_LEVEL
 
 logger = logging.getLogger(base_package)
@@ -110,7 +111,7 @@ def _debounced_compile(shared: SharedTreeCache, node_tree, colors, settings, mas
         path = "settle_bump"
         logger.debug("SETTLE settle_bump: fingerprint unchanged, bumped version=%d", shared.tree_version)
     elif _is_move_only_diff(old_fingerprint, current_fingerprint) and shared.tree_data:
-        applied = _apply_move_updates(shared, node_tree)
+        applied = _apply_move_updates(shared, node_tree, colors, ui_scale)
         if applied:
             shared.fingerprint = current_fingerprint
             # Movement settled: unfreeze wire/marker batches so they snap to
@@ -542,6 +543,174 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
     }
 
 
+# Zone fill theme key per input node bl_idname (maps to the theme dict key).
+_ZONE_COLOR_KEY: dict[str, str] = {
+    "GeometryNodeSimulationInput": "zone_simulation",
+    "GeometryNodeRepeatInput": "zone_repeat",
+    "GeometryNodeForeachGeometryElementInput": "zone_foreach",
+    "NodeClosureInput": "zone_closure",
+}
+_ZONE_INPUT_IDNAMES = frozenset(ZONE_INPUT_BL_IDNAMES)
+
+
+def _zone_successors(node_tree) -> dict[int, list[int]]:
+    """Return the node-pointer -> successor-pointer adjacency for all links."""
+    successors: dict[int, list[int]] = {}
+    for link in node_tree.links:
+        from_node = link.from_node
+        to_node = link.to_node
+        if not from_node or not to_node:
+            continue
+        try:
+            fptr = from_node.as_pointer()
+            tptr = to_node.as_pointer()
+        except ReferenceError:
+            continue
+        successors.setdefault(fptr, []).append(tptr)
+    return successors
+
+
+def _zone_predecessors(node_tree) -> dict[int, list[int]]:
+    """Return the node-pointer -> predecessor-pointer adjacency for all links."""
+    predecessors: dict[int, list[int]] = {}
+    for link in node_tree.links:
+        from_node = link.from_node
+        to_node = link.to_node
+        if not from_node or not to_node:
+            continue
+        try:
+            fptr = from_node.as_pointer()
+            tptr = to_node.as_pointer()
+        except ReferenceError:
+            continue
+        predecessors.setdefault(tptr, []).append(fptr)
+    return predecessors
+
+
+def _zone_inputs(node_tree) -> tuple[dict[int, int], dict[int, str]]:
+    """Return ``(input_ptr -> output_ptr, input_ptr -> input bl_idname)`` per zone.
+
+    The output node is read from the zone input's ``paired_output`` property —
+    the same pairing Blender's own zone discovery uses. The body nodes sit
+    between the input and output, so no direct input-to-output link exists to
+    pair on. Unpaired inputs are skipped (Blender draws no zone for them).
+    """
+    out_by_input: dict[int, int] = {}
+    idname_by_input: dict[int, str] = {}
+    for node in node_tree.nodes:
+        idname = node.bl_idname
+        if idname not in _ZONE_INPUT_IDNAMES:
+            continue
+        try:
+            ptr = node.as_pointer()
+        except ReferenceError:
+            continue
+        idname_by_input[ptr] = idname
+        paired_output = getattr(node, "paired_output", None)
+        if paired_output is None:
+            continue
+        try:
+            out_by_input[ptr] = paired_output.as_pointer()
+        except ReferenceError:
+            continue
+    return out_by_input, idname_by_input
+
+
+def _zone_body(
+    input_ptr: int,
+    output_ptr: int,
+    successors: dict[int, list[int]],
+    predecessors: dict[int, list[int]],
+) -> set[int]:
+    """Return the zone body: the nodes on some path from the input to the output.
+
+    The body is the nodes reachable from the input node intersected with the
+    nodes that reach the output node, so the outline stops at the zone output
+    instead of bleeding into the nodes downstream of it.
+    """
+    forward: set[int] = set()
+    stack = [input_ptr]
+    while stack:
+        ptr = stack.pop()
+        if ptr in forward:
+            continue
+        forward.add(ptr)
+        stack.extend(successors.get(ptr, ()))
+    backward: set[int] = set()
+    stack = [output_ptr]
+    while stack:
+        ptr = stack.pop()
+        if ptr in backward:
+            continue
+        backward.add(ptr)
+        stack.extend(predecessors.get(ptr, ()))
+    # The IO nodes are always part of the zone, even before the pair is linked.
+    return (forward & backward) | {input_ptr, output_ptr}
+
+
+def _compute_zone_bodies(node_tree, node_data, colors, ui_scale) -> list[dict]:
+    """Compute zone fill polygons (filleted convex hull) for every zone body.
+
+    Each body is the set of nodes on some path from the zone input node to the
+    zone output node. The input node contributes its right 75% and the output
+    node its left 75% so the outline hugs the body instead of bulging past the
+    IO nodes.
+    """
+    node_by_rect: dict[int, tuple[float, float, float, float]] = {}
+    for node in node_tree.nodes:
+        try:
+            ptr = node.as_pointer()
+        except ReferenceError:
+            continue
+        meta = node_data.get(ptr)
+        if meta is None:
+            continue
+        w, h = meta["dims"]
+        x, y = meta["loc"]
+        node_by_rect[ptr] = (x, y - h, x + w, y)
+
+    out_by_input, idname_by_input = _zone_inputs(node_tree)
+    if not idname_by_input:
+        return []
+    successors = _zone_successors(node_tree)
+    predecessors = _zone_predecessors(node_tree)
+
+    fills: list[dict] = []
+    seen_bodies: set[frozenset] = set()
+    for input_ptr, idname in idname_by_input.items():
+        out_ptr = out_by_input.get(input_ptr)
+        if out_ptr is None:
+            # Unpaired input: Blender draws no zone for incomplete pairs.
+            continue
+        body = _zone_body(input_ptr, out_ptr, successors, predecessors)
+        body_key = frozenset(body)
+        if body_key in seen_bodies:
+            continue
+        seen_bodies.add(body_key)
+        node_rects: list[tuple[float, float, float, float]] = []
+        for ptr in body:
+            rect = node_by_rect.get(ptr)
+            if rect is None:
+                continue
+            x0, y0, x1, y1 = rect
+            if ptr == input_ptr:
+                x0 = x0 + (x1 - x0) * (1.0 - ZONE_IO_TRIM)
+            elif ptr == out_ptr:
+                x1 = x0 + (x1 - x0) * ZONE_IO_TRIM
+            node_rects.append((x0, y0, x1, y1))
+        if not node_rects:
+            continue
+        color_key = _ZONE_COLOR_KEY.get(idname)
+        color = colors.get(color_key) if color_key else None
+        if color is None:
+            continue
+        hull = zone_outline(node_rects, ui_scale)
+        if len(hull) < 3:
+            continue
+        fills.append({"hull": hull, "color": color})
+    return fills
+
+
 def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, master_alpha, ui_scale):
     """Compute tree-space data for nodes, wires, sockets, and labels.
 
@@ -584,6 +753,7 @@ def _compile_tree_data(shared: SharedTreeCache, node_tree, colors, settings, mas
         type_nodes[_lbl].sort()
 
     tree_data["node_infos"] = built["node_infos"]
+    tree_data["zone_fills"] = _compute_zone_bodies(node_tree, node_data, colors, ui_scale)
     tree_data["socket_items"] = _group_socket_dots(built["socket_items_by_node"])
     tree_data["socket_ph_base"] = 8.0
     tree_data["group_markers"] = built["group_markers"]
@@ -840,7 +1010,7 @@ def _group_socket_dots(by_node: dict[int, list[tuple[tuple, float, float]]]) -> 
     return grouped
 
 
-def _apply_move_updates(shared: SharedTreeCache, node_tree) -> bool:
+def _apply_move_updates(shared: SharedTreeCache, node_tree, colors, ui_scale) -> bool:
     """Patch cached tree data in place after pure position changes.
 
     Refresh node positions, socket/wire endpoints, and group markers
@@ -1012,6 +1182,16 @@ def _apply_move_updates(shared: SharedTreeCache, node_tree) -> bool:
             )
     tree_data["group_markers"] = markers
     if moved_any:
+        # Zone fills track node positions: rebuild the hulls from the patched
+        # node rects (per-zone colors are unchanged on a pure move).
+        zone_data = {
+            info["ptr"]: {
+                "dims": (info["tree_w"], info["tree_h"]),
+                "loc": (info["tree_x"], info["tree_y"] + info["tree_h"]),
+            }
+            for info in node_infos
+        }
+        tree_data["zone_fills"] = _compute_zone_bodies(node_tree, zone_data, colors, ui_scale)
         if show_indicators:
             tree_data["socket_items"] = _group_socket_dots(by_node)
         if reroute_moved and show_reroutes_flag:

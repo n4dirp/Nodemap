@@ -1,6 +1,7 @@
 """Provide coordinate transforms and geometry for the minimap."""
 
 import logging
+import math
 from typing import Any
 
 import bpy
@@ -10,7 +11,10 @@ from ..core.constants import (
     ELEMENT_GAP,
     MAX_MAP_SCALE,
     MIN_MAP_SCALE,
+    NODE_ZONE_PADDING,
     TYPE_LIST_ASPECT_THRESHOLD,
+    ZONE_FILLET_RADIUS,
+    ZONE_FILLET_SEGMENTS,
 )
 from ..core.helpers import _get_ui_scale, get_addon_preferences
 from ..core.state import MinimapState, _state
@@ -533,3 +537,96 @@ def _get_visible_rect(
     except Exception as e:
         logger.log(5, "_get_visible_rect failed: %s", e)
         return None
+
+
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Return the CCW convex hull of *points* via the monotone chain algorithm."""
+    pts = sorted(set(points))
+    if len(pts) <= 2:
+        return list(pts)
+
+    def _cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _fillet_polygon(poly, radius, segments=5):
+    """Round a CCW polygon's corners with circular arcs (Blender fillet_curves_poly)."""
+    n = len(poly)
+    if n < 3 or radius <= 0:
+        return list(poly)
+
+    def _norm(a):
+        length = math.hypot(a[0], a[1])
+        return (0.0, 0.0) if length == 0 else (a[0] / length, a[1] / length)
+
+    in_dir, out_dir, d = [], [], []
+    for i in range(n):
+        p, prev, nxt = poly[i], poly[i - 1], poly[(i + 1) % n]
+        d_in = _norm((p[0] - prev[0], p[1] - prev[1]))
+        d_out = _norm((nxt[0] - p[0], nxt[1] - p[1]))
+        in_dir.append(d_in)
+        out_dir.append(d_out)
+        dot = max(-1.0, min(1.0, d_in[0] * d_out[0] + d_in[1] * d_out[1]))
+        ang = math.pi - math.acos(-dot)
+        d.append(radius * math.tan(ang / 2.0))
+
+    # Clamp adjacent fillets so they don't overlap on short edges.
+    for i in range(n):
+        j = (i + 1) % n
+        ex = poly[j][0] - poly[i][0]
+        ey = poly[j][1] - poly[i][1]
+        elen = math.hypot(ex, ey)
+        s = d[i] + d[j]
+        if s > elen and s > 0:
+            f = elen / s
+            d[i] *= f
+            d[j] *= f
+
+    out = []
+    for i in range(n):
+        p = poly[i]
+        di, do, dd = in_dir[i], out_dir[i], d[i]
+        start = (p[0] - di[0] * dd, p[1] - di[1] * dd)
+        cd = _norm((do[0] - di[0], do[1] - di[1]))
+        dc = math.sqrt(radius * radius + dd * dd)
+        cx = p[0] + cd[0] * dc
+        cy = p[1] + cd[1] * dc
+        ang = math.pi - math.acos(max(-1.0, min(1.0, di[0] * do[0] + di[1] * do[1])))
+        r = math.hypot(start[0] - cx, start[1] - cy)
+        a0 = math.atan2(start[1] - cy, start[0] - cx)
+        for k in range(segments + 1):
+            a = a0 + (ang * k / segments)
+            out.append((cx + math.cos(a) * r, cy + math.sin(a) * r))
+    return out
+
+
+def zone_outline(node_rects, widget_unit):
+    """Compute the zone fill polygon for a set of node rects in tree space.
+
+    Each rect is ``(xmin, ymin, xmax, ymax)``.  Returns a CCW filleted convex
+    hull polygon suitable for triangulation and GPU rendering.
+    """
+    pad = widget_unit * NODE_ZONE_PADDING
+    corners = []
+    for x0, y0, x1, y1 in node_rects:
+        x0 -= pad
+        y0 -= pad
+        x1 += pad
+        y1 += pad
+        corners.extend([(x0, y0), (x0, y1), (x1, y0), (x1, y1)])
+    hull = _convex_hull(corners)
+    if len(hull) < 3:
+        return hull
+    return _fillet_polygon(hull, radius=widget_unit * ZONE_FILLET_RADIUS, segments=ZONE_FILLET_SEGMENTS)
