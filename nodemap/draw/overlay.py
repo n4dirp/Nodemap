@@ -326,6 +326,62 @@ def _draw_background(
     return panel_roundness
 
 
+def _draw_moving_panel(
+    map_x: float,
+    map_y: float,
+    map_w: float,
+    map_h: float,
+    panel_roundness: float,
+    colors: dict,
+    master_alpha: float,
+    ui_scale: float,
+    mvp: Any = None,
+) -> None:
+    """Draw the darkened panel fill and thin border shown while moving or resizing."""
+    border_width = 1.5 * ui_scale
+    border_color = _alpha_mul(colors["background_border"], master_alpha)
+    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.4 * master_alpha), mvp=mvp)
+    _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
+
+
+def _draw_edge_bars(
+    map_x: float,
+    map_y: float,
+    map_w: float,
+    map_h: float,
+    side_colors: dict[str, tuple],
+    ui_scale: float,
+    mvp: Any = None,
+) -> None:
+    """Draw full-edge indicator bars on the given sides."""
+    if not side_colors:
+        return
+
+    thickness = 1.5 * ui_scale
+    margin = CONTENT_PADDING * ui_scale
+    inset = 0.5 * ui_scale
+
+    # Pre-compute all repeated edge coordinates once
+    x_margin = map_x + margin
+    y_margin = map_y + margin
+    w_bar = map_w - 2.0 * margin
+    h_bar = map_h - 2.0 * margin
+    x_right = map_x + map_w - inset - thickness
+    y_top = map_y + map_h - inset - thickness
+
+    # (x, y, w, h) for each side; only drawn when color is present
+    edges: dict[str, tuple[float, float, float, float]] = {
+        "top": (x_margin, y_top, w_bar, thickness),
+        "bottom": (x_margin, map_y, w_bar, thickness),
+        "left": (map_x, y_margin, thickness, h_bar),
+        "right": (x_right, y_margin, thickness, h_bar),
+    }
+
+    for side, rect in edges.items():
+        if (fill_color := side_colors.get(side)) is not None:
+            _draw_filled_rounded_rect(*rect, 0, fill_color, mvp=mvp)
+
+
 def _draw_moving_border(
     map_x,
     map_y,
@@ -341,14 +397,10 @@ def _draw_moving_border(
     position,
     mvp: Any = None,
 ):
-    border_width = 1.5 * ui_scale
     border_color = _alpha_mul(colors["background_border"], master_alpha)
 
     if moving:
-        _draw_filled_rounded_rect(
-            map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.4 * master_alpha), mvp=mvp
-        )
-        _draw_rounded_rect_border(map_x, map_y, map_w, map_h, panel_roundness, border_color, border_width, mvp=mvp)
+        _draw_moving_panel(map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, mvp=mvp)
     else:
         if not hovered_minimap:
             border_color = _alpha_mul(border_color, 0.2 * master_alpha)
@@ -356,39 +408,7 @@ def _draw_moving_border(
 
     if snapped and (snap_sides := _snap_sides_for(position)):
         snap_color = _alpha_mul(colors["regular_selected"], master_alpha)
-        side_colors = {side: snap_color for side in snap_sides}
-
-        if not side_colors:
-            return
-
-        thickness = border_width
-        margin = CONTENT_PADDING * ui_scale
-        inset = 0.5 * ui_scale
-        radius = 0
-
-        # Pre-compute all repeated edge coordinates once
-        x_inner = map_x
-        y_inner = map_y
-        x_margin = map_x + margin
-        y_margin = map_y + margin
-        w_pill = map_w - 2.0 * margin
-        h_pill = map_h - 2.0 * margin
-        x_right = map_x + map_w - inset - thickness
-        y_top = map_y + map_h - inset - thickness
-
-        # (x, y, w, h) for each side; only drawn when color is present
-        edges: dict[str, tuple[float, float, float, float]] = {
-            "top": (x_margin, y_top, w_pill, thickness),
-            "bottom": (x_margin, y_inner, w_pill, thickness),
-            "left": (x_inner, y_margin, thickness, h_pill),
-            "right": (x_right, y_margin, thickness, h_pill),
-        }
-
-        for side, rect in edges.items():
-            fill_color = side_colors.get(side)
-            if fill_color is not None:
-                # _draw_divider(*rect, radius, fill_color, border_color, border_width, mvp=mvp)
-                _draw_filled_rounded_rect(*rect, radius, fill_color, mvp)
+        _draw_edge_bars(map_x, map_y, map_w, map_h, {side: snap_color for side in snap_sides}, ui_scale, mvp=mvp)
 
 
 def _draw_resize_handles(
@@ -413,11 +433,13 @@ def _draw_resize_handles(
 
     color_base = _alpha_mul(colors["regular_text_selected"], 0.5 * master_alpha)
     color_warn = _alpha_mul(colors["regular_selected"], master_alpha)
-    thickness = 3.0 * ui_scale
-
-    _draw_filled_rounded_rect(map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.2 * master_alpha), mvp=mvp)
+    thickness = 2.0 * ui_scale
 
     if resize_handle == ResizeHandle.LIST:
+        _draw_filled_rounded_rect(
+            map_x, map_y, map_w, map_h, panel_roundness * 1.2, (0, 0, 0, 0.2 * master_alpha), mvp=mvp
+        )
+
         list_state = state.list
         zone_rect = list_state.list_zone_rect
 
@@ -436,11 +458,14 @@ def _draw_resize_handles(
         else:  # LEFT
             view = state.view
             zone_right = view.rect[0] + view.inner_padding + list_state.list_width - 2.0 * ui_scale
-            x, y = round(zone_right + ELEMENT_GAP * half_scale - half_handle), zone_y
+            x, y = round(zone_right + 1 + ELEMENT_GAP * half_scale - half_handle), zone_y
             w, h = thickness, zone_h
 
         _draw_pill(x, y, w, h, fill_color, mvp=mvp)
         return
+
+    # Same fill and border as the moving indicator
+    _draw_moving_panel(map_x, map_y, map_w, map_h, panel_roundness, colors, master_alpha, ui_scale, mvp=mvp)
 
     # Determine which edges to highlight
     width_side = height_side = None
@@ -459,28 +484,7 @@ def _draw_resize_handles(
     if height_side:
         active_sides[height_side] = color_warn if height_clamped else color_base
 
-    margin = CONTENT_PADDING * ui_scale
-    inset = 2.0 * ui_scale
-
-    x_inner = map_x + inset
-    y_inner = map_y + inset
-    x_margin = map_x + margin
-    y_margin = map_y + margin
-    w_pill = map_w - 2.0 * margin
-    h_pill = map_h - 2.0 * margin
-    x_right = map_x + map_w - inset - thickness
-    y_top = map_y + map_h - inset - thickness
-
-    edges = {
-        "top": (x_margin, y_top, w_pill, thickness),
-        "bottom": (x_margin, y_inner, w_pill, thickness),
-        "left": (x_inner, y_margin, thickness, h_pill),
-        "right": (x_right, y_margin, thickness, h_pill),
-    }
-
-    for side, rect in edges.items():
-        if (fill_color := active_sides.get(side)) is not None:
-            _draw_pill(*rect, fill_color, mvp=mvp)
+    _draw_edge_bars(map_x, map_y, map_w, map_h, active_sides, ui_scale, mvp=mvp)
 
 
 def _draw_viewport_overlay(
@@ -1027,10 +1031,6 @@ def draw_minimap() -> None:
             settings, state, map_x, map_y, map_w, map_h, padding, colors, master_alpha, ui_scale, mvp=base_mvp
         )
 
-        _draw_resize_handles(
-            map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, panel_roundness, state, mvp=base_mvp
-        )
-
         dragging = (
             state.view.moving
             or state.interaction.pressed
@@ -1053,6 +1053,9 @@ def draw_minimap() -> None:
             hovered_minimap,
             settings.current_position,
             mvp=base_mvp,
+        )
+        _draw_resize_handles(
+            map_x, map_y, map_w, map_h, colors, master_alpha, ui_scale, panel_roundness, state, mvp=base_mvp
         )
         if state.buttons.pressed_button_id == "DRAG" and "DRAG" in button_layout.rects:
             # The moving overlay above smothers the grip's pressed fill, so
