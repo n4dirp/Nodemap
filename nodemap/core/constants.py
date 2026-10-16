@@ -146,6 +146,8 @@ INERTIA_PAN_DECAY: float = 0.85
 # ---------------------------------------------------------------------------
 FONT_SIZE: int = 11
 BUTTON_SIZE: int = 20
+# Drawn glyph extent for the 32px button icon PNGs, in ui_scale units.
+BUTTON_ICON_SIZE: int = 16
 BUTTON_MARGIN: int = 0
 BUTTON_HOVER_ALPHA: float = 0.05
 

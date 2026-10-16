@@ -558,7 +558,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         description="Font size for the node-type list entries (pixels)",
         default=11,
         min=8,
-        max=20,
+        max=15,
         update=_update_invalidate_all,
     )
 

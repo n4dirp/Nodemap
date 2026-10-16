@@ -194,6 +194,7 @@ class RenderCache:
     list_effective_expanded: set = field(default_factory=set)
     list_swatches_batch: Any = None
     list_swatches_border_batch: Any = None
+    list_chevrons: tuple = ()
     batch_key: Any = None
     batch_scale: float = 1.0
     batch_anchor: Vec2 = (0.0, 0.0)
@@ -227,6 +228,7 @@ class RenderCache:
         "list_filtered_children",
         "list_swatches_batch",
         "list_swatches_border_batch",
+        "list_chevrons",
     )
 
     def _reset_fields(self, field_names: tuple[str, ...]) -> None:

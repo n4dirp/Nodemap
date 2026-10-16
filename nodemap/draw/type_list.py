@@ -8,9 +8,9 @@ from typing import Any
 import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
-from mathutils import Matrix
 
 from ..core.constants import (
+    BUTTON_ICON_SIZE,
     BUTTON_SIZE,
     CONTENT_PADDING,
     ELEMENT_GAP,
@@ -51,10 +51,11 @@ from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_icon_batch,
     _draw_rounded_rect_border,
+    _draw_tinted_image,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
-    _rects_to_verts,
 )
+from .icon_textures import _get_chevron_texture, _get_filter_texture
 from .scrollbar import _draw_list_scrollbar_core, _scrollbar_thickness
 
 _DEFAULT_ENTRY = ("", 0.0, 1)
@@ -397,7 +398,7 @@ def _bake_list_glyph_batch(
     rows: tuple,
     entry_map: dict,
 ) -> None:
-    """Bake static swatches and expand chevrons into one batched rect pass."""
+    """Bake static swatches into one batched rect pass and record chevron slots."""
     tree_data = state.tree_data() or {}
     type_colors = tree_data.get("type_colors") or {}
     type_node_colors = tree_data.get("type_node_colors") or {}
@@ -419,9 +420,10 @@ def _bake_list_glyph_batch(
     icon_col_x = swatch + swatch_gap
     swatch_col_x = icon_col_x if show_type_colors else 0.0
 
-    chevron_color = _srgb_to_linear(_alpha_mul(colors["outliner_text"], 0.8 * master_alpha))
     swatch_border_color = _srgb_to_linear(_alpha_mul(colors["node_outline"], 0.5 * master_alpha))
     swatch_border_w = 0.25 * ui_scale
+
+    chevrons: list[tuple[float, float, bool]] = []
 
     pos: list = []
     uv: list = []
@@ -471,62 +473,12 @@ def _bake_list_glyph_batch(
 
         b_quads += 1
 
-    def _push_rotated_bar(matrix, arm: float, bar_thickness: float) -> None:
-        nonlocal quads
-
-        half_w = (arm + bar_thickness / 2.0) / 2.0
-        half_h = bar_thickness / 2.0
-
-        local = (
-            (-arm, -half_h),
-            (bar_thickness / 2.0, -half_h),
-            (bar_thickness / 2.0, half_h),
-            (-arm, half_h),
-        )
-
-        uvs = (
-            (-half_w, -half_h),
-            (half_w, -half_h),
-            (half_w, half_h),
-            (-half_w, half_h),
-        )
-
-        for (lx, ly), (ux, uy) in zip(local, uvs):
-            pos.append(
-                (
-                    matrix[0][0] * lx + matrix[0][1] * ly + matrix[0][3],
-                    matrix[1][0] * lx + matrix[1][1] * ly + matrix[1][3],
-                    0.0,
-                )
-            )
-            uv.append((ux, uy))
-            half_size.append((half_w, half_h))
-            radius.append(half_h)
-            vertex_color.append(chevron_color)
-
-        quads += 1
-
     for kind, label, node_name, local_y in rows:
         x = pad_x
 
         if kind == _ROW_HEADER:
             if entry_map.get(label, _DEFAULT_ENTRY)[2] > 1:
-                bar_thickness = max(1.0, 1.2 * ui_scale)
-                arm = swatch * 0.6
-
-                cx = pad_x + swatch / 2.0
-                cy = local_y - row_h / 2.0
-
-                base_angle = -90.0 if label in expanded else 0.0
-                offset_x = (arm * math.cos(math.radians(45.0))) / 2.0
-
-                base_rot = Matrix.Rotation(math.radians(base_angle), 4, "Z")
-                center = Matrix.Translation((cx, cy, 0.0))
-                offset = Matrix.Translation((offset_x, 0.0, 0.0))
-
-                for sign in (-1, 1):
-                    arm_rot = Matrix.Rotation(math.radians(sign * 45.0), 4, "Z")
-                    _push_rotated_bar(center @ base_rot @ offset @ arm_rot, arm, bar_thickness)
+                chevrons.append((pad_x + swatch / 2.0, local_y - row_h / 2.0, label in expanded))
 
             if show_type_colors:
                 header_color = _header_type_color(
@@ -583,6 +535,8 @@ def _bake_list_glyph_batch(
                     swatch_border_color,
                 )
 
+    state.cache.list_chevrons = tuple(chevrons)
+
     if quads == 0:
         state.cache.list_swatches_batch = None
         return
@@ -619,7 +573,7 @@ def _bake_list_glyph_batch(
 
 
 def _draw_list_glyph_batch(state: MinimapState, zone_x: float, view_y: float, h_scroll: float = 0.0) -> None:
-    """Draw the baked swatch/chevron batch under a `(zone_x, view_y)` translate."""
+    """Draw the baked swatch batch under a `(zone_x, view_y)` translate."""
     batch = state.cache.list_swatches_batch
     border_batch = state.cache.list_swatches_border_batch
     if batch is None and border_batch is None:
@@ -642,6 +596,37 @@ def _draw_list_glyph_batch(state: MinimapState, zone_x: float, view_y: float, h_
             border_shader.bind()
             border_shader.uniform_float("ModelViewProjectionMatrix", mvp)
             border_batch.draw(border_shader)
+    finally:
+        gpu.matrix.pop()
+
+
+def _draw_list_chevrons(
+    state: MinimapState,
+    zone_x: float,
+    view_y: float,
+    h_scroll: float,
+    color,
+    ui_scale: float,
+) -> None:
+    """Draw tinted expand/collapse icon textures at the baked chevron slots."""
+    chevrons = state.cache.list_chevrons
+    if not chevrons:
+        return
+
+    draw_size = BUTTON_ICON_SIZE * ui_scale
+    half_draw = draw_size / 2.0
+
+    gpu.matrix.push()
+    try:
+        gpu.matrix.translate((zone_x - h_scroll, view_y))
+
+        mvp = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+
+        for cx, cy, is_expanded in chevrons:
+            texture = _get_chevron_texture(is_expanded)
+            if texture is None:
+                continue
+            _draw_tinted_image(cx - half_draw, cy - half_draw, draw_size, texture, color, mvp=mvp)
     finally:
         gpu.matrix.pop()
 
@@ -890,24 +875,11 @@ def _draw_search_filter_icon(
     color,
     ui_scale: float,
 ) -> None:
-    """Minimal filter icon: three centered bars (wide, medium, narrow)."""
-    cx = size / 2
-    cy = size / 2
-
-    row_y = max(2, round(size / 3))
-    half_top = max(2, round(size * 0.42))
-    half_mid = max(1, round(size * 0.25))
-    half_bot = max(1, round(size * 0.083))
-    stroke = max(1.0, round(0.8 * ui_scale))
-    r = stroke / 2
-
-    rects = (
-        (cx - half_top, cy + row_y - r, half_top * 2, stroke, r),
-        (cx - half_mid, cy - r, half_mid * 2, stroke, r),
-        (cx - half_bot, cy - row_y - r, half_bot * 2, stroke, r),
-    )
-    pos, uv, hs, radii = _rects_to_verts(rects)
-    _draw_icon_batch(("FILTER", size, ui_scale), pos, uv, hs, radii, x, y, color)
+    """Draw the search filter icon texture tinted with *color*."""
+    texture = _get_filter_texture()
+    if texture is None:
+        return
+    _draw_tinted_image(x, y, size, texture, color)
 
 
 # ---------------------------------------------------------------------------
@@ -1472,13 +1444,21 @@ def _draw_list_text(
     entry_map: dict,
     mvp: Any = None,
 ) -> None:
-    """Draw glyph batch, row labels, counts, and search UI text."""
+    """Draw glyph batch, chevrons, row labels, counts, and search UI text."""
     h_scroll = geo.get("h_scroll", 0.0)
     _draw_list_glyph_batch(
         state,
         geo["zone_x"],
         round(geo["view_top"] + state.list.scroll),
         h_scroll,
+    )
+    _draw_list_chevrons(
+        state,
+        geo["zone_x"],
+        round(geo["view_top"] + state.list.scroll),
+        h_scroll,
+        _alpha_mul(colors["outliner_text"], 0.8 * master_alpha),
+        ui_scale,
     )
 
     font_id = TYPE_LIST_FONT_ID
@@ -1561,8 +1541,8 @@ def _draw_list_text(
             else _alpha_mul(colors["search_text"], 0.3 * master_alpha)
         )
         icon_color = _alpha_mul(colors["search_text"], master_alpha)
-        icon_size = 10 * ui_scale  # search_draw_h * 1
-        icon_margin = 15 * ui_scale
+        icon_size = BUTTON_ICON_SIZE * ui_scale
+        icon_margin = (BUTTON_ICON_SIZE + 5) * ui_scale
         _draw_search_filter_icon(
             search_text_x,
             search_pill_y + (search_draw_h - icon_size) / 2,
@@ -1597,7 +1577,7 @@ def _draw_list_text(
                 mvp=mvp,
             )
 
-        search_text = search_query if search_query else "Filter"
+        search_text = search_query if search_query else "Search"
 
         blf.clipping(font_id, int(base_text_start_x), clip_top, int(search_text_right), clip_bottom)
         blf.position(font_id, search_text_start_x, search_text_y, 0)

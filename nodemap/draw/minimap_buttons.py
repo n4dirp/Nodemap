@@ -14,6 +14,7 @@ from ..core.buttons import (
 )
 from ..core.constants import (
     BUTTON_HOVER_ALPHA,
+    BUTTON_ICON_SIZE,
     BUTTON_SIZE,
     CONTENT_PADDING,
     ELEMENT_GAP,
@@ -24,11 +25,11 @@ from ..geo.transforms import _get_map_content_rect
 from .gpu_draw import (
     _draw_filled_rounded_rect,
     _draw_filled_rounded_rect_varying,
-    _draw_icon_batch,
     _draw_rounded_rect_border,
     _draw_rounded_rect_border_varying_sides,
-    _rects_to_verts,
+    _draw_tinted_image,
 )
+from .icon_textures import _get_button_texture
 
 
 @dataclass
@@ -60,114 +61,16 @@ class ButtonTheme:
     regular_text_selected: tuple
 
 
-def _paint_frame_all_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
-    """Draw the frame-all corner brackets icon."""
-    inset = 5 * ui_scale
-    t = max(1, int(1.5 * ui_scale))
-    arm = size * 0.15
-    r = t * 0.5
-
-    rects = (
-        (inset, inset, arm, t, r),
-        (inset, inset, t, arm, r),
-        (size - inset - arm, inset, arm, t, r),
-        (size - inset - t, inset, t, arm, r),
-        (inset, size - inset - t, arm, t, r),
-        (inset, size - inset - arm, t, arm, r),
-        (size - inset - arm, size - inset - t, arm, t, r),
-        (size - inset - t, size - inset - arm, t, arm, r),
-    )
-    pos, uv, hs, radii = _rects_to_verts(rects)
-    _draw_icon_batch(("ALL", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
-
-
-def _paint_frame_view_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
-    """Draw the frame-view viewport rectangle icon."""
-    inset = 5 * ui_scale
-    border_thickness = max(4, int(4.0 * ui_scale))
-    _draw_rounded_rect_border(
-        round(x + inset),
-        round(y + inset),
-        round(size - 2 * inset),
-        round(size - 2 * inset),
-        border_thickness,
-        color,
-        0.5 * ui_scale,
-        mvp=mvp,
-    )
-
-
-def _paint_frame_selected_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
-    """Draw the frame-selected rails and center box icon."""
-    inset = 5 * ui_scale
-    t = max(1, int(1.5 * ui_scale))
-    arm = size * 0.15
-    r = t * 0.5
-    rail_h = size - 2 * inset
-    box = 2 * ui_scale
-    box_off = (size - box) / 2
-
-    rects = (
-        (inset, inset, t, rail_h, r),
-        (size - inset - t, inset, t, rail_h, r),
-        (inset, inset, arm, t, r),
-        (size - inset - arm, inset, arm, t, r),
-        (inset, size - inset - t, arm, t, r),
-        (size - inset - arm, size - inset - t, arm, t, r),
-        (box_off, box_off, box, box, 1.5 * ui_scale),
-    )
-    pos, uv, hs, radii = _rects_to_verts(rects)
-    _draw_icon_batch(("SELECTED", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
-
-
-def _paint_list_toggle_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
-    """Draw the list-toggle icon: three horizontal bars."""
-    t = max(1, int(1.5 * ui_scale))
-    bar_w = size * 0.5
-    gap = 2.0 * ui_scale
-    bar_x = (size - bar_w) / 2
-    bar_y = (size - (3 * t + 2 * gap)) / 2 - 0.5
-    r = t * 0.5
-
-    rects = (
-        (bar_x, bar_y, bar_w, t, r),
-        (bar_x, bar_y + t + gap, bar_w, t, r),
-        (bar_x, bar_y + 2 * (t + gap), bar_w, t, r),
-    )
-    pos, uv, hs, radii = _rects_to_verts(rects)
-    _draw_icon_batch(("LIST", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
-
-
-def _paint_grip_icon(x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None) -> None:
-    """Draw a move grip icon: two rows of four dots (like a drag handle)."""
-    dot = 1.0 * ui_scale
-    gap = 2.0 * ui_scale
-    col_gap = 2.0 * ui_scale
-    group_w = 4 * dot + 3 * col_gap
-    group_h = 2 * dot + gap
-    gx = round((size - group_w) / 2)
-    gy = round((size - group_h) / 2)
-    r = dot / 2
-
-    rects = []
-    for column in range(4):
-        for row in range(2):
-            dx = round(gx + column * (dot + col_gap))
-            dy = round(gy + row * (dot + gap))
-            rects.append((dx, dy, dot, dot, r))
-    pos, uv, hs, radii = _rects_to_verts(tuple(rects))
-    _draw_icon_batch(("DRAG", size, ui_scale), pos, uv, hs, radii, x, y, color, mvp=mvp)
-
-
-_ICONS = {
-    "ALL": _paint_frame_all_icon,
-    "VIEW": _paint_frame_view_icon,
-    "SELECTED": _paint_frame_selected_icon,
-    "LIST": _paint_list_toggle_icon,
-    "DRAG": _paint_grip_icon,
-}
-
-assert all(button_def.icon in _ICONS for button_def in BUTTONS.values()), "Button registry icon missing a painter"
+def _paint_button_icon(
+    button_id: str, x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None
+) -> None:
+    """Paint the tinted PNG glyph for a button id, centered in its rect."""
+    texture = _get_button_texture(BUTTONS[button_id].icon)
+    if texture is None:
+        return
+    draw_size = BUTTON_ICON_SIZE * ui_scale
+    offset = (size - draw_size) / 2.0
+    _draw_tinted_image(x + offset, y + offset, draw_size, texture, color, mvp=mvp)
 
 
 def _row_geometry(
@@ -287,13 +190,6 @@ def _resolve_button_theme(colors: dict, master_alpha: float, ui_scale: float) ->
         regular_text=_alpha_mul(colors["regular_text"], master_alpha),
         regular_text_selected=_alpha_mul(colors["regular_text_selected"], master_alpha),
     )
-
-
-def _paint_button_icon(
-    button_id: str, x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None
-) -> None:
-    """Paint the glyph for a button id at its rect origin."""
-    _ICONS[BUTTONS[button_id].icon](x, y, size, color, ui_scale, mvp=mvp)
 
 
 def _paint_buttons(

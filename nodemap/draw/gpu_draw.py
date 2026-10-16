@@ -29,6 +29,7 @@ _BATCH_RECT_BORDER_SHADER: gpu.types.GPUShader | None = None
 _BATCH_NOODLE_SHADER: gpu.types.GPUShader | None = None
 _BATCH_POLY_SHADER: gpu.types.GPUShader | None = None
 _BATCH_ICON_SHADER: gpu.types.GPUShader | None = None
+_TINTED_IMAGE_SHADER: gpu.types.GPUShader | None = None
 _LINE_STRIP_SHADER: gpu.types.GPUShader | None = None
 
 _BATCH_CACHE: dict[tuple, Any] = {}
@@ -318,6 +319,20 @@ void main() {
     float dist = sdRoundRect(vUv, vHalfSize, vRadius);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = vec4(color.rgb, color.a * alpha);
+}
+"""
+
+_TINTED_IMAGE_VERT_SRC = """
+void main() {
+    vUv = uv;
+    gl_Position = ModelViewProjectionMatrix * vec4(pos, 1.0);
+}
+"""
+
+_TINTED_IMAGE_FRAG_SRC = """
+void main() {
+    float icon_alpha = texture(image, vUv).a;
+    fragColor = vec4(color.rgb, color.a * icon_alpha);
 }
 """
 
@@ -712,6 +727,27 @@ def _get_batch_icon_shader() -> gpu.types.GPUShader:
         _BATCH_ICON_SHADER = gpu.shader.create_from_info(info)
         del vert_out, info
     return _BATCH_ICON_SHADER
+
+
+def _get_tinted_image_shader() -> gpu.types.GPUShader:
+    """Return a texture-sampling shader that tints white-alpha icons with a uniform color."""
+    global _TINTED_IMAGE_SHADER
+    if _TINTED_IMAGE_SHADER is None:
+        vert_out = GPUStageInterfaceInfo("tinted_image_iface")
+        vert_out.smooth("VEC2", "vUv")
+        info = GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "color")
+        info.sampler(0, "FLOAT_2D", "image")
+        info.vertex_in(0, "VEC3", "pos")
+        info.vertex_in(1, "VEC2", "uv")
+        info.vertex_out(vert_out)
+        info.fragment_out(0, "VEC4", "fragColor")
+        info.vertex_source(_TINTED_IMAGE_VERT_SRC)
+        info.fragment_source(_TINTED_IMAGE_FRAG_SRC)
+        _TINTED_IMAGE_SHADER = gpu.shader.create_from_info(info)
+        del vert_out, info
+    return _TINTED_IMAGE_SHADER
 
 
 def _get_batch_noodle_shader() -> gpu.types.GPUShader:
@@ -1493,4 +1529,39 @@ def _draw_icon_batch(
     shader.bind()
     shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x, y, mvp))
     shader.uniform_float("color", _srgb_to_linear(color))
+    batch.draw(shader)
+
+
+_TINTED_IMAGE_BATCH_CACHE: dict[float, Any] = {}
+
+
+def _draw_tinted_image(x: float, y: float, draw_size: float, texture: Any, color, mvp: Any = None) -> None:
+    """Draw a ``draw_size`` square icon texture with its lower-left corner at ``(x, y)``.
+
+    The source art is white with alpha; the texture alpha masks the uniform
+    *color* so theme tints match the previous vector glyphs.
+    """
+    if draw_size <= 0 or texture is None:
+        return
+    shader = _get_tinted_image_shader()
+    key = round(float(draw_size), 3)
+    batch = _TINTED_IMAGE_BATCH_CACHE.get(key)
+    if batch is None:
+        if len(_TINTED_IMAGE_BATCH_CACHE) >= 16:
+            _TINTED_IMAGE_BATCH_CACHE.clear()
+        half = key / 2.0
+        batch = batch_for_shader(
+            shader,
+            "TRIS",
+            {
+                "pos": [(-half, -half, 0.0), (half, -half, 0.0), (half, half, 0.0), (-half, half, 0.0)],
+                "uv": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+            },
+            indices=((0, 1, 2), (2, 3, 0)),
+        )
+        _TINTED_IMAGE_BATCH_CACHE[key] = batch
+    shader.bind()
+    shader.uniform_float("ModelViewProjectionMatrix", _translated_mvp(x + key / 2.0, y + key / 2.0, mvp))
+    shader.uniform_float("color", _srgb_to_linear(color))
+    shader.uniform_sampler("image", texture)
     batch.draw(shader)
