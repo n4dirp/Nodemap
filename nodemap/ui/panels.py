@@ -101,7 +101,7 @@ class NODEMAP_PT_popup(Panel):
                 if body:
                     body.active = settings.show_type_list
                     flow = body.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
-                    flow.prop(settings, "show_search_bar", text="Filter Bar")
+                    flow.prop(settings, "show_search_bar", text="Search Bar")
                     flow.prop(settings, "use_follow_active", text="Follow Active")
                     sub = flow.row(align=True)
                     sub.active = settings.show_node_colors

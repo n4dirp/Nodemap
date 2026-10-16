@@ -24,7 +24,7 @@ BUTTON_FILES: dict[str, str] = {
     "DRAG": "blender_icon_grip.png",
 }
 
-FILTER_FILE = "blender_icon_viewzoom.png"
+SEARCH_FILE = "blender_icon_viewzoom.png"
 
 EXPAND_FILE = "blender_icon_rightarrow.png"
 COLLAPSE_FILE = "blender_icon_downarrow_hlt.png"
@@ -84,9 +84,9 @@ def _get_button_texture(icon: str):
     return _texture_for(filename)
 
 
-def _get_filter_texture():
-    """Return the cached GPU texture for the search filter icon, or None."""
-    return _texture_for(FILTER_FILE)
+def _get_search_texture():
+    """Return the cached GPU texture for the search icon, or None."""
+    return _texture_for(SEARCH_FILE)
 
 
 def _get_chevron_texture(expanded: bool):

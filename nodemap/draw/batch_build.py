@@ -212,7 +212,7 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
     if bx >= ctx.cull_right or bx + node_w <= ctx.cull_left or by >= ctx.cull_top or by + node_h <= ctx.cull_bottom:
         return
 
-    # Under an active search filter, non-matching nodes keep only their
+    # Under an active search, non-matching nodes keep only their
     # solid fill — borders, labels, highlights, sockets, and wires are
     # hidden so the map mirrors the filtered list.
     is_filtered_out = ctx.filter_names is not None and info.get("name") not in ctx.filter_names
@@ -766,7 +766,7 @@ def _ensure_minimap_batches(
     node_infos = tree_data["node_infos"]
     frame_depths = tree_data.get("frame_depths") or _compute_frame_depths(node_infos)
     frame_label_entries: list[dict] = []
-    # Active search filter: node names to keep visible, or None when the
+    # Active search: node names to keep visible, or None when the
     # query is empty or the type list is hidden (draw everything). Mirrors
     # the type list's own matching.
     filter_names = (
@@ -1058,8 +1058,8 @@ def _rebuild_wire_marker_batches(
     wire_batches: list[tuple] = []
     per_color_wires: dict[Any, list[tuple[float, float, float, float, float, float, float, float]]] = {}
 
-    # Under an active search filter, resolve wires from raw links so a link
-    # stays visible while either endpoint node matches; with no filter the
+    # Under an active search, resolve wires from raw links so a link
+    # stays visible while either endpoint node matches; with no search the
     # pre-grouped per-color wire_items are used verbatim.
     if filter_names is not None:
         raw_links = tree_data.get("raw_links") or []
@@ -1143,7 +1143,7 @@ def _rebuild_wire_marker_batches(
     # so all marker colors plus the optional border underlay share a draw.
     if filter_names is not None:
         # Rebuild markers from node infos so group nodes hidden by the
-        # search filter drop their underline too (markers carry no names).
+        # search drop their underline too (markers carry no names).
         grouped_markers: dict = {}
         for info in tree_data.get("node_infos") or []:
             if info.get("name") not in filter_names:

@@ -17,7 +17,7 @@ def _draw_list_toggles(layout, settings) -> None:
     options = layout.column()
     options.active = settings.show_type_list
     options.prop(settings, "use_group_by_type", text="Group by Type")
-    options.prop(settings, "show_search_bar", text="Filter Bar")
+    options.prop(settings, "show_search_bar", text="Search Bar")
     options.prop(settings, "use_follow_active", text="Follow Active")
     options.prop(settings, "show_type_colors", text="Type Colors")
 

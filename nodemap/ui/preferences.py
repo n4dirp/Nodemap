@@ -595,8 +595,8 @@ class NODEMAP_PG_settings(PropertyGroup):
     )
 
     show_search_bar: BoolProperty(
-        name="Filter Bar",
-        description="Show the filter field at the top of the node-type list",
+        name="Search Bar",
+        description="Show the search field at the top of the node-type list",
         default=True,
         update=_update_invalidate_all,
     )
@@ -853,7 +853,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.row().prop(settings, "type_list_position", text="Position", expand=True)
         col.prop(settings, "type_list_font_size", text="Font Size")
         row = col.row()
-        row.prop(settings, "show_search_bar", text="Filter Bar")
+        row.prop(settings, "show_search_bar", text="Search Bar")
         sub = row.row()
         sub.active = settings.show_node_colors
         sub.prop(settings, "show_type_colors", text="Type Colors")

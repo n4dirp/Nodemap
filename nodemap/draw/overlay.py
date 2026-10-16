@@ -995,7 +995,7 @@ def draw_minimap() -> None:
     _paint_buttons(button_layout, button_theme, state, settings, ui_scale, master_alpha, mvp=base_mvp)
 
     # Match the node search highlight gate in _ensure_minimap_batches: the
-    # filter is active while the list is shown and the query is non-empty.
+    # search is active while the list is shown and the query is non-empty.
     shown_count = content_count
     if settings.show_type_list and state.list.search_query.strip():
         tree_data = state.tree_data() or {}

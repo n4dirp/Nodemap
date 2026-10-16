@@ -548,7 +548,7 @@ class NODEMAP_OT_navigate(Operator):
     _list_search_clear_pressed: bool = False
     _search_blur_consumed: bool = False
     _context_menu_button: str | None = None
-    # Right-click armed on the filter (search) bar: opens the list button menu.
+    # Right-click armed on the search bar: opens the list button menu.
     _context_menu_search: bool = False
     _list_mmb_dragging: bool = False
     _list_mmb_drag_start: tuple[int, int] | None = None
@@ -694,7 +694,7 @@ class NODEMAP_OT_navigate(Operator):
         if state.list.search_focused and _is_search_keyboard_event(event):
             return self._handle_list_search(context, event)
 
-        # Second Esc over the minimap clears the filter text. The first Esc
+        # Second Esc over the minimap clears the search text. The first Esc
         # (handled above) only blurs and arms this; repeats of a held key are
         # swallowed without clearing so clearing takes a distinct press.
         if (
@@ -713,7 +713,7 @@ class NODEMAP_OT_navigate(Operator):
             return {"RUNNING_MODAL"}
 
         # Ctrl+F over the minimap: reveal the type list (if hidden) and focus
-        # its filter field. Ignored when the filter bar is hidden so the key
+        # its search field. Ignored when the search bar is hidden so the key
         # passes through to the editor.
         if (
             event.type == "F"
@@ -731,7 +731,7 @@ class NODEMAP_OT_navigate(Operator):
             state.list.search_esc_armed = False
             _clear_search_stale_hover(state)
             # Entering text-input mode: show the I-beam so the pointer
-            # indicates typing, like clicking the filter field.
+            # indicates typing, like clicking the search field.
             context.window.cursor_modal_set("TEXT")
             self._last_cursor = "TEXT"
             self._redraw_ui()
@@ -954,7 +954,7 @@ class NODEMAP_OT_navigate(Operator):
         Typed characters (letters, digits, and a few common separators) are
         inserted at the caret; Left/Right/Home/End move the caret, Backspace
         deletes before it and Delete after it. Enter blurs (keeping the
-        filter); the first Esc blurs (keeping the filter) and arms clearing,
+        search); the first Esc blurs (keeping the search) and arms clearing,
         so a second Esc over the minimap clears the query. Every other event
         is swallowed so it never reaches the Node Editor.
         """

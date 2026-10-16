@@ -55,7 +55,7 @@ from .gpu_draw import (
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
-from .icon_textures import _get_chevron_texture, _get_filter_texture
+from .icon_textures import _get_chevron_texture, _get_search_texture
 from .scrollbar import _draw_list_scrollbar_core, _scrollbar_thickness
 
 _DEFAULT_ENTRY = ("", 0.0, 1)
@@ -303,7 +303,7 @@ def _build_type_list_cache(
     effective_expanded = effective_expanded or set()
     filtered_children = filtered_children or {}
 
-    # While searching, preserve filter/match order.
+    # While searching, preserve search/match order.
     if not state.list.search_query.strip():
         if settings.type_list_sort == "NAME":
             visible.sort(key=lambda label_count: label_count[0].lower())
@@ -868,15 +868,15 @@ def _draw_search_clear_button(
     )
 
 
-def _draw_search_filter_icon(
+def _draw_search_icon(
     x: float,
     y: float,
     size: float,
     color,
     ui_scale: float,
 ) -> None:
-    """Draw the search filter icon texture tinted with *color*."""
-    texture = _get_filter_texture()
+    """Draw the search icon texture tinted with *color*."""
+    texture = _get_search_texture()
     if texture is None:
         return
     _draw_tinted_image(x, y, size, texture, color)
@@ -1543,7 +1543,7 @@ def _draw_list_text(
         icon_color = _alpha_mul(colors["search_text"], master_alpha)
         icon_size = BUTTON_ICON_SIZE * ui_scale
         icon_margin = (BUTTON_ICON_SIZE + 5) * ui_scale
-        _draw_search_filter_icon(
+        _draw_search_icon(
             search_text_x,
             search_pill_y + (search_draw_h - icon_size) / 2,
             icon_size,
