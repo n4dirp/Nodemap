@@ -1538,7 +1538,7 @@ def _draw_list_text(
         search_text_color = (
             _alpha_mul(colors["search_text_selected"], master_alpha)
             if state.list.search_focused and search_query
-            else _alpha_mul(colors["search_text"], 0.3 * master_alpha)
+            else _alpha_mul(colors["search_text"], 0.1 * master_alpha)
         )
         icon_color = _alpha_mul(colors["search_text"], master_alpha)
         icon_size = BUTTON_ICON_SIZE * ui_scale
