@@ -61,18 +61,28 @@ def redraw_ui(mode: str = "VIEW_3D", area_pointer: int | None = None) -> None:
 
 
 def _get_ui_scale() -> float:
-    """Return the Blender UI scale factor from preferences."""
-    return float(bpy.context.preferences.system.ui_scale)
+    """Return the Blender UI scale factor, defaulting to 1.0 when unavailable.
+
+    The preference reports 0 in background/headless contexts, where there is no
+    window to supply a real scale.
+    """
+    return float(bpy.context.preferences.system.ui_scale) or 1.0
+
+
+def _reduce_motion_enabled() -> bool:
+    """Return True when the Reduce Motion accessibility option is on (Blender 5.0+)."""
+    view = getattr(bpy.context.preferences, "view", None)
+    return bool(getattr(view, "use_reduce_motion", False))
 
 
 def _get_node_dims(node: bpy.types.Node, ui_scale: float | None = None) -> tuple[float, float]:
     """Return width and height ensuring positive float values."""
     if ui_scale is None:
         ui_scale = _get_ui_scale()
-    if getattr(node, "hide", False):
+    if node.hide:
         return 100.0, 30.0
-    dims = getattr(node, "dimensions", None)
-    if dims is not None and len(dims) >= 2:
+    dims = node.dimensions
+    if len(dims) >= 2:
         try:
             node_w = abs(float(dims[0]))
             if node_w == 0:
@@ -82,12 +92,12 @@ def _get_node_dims(node: bpy.types.Node, ui_scale: float | None = None) -> tuple
         try:
             node_h = abs(float(dims[1]))
             if node_h == 0:
-                node_h = abs(float(getattr(node, "height", 30.0)))
+                node_h = abs(float(node.height))
         except (TypeError, ValueError, IndexError):
-            node_h = abs(float(getattr(node, "height", 30.0)))
+            node_h = abs(float(node.height))
     else:
         node_w = abs(float(node.width))
-        node_h = abs(float(getattr(node, "height", 30.0)))
+        node_h = abs(float(node.height))
 
     return max(node_w / ui_scale, 5.0), max(node_h / ui_scale, 5.0)
 
@@ -325,11 +335,8 @@ def start_list_width_animation(minimap_state, settings) -> None:
     measurable type stats only exist once the pending tree compile lands.
     Skipped when Reduce Motion is enabled so the zone snaps instantly.
     """
-    try:
-        if bpy.context.preferences.view.use_reduce_motion:
-            return
-    except AttributeError:
-        pass
+    if _reduce_motion_enabled():
+        return
     if not settings or not settings.use_animations:
         return
     minimap_state.list.anim_active = True
@@ -400,7 +407,7 @@ def _get_tree_snapshot(
             height_raw = abs(dims[1])
             dimensions_width = abs(dims[0])
         except (AttributeError, TypeError, IndexError):
-            height_raw = abs(getattr(node, "height", 30.0))
+            height_raw = abs(node.height)
             dimensions_width = width_rna
         height_sum += height_raw
 
@@ -411,7 +418,7 @@ def _get_tree_snapshot(
             bounds_w, bounds_h = 100.0, 30.0
         else:
             bounds_w = dimensions_width if dimensions_width > 0 else width_rna
-            bounds_h = height_raw if height_raw > 0 else abs(getattr(node, "height", 30.0))
+            bounds_h = height_raw if height_raw > 0 else abs(node.height)
             bounds_w = max(bounds_w / ui_scale, 5.0)
             bounds_h = max(bounds_h / ui_scale, 5.0)
 

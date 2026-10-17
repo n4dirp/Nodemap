@@ -120,11 +120,27 @@ def _theme_rgba(path: str, default: tuple[float, ...]) -> tuple[float, ...]:
     return result
 
 
+# Blender tints non-frame node headers with the node backdrop up to 4.5; 5.0
+# draws the category color directly and ships a desaturated default palette.
+_HEADER_BLENDS_BACKDROP = bpy.app.version < (5, 0, 0)
+
+
+def _node_header_color(color: tuple[float, ...], backdrop: tuple[float, ...]) -> tuple[float, ...]:
+    """Return the node category color as Blender tints it in the node header.
+
+    Versions before Blender 5.0 draw the header as 60% node backdrop and 40%
+    category color; 5.0 and later draw the category color directly.
+    """
+    if not _HEADER_BLENDS_BACKDROP:
+        return color
+    return tuple(0.6 * back + 0.4 * chan for back, chan in zip(backdrop, color))
+
+
 def _get_node_color(node: bpy.types.Node, fallback_color: tuple[float, ...]) -> tuple[float, ...]:
     """Return the node's custom color, theme-mapped color_tag color, or fallback."""
-    if getattr(node, "use_custom_color", False):
+    if node.use_custom_color:
         return _rgba(node.color, fallback_color[3])
-    color_tag = getattr(node, "color_tag", "NONE")
+    color_tag = node.color_tag
     if color_tag != "NONE":
         mapped_theme_attr = _COLOR_TAG_TO_THEME_ATTR.get(color_tag)
         if mapped_theme_attr:

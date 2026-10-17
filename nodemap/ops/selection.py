@@ -36,10 +36,11 @@ def node_select_location(node) -> tuple[float, float]:
     reuse the minimap hit-test dims so collapsed or never-drawn nodes
     probe inside their actual drawn bounds.
     """
+    location = node.location_absolute
     if node.type == "FRAME":
-        return node.location_absolute.x + 15, node.location_absolute.y - 15
+        return location.x + 15, location.y - 15
     w, h = _get_node_dims(node)
-    return node.location_absolute.x + w / 2.0, node.location_absolute.y - h / 2.0
+    return location.x + w / 2.0, location.y - h / 2.0
 
 
 def node_fallback_location(node) -> tuple[float, float]:
@@ -48,7 +49,8 @@ def node_fallback_location(node) -> tuple[float, float]:
     Falls inside a collapsed node's header strip whatever its drawn label
     width, covering center probes that miss due to stale dimensions.
     """
-    x, y = node.location_absolute.x, node.location_absolute.y
+    location = node.location_absolute
+    x, y = location.x, location.y
     if node.type == "FRAME":
         return x + 15, y - 15
     return x + 10.0, y - 10.0
@@ -104,13 +106,7 @@ def select_node_via_operator(
         keep = None
         if probe_index and extend and tree_nodes:
             keep = {n.name for n in tree_nodes if n.select}
-        kwargs: dict = {"extend": extend}
-        if bpy.app.version >= (3, 0, 0):
-            kwargs["location"] = (proj_x, proj_y)
-            kwargs["deselect_all"] = deselect_all
-        else:
-            kwargs["mouse_x"] = proj_x
-            kwargs["mouse_y"] = proj_y
+        kwargs: dict = {"extend": extend, "location": (proj_x, proj_y), "deselect_all": deselect_all}
         try:
             with op._override_ctx(context):
                 bpy.ops.node.select(**kwargs)

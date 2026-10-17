@@ -152,11 +152,14 @@ float sdRoundRectVarying(vec2 p, vec2 b, vec4 r) {
     vec2 q = abs(p) - b + radius;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
 }
-float sdRoundBoxAniso(vec2 p, vec2 bNeg, vec2 bPos, vec4 radii) {
+// Parameter names must not shadow push-constant names: the Vulkan backend in
+// Blender 5.0 and earlier injects push constants as text defines, so an
+// expanded parameter name corrupts the declaration into invalid syntax.
+float sdRoundBoxAniso(vec2 p, vec2 bNeg, vec2 bPos, vec4 rads) {
     vec2 b = mix(bNeg, bPos, step(0.0, p));
     float radius = mix(
-        mix(radii.w, radii.z, step(0.0, p.x)),
-        mix(radii.x, radii.y, step(0.0, p.x)),
+        mix(rads.w, rads.z, step(0.0, p.x)),
+        mix(rads.x, rads.y, step(0.0, p.x)),
         step(0.0, p.y)
     );
     vec2 q = abs(p) - b + radius;

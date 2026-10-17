@@ -17,6 +17,7 @@ from ..core.state import SharedTreeCache
 from ..core.theme import (
     _COLOR_TAG_TO_THEME_ATTR,
     _alpha_mul,
+    _node_header_color,
     _srgb_to_linear,
     _theme_rgba,
 )
@@ -334,7 +335,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
 
         if is_frame:
             if show_node_colors:
-                if getattr(node, "use_custom_color", False):
+                if node.use_custom_color:
                     custom_color = node.color
                     frame_color = (
                         float(custom_color[0]),
@@ -343,7 +344,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                         colors["node_backdrop"][3],
                     )
                 else:
-                    tag = getattr(node, "color_tag", "NONE")
+                    tag = node.color_tag
                     frame_color = color_tag_cache.get(tag, colors.get("frame_node", colors["node_backdrop"]))
             else:
                 frame_color = colors.get("frame_node", colors["node_backdrop"])
@@ -370,7 +371,7 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                     type_active_label = "Frame"
         else:
             if show_node_colors:
-                if getattr(node, "use_custom_color", False):
+                if node.use_custom_color:
                     custom_color = node.color
                     node_color = (
                         float(custom_color[0]),
@@ -379,8 +380,11 @@ def _build_node_infos(sorted_items, node_data, active_node, colors, settings, ma
                         colors["node_backdrop"][3],
                     )
                 else:
-                    tag = getattr(node, "color_tag", "NONE")
-                    node_color = color_tag_cache.get(tag, colors["node_backdrop"])
+                    tag = node.color_tag
+                    node_color = _node_header_color(
+                        color_tag_cache.get(tag, colors["node_backdrop"]),
+                        colors["node_backdrop"],
+                    )
             else:
                 node_color = colors["node_backdrop"]
             if show_type_list:

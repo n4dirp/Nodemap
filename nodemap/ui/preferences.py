@@ -8,7 +8,7 @@ from bpy.types import AddonPreferences, PropertyGroup
 
 from .. import __package__ as base_package
 from ..core.constants import MIN_MAP_HEIGHT, MIN_MAP_WIDTH, TYPE_LIST_MIN_WIDTH
-from ..core.helpers import get_addon_preferences
+from ..core.helpers import _reduce_motion_enabled, get_addon_preferences
 from ..core.state import _suppress_update
 from .panels import NODEMAP_PT_presets
 
@@ -932,7 +932,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = row.column()
         col.prop(settings, "use_interactive", text="Interactive Map")
         sub = col.column()
-        sub.active = settings.use_interactive and not context.preferences.view.use_reduce_motion
+        sub.active = settings.use_interactive and not _reduce_motion_enabled()
         sub.prop(settings, "use_animations", text="Animations")
         col = row.column()
         col.prop(settings, "use_follow_view", text="Follow View")

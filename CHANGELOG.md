@@ -3,10 +3,12 @@
 ## [Unreleased]
 
 ### Added
-- Added Zone Fills to paint a rounded background behind geometry node zone bodies (simulation, repeat, for-each, and closure), with a Zone Fills toggle in the Objects options
+- Added support for draw Zone Fills (simulation, repeat, for-each, and closure)
 
 ### Changed
-- Updated minimap button icons
+- Updated button icons
+- Require Blender 4.4 or newer
+
 
 ## [2.0.0] - 2026-09-15
 

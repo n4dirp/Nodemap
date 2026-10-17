@@ -11,7 +11,7 @@ import bpy
 
 from .. import __package__ as base_package
 from ..core.constants import INERTIA_PAN_DECAY, PAN_ANIM_INTERVAL, PAN_FRAMES, PAN_MIN_FRAMES
-from ..core.helpers import get_addon_preferences
+from ..core.helpers import _reduce_motion_enabled, get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
 from ..geo.transforms import (
     _clamp_pan_to_viewport,
@@ -491,7 +491,7 @@ class AnimationController:
 
     def _animations_enabled(self, context: Context) -> bool:
         """Return True when animations are allowed by preferences and accessibility."""
-        if context.preferences.view.use_reduce_motion:
+        if _reduce_motion_enabled():
             return False
         return self._settings(context).use_animations
 
