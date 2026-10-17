@@ -104,7 +104,7 @@ BUTTONS: dict[str, ButtonDef] = {
 
 # Order defines the top-edge draw row (left to right), the cull priority when
 # space is tight, and the deterministic paint order.
-BUTTON_ORDER: tuple[str, ...] = ("ALL", "VIEW", "SELECTED", "LIST", "DRAG")
+BUTTON_ORDER: tuple[str, ...] = ("SELECTED", "VIEW", "ALL", "LIST", "DRAG")
 
 # Display order for the Buttons visibility submenu (frame entries
 # most-used-first, unlike the draw row order above).
