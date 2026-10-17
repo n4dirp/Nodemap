@@ -234,6 +234,24 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
+    minimap_width_with_list: IntProperty(
+        name="Size X with List",
+        description="Minimap width in pixels while the type list is open",
+        default=560,
+        min=MIN_MAP_WIDTH,
+        subtype="PIXEL",
+        update=_update_invalidate_batches,
+    )
+
+    minimap_height_with_list: IntProperty(
+        name="Size Y with List",
+        description="Minimap height in pixels while the type list is open",
+        default=124,
+        min=MIN_MAP_HEIGHT,
+        subtype="PIXEL",
+        update=_update_invalidate_batches,
+    )
+
     max_width_percent: IntProperty(
         name="Max Width",
         description="Maximum share of the available width the minimap can occupy",
@@ -783,6 +801,10 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col = group.column(align=True)
         col.prop(settings, "minimap_width", text="Size X")
         col.prop(settings, "minimap_height", text="Y")
+        if settings.show_type_list:
+            col = group.column(align=True)
+            col.prop(settings, "minimap_width_with_list", text="Size X with List")
+            col.prop(settings, "minimap_height_with_list", text="Y")
         col = group.column(align=True)
         col.prop(settings, "max_width_percent", text="Max Width")
         col.prop(settings, "max_height_percent", text="Max Height")

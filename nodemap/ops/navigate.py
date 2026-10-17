@@ -56,6 +56,7 @@ from ..geo.transforms import (
     _compute_map_transform,
     _get_minimap_transform,
     _get_visible_rect,
+    _map_duo_size,
 )
 from ..ui.menus import open_minimap_button_menu
 from . import resize, selection
@@ -2359,10 +2360,9 @@ class NODEMAP_OT_navigate(Operator):
         # to the border (where it can snap) instead of shrinking away.
         safe_width = ex - sx
         safe_height = ey - sy
-        map_w = min(settings.minimap_width * ui_scale, (safe_width - x_margin) * settings.max_width_percent / 100.0)
-        map_h = min(
-            settings.minimap_height * ui_scale, (safe_height - y_margin - margin) * settings.max_height_percent / 100.0
-        )
+        map_w, map_h = _map_duo_size(state, settings, ui_scale)
+        map_w = min(map_w, (safe_width - x_margin) * settings.max_width_percent / 100.0)
+        map_h = min(map_h, (safe_height - y_margin - margin) * settings.max_height_percent / 100.0)
         map_x = sx + x_margin + offset_x * ui_scale
         map_y = sy + y_margin + offset_y * ui_scale
         safe = (sx, sy, ex, ey)

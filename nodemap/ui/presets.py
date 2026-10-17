@@ -60,6 +60,8 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_frame_labels",
         "settings.minimap_width",
         "settings.minimap_height",
+        "settings.minimap_width_with_list",
+        "settings.minimap_height_with_list",
         "settings.max_width_percent",
         "settings.max_height_percent",
         # Theme.

@@ -406,13 +406,18 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
 
     from ..core.state import suppress_update_callbacks
 
-    old_w = settings.minimap_width
-    old_h = settings.minimap_height
+    # Size edits apply to the pair of the active mode: with-list fields while
+    # the type list is shown, base fields otherwise.
+    on_list = op._state is not None and op._state.list.list_width > 0
+    old_w = settings.minimap_width_with_list if on_list else settings.minimap_width
+    old_h = settings.minimap_height_with_list if on_list else settings.minimap_height
+    width_field = "minimap_width_with_list" if on_list else "minimap_width"
+    height_field = "minimap_height_with_list" if on_list else "minimap_height"
     with suppress_update_callbacks():
         if new_w is not None:
-            settings.minimap_width = new_w
+            setattr(settings, width_field, new_w)
         if new_h is not None:
-            settings.minimap_height = new_h
+            setattr(settings, height_field, new_h)
         # FREE anchors the map's bottom-left edge at offset_x/offset_y. For
         # left/bottom grabs the anchor shifts by the effective size change, so
         # the grabbed edge follows the cursor until the size clamps and then
@@ -444,14 +449,15 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
     # resized map (100→75 keeps the same relative view).
     from ..geo.transforms import _preserve_view_for_map_resize
 
-    _preserve_view_for_map_resize(state, old_w, old_h, settings.minimap_width, settings.minimap_height, ui_scale)
+    # Sizes are already-scaled px; an axis with no delta keeps its old value.
+    new_w_px = (new_w if new_w is not None else old_w) * ui_scale
+    new_h_px = (new_h if new_h is not None else old_h) * ui_scale
+    _preserve_view_for_map_resize(state, old_w * ui_scale, old_h * ui_scale, new_w_px, new_h_px, ui_scale)
     state.interaction.hovered_handle = op._resize_handle
-    state.view.width_clamped = (
-        settings.minimap_width <= MIN_MAP_WIDTH or settings.minimap_width >= max_w or room_capped_w
-    )
-    state.view.height_clamped = (
-        settings.minimap_height <= MIN_MAP_HEIGHT or settings.minimap_height >= max_h or room_capped_h
-    )
+    current_w = new_w if new_w is not None else old_w
+    current_h = new_h if new_h is not None else old_h
+    state.view.width_clamped = current_w <= MIN_MAP_WIDTH or current_w >= max_w or room_capped_w
+    state.view.height_clamped = current_h <= MIN_MAP_HEIGHT or current_h >= max_h or room_capped_h
 
 
 def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:

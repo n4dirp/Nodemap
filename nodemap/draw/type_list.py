@@ -28,6 +28,7 @@ from ..core.constants import (
 from ..core.helpers import (
     _get_type_list_width,
     _schedule_list_anim_redraw,
+    _schedule_settle_redraw,
 )
 from ..core.list_filter import (
     _ROW_CHILD,
@@ -122,13 +123,18 @@ def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, 
         return
 
     if not state.list.anim_active:
-        _maybe_preserve_view_for_list_width(
-            state,
-            state.list.list_width,
-            target_width,
-            ui_scale,
-        )
-        state.list.list_width = target_width
+        if target_width != state.list.list_width:
+            _maybe_preserve_view_for_list_width(
+                state,
+                state.list.list_width,
+                target_width,
+                ui_scale,
+            )
+            state.list.list_width = target_width
+            # The settled extent just changed; the panel rect for this frame
+            # already keyed off the pre-toggle extent, so repaint once to
+            # land the panel on its final size.
+            _schedule_settle_redraw()
         return
 
     if state.list.anim_target < 0:
@@ -138,6 +144,7 @@ def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, 
         elif time.perf_counter() - state.list.anim_start > TYPE_LIST_ANIM_AWAIT_TIMEOUT:
             state.list.anim_active = False
             state.list.list_width = target_width
+            _schedule_settle_redraw()
             return
         else:
             state.list.list_width = state.list.anim_from
@@ -172,10 +179,13 @@ def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, 
 
     if progress >= 1.0:
         state.list.anim_active = False
-        # The list animation is over; drop the batch key so the next draw
+        # The type-list animation is over; drop the batch key so the next draw
         # rebuilds at the final scale immediately instead of waiting the
         # zoom settle window.
         # state.cache.batch_key = None
+        # One repaint after completion so the panel size (computed earlier in
+        # the frame from the anim state) lands exactly on the final pair.
+        _schedule_settle_redraw()
     else:
         _schedule_list_anim_redraw(state)
 

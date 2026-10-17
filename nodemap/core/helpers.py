@@ -363,6 +363,20 @@ def _schedule_list_anim_redraw(minimap_state) -> None:
         pass
 
 
+def _schedule_settle_redraw() -> None:
+    """Schedule a single repaint after the type-list zone extent settles.
+
+    The minimap panel size derives from the zone extent, but the panel rect
+    is computed earlier in the frame than the zone step; when the extent
+    settles outside an animation (toggle snap, await timeout, animation
+    completion) one extra repaint lands the panel on its final size.
+    """
+    try:
+        bpy.app.timers.register(lambda: redraw_ui("NODE_EDITOR"), first_interval=PAN_ANIM_INTERVAL)
+    except (RuntimeError, ValueError):
+        pass
+
+
 def _get_tree_snapshot(
     node_tree, include_selection: bool = True
 ) -> tuple[tuple, tuple[float, float, float, float], int, tuple[float, float, float, float] | None]:

@@ -2,6 +2,7 @@
 
 import logging
 import math
+import time
 from typing import Any
 
 import bpy
@@ -41,6 +42,38 @@ def _list_placement(map_w: float, map_h: float, position: str = "AUTO") -> str:
 def _list_top_inset(list_width: float, ui_scale: float) -> float:
     """Return the top inset reserved by the list strip."""
     return ELEMENT_GAP * ui_scale + list_width
+
+
+def _map_duo_size(minimap_state: MinimapState, settings, ui_scale: float) -> tuple[float, float]:
+    """Return the frame's minimap size in scaled pixels.
+
+    ``minimap_width``/``minimap_height`` apply while the type list is closed
+    and ``minimap_width_with_list``/``minimap_height_with_list`` while it is
+    open. While the list open/close animation runs, the two pairs ease into
+    each other with the same progress that drives the list zone extent, so
+    the panel grows together with the list instead of snapping.
+    """
+    base_w = settings.minimap_width * ui_scale
+    base_h = settings.minimap_height * ui_scale
+    list_w = settings.minimap_width_with_list * ui_scale
+    list_h = settings.minimap_height_with_list * ui_scale
+
+    list_state = minimap_state.list
+    if list_state.anim_active and list_state.anim_target >= 0:
+        progress = min((time.perf_counter() - list_state.anim_start) / max(list_state.anim_duration, 1e-4), 1.0)
+        opening = list_state.anim_target >= list_state.anim_from
+        eased = 1.0 - (1.0 - progress) ** 3 if opening else progress**3
+        factor = eased if opening else 1.0 - eased
+    else:
+        # Animation settled (or never started; reduce-motion snaps): key the
+        # pair on the visible zone extent.
+        factor = 1.0 if list_state.list_width > 0 else 0.0
+
+    if factor <= 0.0:
+        return base_w, base_h
+    if factor >= 1.0:
+        return list_w, list_h
+    return base_w + (list_w - base_w) * factor, base_h + (list_h - base_h) * factor
 
 
 def _get_map_content_rect_for_width(
@@ -236,7 +269,7 @@ def _preserve_view_for_map_resize(
     Scale pan by the base-scale ratio between the old and new content rects,
     keeping the world point at the content-rect center fixed. Zoom is left
     untouched. No-op when use_follow_view is active, sizes are equal within 0.5px,
-    or geometry is degenerate.
+    or geometry is degenerate. Sizes are in scaled pixels (pooled * ui_scale).
     """
     if abs(new_w - old_w) < 0.5 and abs(new_h - old_h) < 0.5:
         return
@@ -261,14 +294,14 @@ def _preserve_view_for_map_resize(
     def _base_scale(map_w: float, map_h: float) -> float:
         if list_width > 0 and minimap_state.list.list_placement == "TOP":
             top_inset = padding + _list_top_inset(list_width, ui_scale)
-            inner_w = max(map_w * ui_scale - 2.0 * padding, 1.0)
-            inner_h = max(map_h * ui_scale - padding - top_inset, 1.0)
+            inner_w = max(map_w - 2.0 * padding, 1.0)
+            inner_h = max(map_h - padding - top_inset, 1.0)
             return min(inner_w / bbox_w, inner_h / bbox_h)
         left_inset = padding + list_width
         if list_width > 0:
             left_inset += 4.0 * ui_scale
-        inner_w = max(map_w * ui_scale - padding - left_inset, 1.0)
-        inner_h = max(map_h * ui_scale - 2.0 * padding, 1.0)
+        inner_w = max(map_w - padding - left_inset, 1.0)
+        inner_h = max(map_h - 2.0 * padding, 1.0)
         return min(inner_w / bbox_w, inner_h / bbox_h)
 
     old_base = _base_scale(old_w, old_h)

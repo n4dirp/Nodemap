@@ -51,6 +51,8 @@ from ..geo.transforms import (
     _get_map_content_rect,
     _get_minimap_transform,
     _get_visible_rect,
+    _map_duo_size,
+    _preserve_view_for_map_resize,
 )
 from . import content_draw
 from .batch_build import _ensure_minimap_batches
@@ -135,9 +137,10 @@ def _compute_minimap_rect(
 
     x_margin, y_margin, margin = _get_minimap_margins(space, corner, ui_scale)
 
-    # Compute desired size, capped to % of safe region (accounting for margins)
-    map_w = settings.minimap_width * ui_scale
-    map_h = settings.minimap_height * ui_scale
+    # Dual size pairs: the with-list pair grows the panel while the type
+    # list is open, easing with the list open/close animation. Still capped
+    # to % of safe region (accounting for margins).
+    map_w, map_h = _map_duo_size(state, settings, ui_scale)
     max_width_pct = settings.max_width_percent / 100.0
     max_height_pct = settings.max_height_percent / 100.0
     map_w = min(map_w, (safe_width - x_margin) * max_width_pct)
@@ -741,6 +744,11 @@ def draw_minimap() -> None:
     if not bounds_frozen and (use_auto_zoom or bounds_uninitialized):
         bounds = _expand_bounds_margin(raw_bounds, ui_scale, map_h, padding)
         state.view.tree_bounds = bounds
+
+    # Cross-frame size deltas (the animated dual-size transition) keep the
+    # same world point centered so the panel growth does not refocus the view.
+    prev_rect = state.view.rect
+    _preserve_view_for_map_resize(state, prev_rect[2], prev_rect[3], map_w, map_h, ui_scale)
 
     state.view.rect = (map_x, map_y, map_w, map_h)
     state.view.outer_margin = y_margin
