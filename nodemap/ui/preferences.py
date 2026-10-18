@@ -219,7 +219,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_width: IntProperty(
         name="Size X",
         description="Minimap width in pixels",
-        default=400,
+        default=300,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -228,7 +228,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_height: IntProperty(
         name="Size Y",
         description="Minimap height in pixels",
-        default=124,
+        default=100,
         min=MIN_MAP_HEIGHT,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -237,7 +237,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_width_with_list: IntProperty(
         name="Size X with List",
         description="Minimap width in pixels while the type list is open",
-        default=560,
+        default=600,
         min=MIN_MAP_WIDTH,
         subtype="PIXEL",
         update=_update_invalidate_batches,
@@ -246,7 +246,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     minimap_height_with_list: IntProperty(
         name="Size Y with List",
         description="Minimap height in pixels while the type list is open",
-        default=124,
+        default=200,
         min=MIN_MAP_HEIGHT,
         subtype="PIXEL",
         update=_update_invalidate_batches,

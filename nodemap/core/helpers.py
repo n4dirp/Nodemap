@@ -328,22 +328,6 @@ def _get_type_list_width(
     return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), max_w)
 
 
-def _log_list_view_state(minimap_state, message: str) -> None:
-    """Log the minimap zoom and pan state for list-toggle diagnostics."""
-    view = minimap_state.view
-    logger.info(
-        "%s: zoom %.4f (anchor %.4f), pan (%.1f, %.1f), map %.0fx%.0f, list %.1f",
-        message,
-        view.user_zoom,
-        view.anchor_zoom,
-        view.pan[0],
-        view.pan[1],
-        view.rect[2] if view.rect else 0.0,
-        view.rect[3] if view.rect else 0.0,
-        minimap_state.list.list_width,
-    )
-
-
 def start_list_width_animation(minimap_state, settings) -> None:
     """Begin animating the type-list zone width after a toggle-button click.
 
@@ -360,9 +344,6 @@ def start_list_width_animation(minimap_state, settings) -> None:
     minimap_state.list.anim_target = 0.0 if not settings.show_type_list else -1.0
     minimap_state.list.anim_duration = TYPE_LIST_ANIM_DURATION
     minimap_state.list.anim_start = time.perf_counter()
-    _log_list_view_state(
-        minimap_state, "List toggle open start" if settings.show_type_list else "List toggle close start"
-    )
 
 
 def _list_anim_tick(minimap_state) -> None:

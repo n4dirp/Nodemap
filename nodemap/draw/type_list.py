@@ -27,7 +27,6 @@ from ..core.constants import (
 )
 from ..core.helpers import (
     _get_type_list_width,
-    _log_list_view_state,
     _schedule_list_anim_redraw,
 )
 from ..core.list_filter import (
@@ -91,11 +90,7 @@ def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, 
         return
 
     if not state.list.anim_active:
-        if target_width != state.list.list_width:
-            _log_list_view_state(
-                state, "List toggle snap open" if target_width > state.list.list_width else "List toggle snap close"
-            )
-            state.list.list_width = target_width
+        state.list.list_width = target_width
         return
 
     if state.list.anim_target < 0:
@@ -129,7 +124,6 @@ def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, 
 
     if progress >= 1.0:
         state.list.anim_active = False
-        _log_list_view_state(state, "List toggle settle")
     else:
         _schedule_list_anim_redraw(state)
 
