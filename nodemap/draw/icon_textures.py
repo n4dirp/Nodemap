@@ -20,7 +20,7 @@ BUTTON_FILES: dict[str, str] = {
     "ALL": "nodemap_frame_all.png",
     "VIEW": "nodemap_frame_view.png",
     "SELECTED": "nodemap_frame_sel.png",
-    "LIST": "blender_icon_collapsemenu.png",
+    "LIST": "nodemap_type_list.png",
     "DRAG": "blender_icon_grip.png",
 }
 
