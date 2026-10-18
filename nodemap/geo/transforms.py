@@ -80,19 +80,13 @@ def _get_map_content_rect_for_width(
     minimap_state: MinimapState,
     list_width: float,
     ui_scale: float | None = None,
-    placement: str | None = None,
 ) -> tuple[float, float, float, float]:
-    """Return the content rect for an explicit list width without mutating state.
-
-    ``placement`` overrides the stored zone placement, for preserving views
-    across a placement flip.
-    """
+    """Return the content rect for an explicit list width without mutating state."""
     map_x, map_y, map_w, map_h = minimap_state.view.rect
     padding = minimap_state.view.inner_padding
     if ui_scale is None:
         ui_scale = _get_ui_scale()
-    if placement is None:
-        placement = minimap_state.list.list_placement
+    placement = minimap_state.list.list_placement
     if list_width > 0 and placement == "TOP":
         # Only the top strip is reserved; the button row beneath it overlaps
         # the content, like the left placement. The left/right span the full
@@ -129,190 +123,139 @@ def _clamp_minimap_zoom(zoom: float, base_scale: float) -> float:
     return max(zoom_min, min(zoom, zoom_max))
 
 
-def _preserve_view_for_list_width(
-    minimap_state: MinimapState,
-    old_width: float,
-    new_width: float,
-    ui_scale: float | None = None,
-    min_delta: float = 0.5,
-    old_placement: str | None = None,
-    new_placement: str | None = None,
-) -> None:
-    """Adjust ``minimap_state.view.pan/zoom`` so the same world rect stays framed after width change.
+# ---------------------------------------------------------------------------
+# Framed view
+# ---------------------------------------------------------------------------
 
-    Keep the world rectangle that previously filled the map content rect
-    filling the new content rect with the same relative position (centered).
-    This is the automatic equivalent of re-running ``frame_view``/``frame_all``
-    after toggling the type list, as requested: if width goes 100→75 the
-    nodes translate and scale to occupy the same position inside the reduced
-    available space.
 
-    No-op when rect/bounds are degenerate or widths are equal within ``min_delta`` px.
-    The animation path passes ``min_delta=0.0`` so eased steps map the list
-    width change exactly; interactive deltas keep the 0.5px tolerance. A
-    placement flip is expressed as equal widths with ``min_delta=0.0`` and
-    explicit old/new placements.
+def _follow_view_enabled() -> bool:
+    """Return True when the view tracks the editor viewport (framing is dynamic)."""
+    preferences = get_addon_preferences()
+    return bool(preferences and preferences.settings.use_follow_view)
+
+
+def _content_size_key(minimap_state: MinimapState) -> tuple[float, float]:
+    """Return the content-rect size the view is fitted against."""
+    _left, _bottom, width, height = _get_map_content_rect(minimap_state)
+    return (round(width, 3), round(height, 3))
+
+
+def _view_for_world_rect(
+    minimap_state: MinimapState, rect: tuple[float, float, float, float]
+) -> tuple[float, tuple[float, float]] | None:
+    """Return ``(zoom, pan)`` showing *rect* fitted and centered in the content rect.
+
+    The rect is scaled to fit inside the content area (the tighter axis
+    decides), the rule ``frame_view`` and ``frame_all`` use. Return None when
+    the geometry is degenerate.
     """
-    if abs(new_width - old_width) < min_delta:
-        return
-    if not minimap_state.view.rect or minimap_state.view.rect[2] <= 1 or minimap_state.view.rect[3] <= 1:
-        return
-    bounds = minimap_state.view.tree_bounds
-    if not bounds or (bounds[2] - bounds[0] <= 0) or (bounds[3] - bounds[1] <= 0):
-        return
-    if ui_scale is None:
-        ui_scale = _get_ui_scale()
-
-    # Follow-view mode already recomputes zoom/clamp every draw; the generic
-    # world-rect preservation would fight that dynamic. Skip automatic
-    # compensation there and let _get_minimap_transform / _clamp_pan_to_viewport
-    # handle it.
-    if get_addon_preferences().settings.use_follow_view:
-        return
-
-    bbox_w = max(bounds[2] - bounds[0], 1.0)
-    bbox_h = max(bounds[3] - bounds[1], 1.0)
-    tree_center_x = (bounds[0] + bounds[2]) / 2
-    tree_center_y = (bounds[1] + bounds[3]) / 2
-
-    old_inner_l, old_inner_b, old_inner_w, old_inner_h = _get_map_content_rect_for_width(
-        minimap_state, old_width, ui_scale, old_placement
-    )
-    new_inner_l, new_inner_b, new_inner_w, new_inner_h = _get_map_content_rect_for_width(
-        minimap_state, new_width, ui_scale, new_placement
-    )
-
-    # Old scale / center derived from current zoom/pan and old geometry.
-    old_base = min(old_inner_w / bbox_w, old_inner_h / bbox_h)
-    if old_base <= 0:
-        return
-    old_scale = old_base * max(minimap_state.view.user_zoom, 1e-6)
-    if old_scale <= 0:
-        return
-    old_cx = old_inner_l + old_inner_w / 2 + minimap_state.view.pan[0]
-    old_cy = old_inner_b + old_inner_h / 2 + minimap_state.view.pan[1]
-
-    # World rect that filled the old inner.
-    world_l = tree_center_x + (old_inner_l - old_cx) / old_scale
-    world_r = tree_center_x + (old_inner_l + old_inner_w - old_cx) / old_scale
-    world_b = tree_center_y + (old_inner_b - old_cy) / old_scale
-    world_t = tree_center_y + (old_inner_b + old_inner_h - old_cy) / old_scale
-
-    # If the old view was framing the full tree (world covers bounds),
-    # preserve the tree bounds instead of the letterboxed world. This
-    # avoids drift when toggling 100→75→100: the world for a framed
-    # view includes empty letterbox margins, so preserving it makes
-    # zoom shrink each toggle (0.116→0.072→0.072). Using bounds keeps
-    # zoom stable (1.0) and matches re-running frame_all.
-    eps = 1.0
-    covers_w = world_l <= bounds[0] + eps and world_r >= bounds[2] - eps
-    covers_h = world_b <= bounds[1] + eps and world_t >= bounds[3] - eps
-    new_base = min(new_inner_w / bbox_w, new_inner_h / bbox_h)
-    if new_base <= 0:
-        return
-
-    if covers_w and covers_h:
-        # Re-frame the full tree: same as frame_all with new inner.
-        # Keep zoom at 1 (or min to fit) and center on tree.
-        target_w = bbox_w
-        target_h = bbox_h
-        target_cx = tree_center_x
-        target_cy = tree_center_y
-        req_zoom_w = (new_inner_w / target_w) / new_base
-        req_zoom_h = (new_inner_h / target_h) / new_base
-        new_zoom = min(req_zoom_w, req_zoom_h)
-        # Clamp to the node-anchored scale range and cap at 1 for
-        # frame_all style (don't magnify small trees).
-        new_zoom = _clamp_minimap_zoom(new_zoom, new_base)
-        if new_zoom > 1.0:
-            new_zoom = 1.0
-        new_scale = new_base * new_zoom
-        pan_x = -(target_cx - tree_center_x) * new_scale
-        pan_y = -(target_cy - tree_center_y) * new_scale
-    else:
-        # Custom panned view: preserve the same world center by
-        # scaling pan proportionally to the width change only (list
-        # affects width, not height). This keeps the same area at
-        # the same relative X position and is symmetric for
-        # toggle off (75→100 restores zoom). A placement flip changes
-        # both axes, so scale by the tighter axis ratio.
-        if old_placement is not None and old_placement != new_placement:
-            scale_ratio = min(new_inner_w / max(old_inner_w, 1.0), new_inner_h / max(old_inner_h, 1.0))
-        else:
-            scale_ratio = new_inner_w / max(old_inner_w, 1.0)
-        new_scale = old_scale * scale_ratio
-        new_zoom = new_scale / new_base
-        new_zoom = _clamp_minimap_zoom(new_zoom, new_base)
-        # Re-derive scale after clamp.
-        new_scale = new_base * new_zoom
-        # Preserve world center proportionally: pan scales with scale.
-        # Equivalent to pan_new = pan_old * (new_scale/old_scale).
-        ratio = new_scale / max(old_scale, 1e-6)
-        pan_x = minimap_state.view.pan[0] * ratio
-        pan_y = minimap_state.view.pan[1] * ratio
-
-    minimap_state.view.user_zoom = new_zoom
-    minimap_state.view.anchor_zoom = new_zoom
-    minimap_state.view.pan = (pan_x, pan_y)
+    view = minimap_state.view
+    if view.rect[2] <= 1 or view.rect[3] <= 1:
+        return None
+    bounds = view.tree_bounds
+    if bounds[2] - bounds[0] <= 0 or bounds[3] - bounds[1] <= 0:
+        return None
+    _inner_l, _inner_b, inner_w, inner_h, _bw, _bh, base_scale, tree_cx, tree_cy = _compute_base_map_geom(minimap_state)
+    if inner_w <= 1 or inner_h <= 1 or base_scale <= 0:
+        return None
+    world_w = max(rect[2] - rect[0], 1e-6)
+    world_h = max(rect[3] - rect[1], 1e-6)
+    zoom = min(inner_w / (base_scale * world_w), inner_h / (base_scale * world_h))
+    zoom = _clamp_minimap_zoom(zoom, base_scale)
+    scale = base_scale * zoom
+    world_cx = (rect[0] + rect[2]) / 2.0
+    world_cy = (rect[1] + rect[3]) / 2.0
+    return zoom, ((tree_cx - world_cx) * scale, (tree_cy - world_cy) * scale)
 
 
-def _preserve_view_for_map_resize(
-    minimap_state: MinimapState,
-    old_w: float,
-    old_h: float,
-    new_w: float,
-    new_h: float,
-    ui_scale: float | None = None,
-) -> None:
-    """Adjust ``minimap_state.view.pan`` so the same world point stays centered after a map resize.
+def _framed_rect_from_view(minimap_state: MinimapState) -> tuple[float, float, float, float] | None:
+    """Return the tree-space rect the running view shows, or None when unavailable."""
+    view = minimap_state.view
+    if view.rect[2] <= 1 or view.rect[3] <= 1:
+        return None
+    bounds = view.tree_bounds
+    if bounds[2] - bounds[0] <= 0 or bounds[3] - bounds[1] <= 0:
+        return None
+    _left, _bottom, inner_w, inner_h = _get_map_content_rect(minimap_state)
+    if inner_w <= 1 or inner_h <= 1:
+        return None
+    return _minimap_world_rect(minimap_state, view.user_zoom, view.pan)
 
-    Scale pan by the base-scale ratio between the old and new content rects,
-    keeping the world point at the content-rect center fixed. Zoom is left
-    untouched. No-op when use_follow_view is active, sizes are equal within 0.5px,
-    or geometry is degenerate. Sizes are in scaled pixels (pooled * ui_scale).
+
+def _fit_framed_view(minimap_state: MinimapState) -> bool:
+    """Fit the framed world rect into the current content rect.
+
+    Also record the content size the fit was made against and the view pair it
+    wrote, so an interaction-driven change can be told apart from a fit. Return
+    True when the view was fitted.
     """
-    if abs(new_w - old_w) < 0.5 and abs(new_h - old_h) < 0.5:
-        return
-    if not minimap_state.view.rect or minimap_state.view.rect[2] <= 1 or minimap_state.view.rect[3] <= 1:
-        return
-    bounds = minimap_state.view.tree_bounds
-    if not bounds or (bounds[2] - bounds[0] <= 0) or (bounds[3] - bounds[1] <= 0):
-        return
-    if ui_scale is None:
-        ui_scale = _get_ui_scale()
+    view = minimap_state.view
+    if view.framed_rect is None:
+        return False
+    fitted = _view_for_world_rect(minimap_state, view.framed_rect)
+    if fitted is None:
+        return False
+    zoom, pan = fitted
+    view.user_zoom = zoom
+    view.anchor_zoom = zoom
+    view.pan = pan
+    view.framed_key = _content_size_key(minimap_state)
+    view.authored_view = (zoom, pan)
+    return True
 
-    # Follow-view mode recomputes zoom/clamp every draw; compensating here
-    # would fight that dynamic. Skip, like _preserve_view_for_list_width.
-    if get_addon_preferences().settings.use_follow_view:
-        return
 
-    bbox_w = max(bounds[2] - bounds[0], 1.0)
-    bbox_h = max(bounds[3] - bounds[1], 1.0)
-    padding = minimap_state.view.inner_padding
-    list_width = minimap_state.list.list_width
+def _mark_view_authored(minimap_state: MinimapState) -> None:
+    """Record the running zoom/pan pair as written by the framing logic."""
+    view = minimap_state.view
+    view.authored_view = (view.user_zoom, view.pan)
 
-    def _base_scale(map_w: float, map_h: float) -> float:
-        if list_width > 0 and minimap_state.list.list_placement == "TOP":
-            top_inset = padding + _list_top_inset(list_width, ui_scale)
-            inner_w = max(map_w - 2.0 * padding, 1.0)
-            inner_h = max(map_h - padding - top_inset, 1.0)
-            return min(inner_w / bbox_w, inner_h / bbox_h)
-        left_inset = padding + list_width
-        if list_width > 0:
-            left_inset += 4.0 * ui_scale
-        inner_w = max(map_w - padding - left_inset, 1.0)
-        inner_h = max(map_h - 2.0 * padding, 1.0)
-        return min(inner_w / bbox_w, inner_h / bbox_h)
 
-    old_base = _base_scale(old_w, old_h)
-    new_base = _base_scale(new_w, new_h)
-    if old_base <= 0 or new_base <= 0:
+def _set_framed_rect(minimap_state: MinimapState, rect: tuple[float, float, float, float]) -> bool:
+    """Remember *rect* as the framed world rect and fit it to the content rect.
+
+    Framing actions call this so the same world rect is re-fitted when the type
+    list or the panel changes the content rect. Return True when fitted; follow
+    view recomputes zoom and pan every draw and is left alone.
+    """
+    view = minimap_state.view
+    view.framed_rect = (float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
+    view.framed_key = None
+    if _follow_view_enabled():
+        return False
+    return _fit_framed_view(minimap_state)
+
+
+def _adopt_view_framing(minimap_state: MinimapState) -> None:
+    """Adopt the running view as the framed rect after an interaction moved it.
+
+    Panning and zooming leave the framed rect behind; the visible rect becomes
+    the framing target, so a later type-list toggle keeps showing it. No-op
+    while the view still holds the pair the last fit wrote, and in follow view,
+    which recomputes zoom and pan every draw.
+    """
+    if _follow_view_enabled():
         return
-    ratio = new_base / old_base
-    if abs(ratio - 1.0) < 1e-6:
+    view = minimap_state.view
+    if view.framed_rect is not None and view.authored_view == (view.user_zoom, view.pan):
         return
-    pan_x, pan_y = minimap_state.view.pan
-    minimap_state.view.pan = (pan_x * ratio, pan_y * ratio)
+    rect = _framed_rect_from_view(minimap_state)
+    if rect is None:
+        return
+    view.framed_rect = rect
+    view.framed_key = _content_size_key(minimap_state)
+    _mark_view_authored(minimap_state)
+
+
+def _refit_framed_view(minimap_state: MinimapState) -> None:
+    """Re-fit the framed rect when the content rect changed (list or panel size)."""
+    if _follow_view_enabled():
+        return
+    view = minimap_state.view
+    if view.framed_rect is None:
+        _adopt_view_framing(minimap_state)
+        return
+    if view.framed_key != _content_size_key(minimap_state):
+        _fit_framed_view(minimap_state)
 
 
 def _compute_base_map_geom(
@@ -408,23 +351,6 @@ def _minimap_world_rect(
     half_w = (inner_w / 2.0) / scale
     half_h = (inner_h / 2.0) / scale
     return (world_cx - half_w, world_cy - half_h, world_cx + half_w, world_cy + half_h)
-
-
-def _minimap_view_from_world_rect(
-    minimap_state: MinimapState, rect: tuple[float, float, float, float] | list[float]
-) -> tuple[float, tuple[float, float]]:
-    """Return the ``(zoom, pan)`` view showing *rect* in the minimap.
-
-    Inverse of :func:`_minimap_world_rect`; interpolating rects and mapping
-    back couples pan and zoom exactly like Blender's rect animation.
-    """
-    _il, _ib, inner_w, _ih, _bw, _bh, base_scale, tree_cx, tree_cy = _compute_base_map_geom(minimap_state)
-    world_w = max(rect[2] - rect[0], 1e-6)
-    scale = inner_w / world_w
-    zoom = scale / max(base_scale, 1e-6)
-    world_cx = (rect[0] + rect[2]) / 2.0
-    world_cy = (rect[1] + rect[3]) / 2.0
-    return zoom, ((tree_cx - world_cx) * scale, (tree_cy - world_cy) * scale)
 
 
 def _get_minimap_transform(

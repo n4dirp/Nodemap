@@ -445,14 +445,6 @@ def resize_apply_delta(op: NODEMAP_OT_navigate, context: Context, event: Event) 
     state = op._state
     if not state:
         return
-    # Preserve framing so the same world point stays centered in the
-    # resized map (100→75 keeps the same relative view).
-    from ..geo.transforms import _preserve_view_for_map_resize
-
-    # Sizes are already-scaled px; an axis with no delta keeps its old value.
-    new_w_px = (new_w if new_w is not None else old_w) * ui_scale
-    new_h_px = (new_h if new_h is not None else old_h) * ui_scale
-    _preserve_view_for_map_resize(state, old_w * ui_scale, old_h * ui_scale, new_w_px, new_h_px, ui_scale)
     state.interaction.hovered_handle = op._resize_handle
     current_w = new_w if new_w is not None else old_w
     current_h = new_h if new_h is not None else old_h
@@ -498,15 +490,9 @@ def apply_list_width_drag(op: NODEMAP_OT_navigate, context: Context) -> None:
             settings.type_list_height = new_px
         else:
             settings.type_list_width = new_px
-    # Preserve framing so the same world rect stays centered in the
-    # reduced/expanded available width (100→75 keeps same relative pos).
-    old_w = state.list.list_width
-    if abs(new_w - old_w) >= 0.5:
-        from ..geo.transforms import _preserve_view_for_list_width
-
-        _preserve_view_for_list_width(state, old_w, new_w, ui_scale)
     # Drive the zone width live (per-pixel) so the pill tracks the cursor
-    # without the integer-percent quantization or a one-frame zone lag.
+    # without the integer-percent quantization or a one-frame zone lag. The
+    # framed view follows the zone extent on the next draw.
     state.list.dragging_width = new_w
     state.list.list_width = new_w
     state.list.width_clamped = new_w <= min_w + 0.5 or new_w >= max_w - 0.5

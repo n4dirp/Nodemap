@@ -64,6 +64,17 @@ class ViewState:
     user_zoom: float = 1.0
     anchor_zoom: float = 1.0
     pan: Vec2 = (0.0, 0.0)
+    # Tree-space rect the minimap is framed to. It is the single source of
+    # truth for the framing: whenever the content rect changes (type list
+    # toggle or drag, panel resize, placement flip) the zoom and pan are
+    # re-fitted from it, so both type-list modes show the same world rect.
+    framed_rect: Rect | None = None
+    # Content-rect size the last fit was made against; a difference means the
+    # view must be re-fitted for this frame.
+    framed_key: tuple[float, float] | None = None
+    # The (zoom, pan) pair the framing logic last wrote. Any other pair means
+    # an interaction moved the view, which then becomes the framed rect.
+    authored_view: tuple[float, Vec2] | None = None
     width_clamped: bool = False
     height_clamped: bool = False
     moving: bool = False
@@ -260,7 +271,7 @@ class MinimapState:
     cache: RenderCache = field(default_factory=RenderCache)
     buttons: ButtonState = field(default_factory=ButtonState)
     last_tree_ptr: int | None = None
-    tree_views: dict[int, tuple[float, float, float]] = field(default_factory=dict)
+    tree_views: dict[int, Rect] = field(default_factory=dict)
     shared: SharedTreeCache | None = None
 
     def tree_data(self) -> dict | None:

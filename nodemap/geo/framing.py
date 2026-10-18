@@ -8,26 +8,29 @@ from ..core.helpers import (
     _get_node_dims,
     _get_node_tree_bounds,
     _get_ui_scale,
-    get_addon_preferences,
 )
 from ..core.state import _state
 from .transforms import (
-    _clamp_minimap_zoom,
-    _compute_base_map_geom,
     _compute_map_transform,
+    _follow_view_enabled,
     _get_visible_rect,
+    _mark_view_authored,
+    _minimap_world_rect,
+    _set_framed_rect,
 )
 
 
-def _compute_frame_all_targets(
+def _compute_frame_all_rect(
     space: bpy.types.SpaceNodeEditor | None = None,
     region: bpy.types.Region | None = None,
     area_ptr: int | None = None,
-) -> tuple[float, float, float] | None:
-    """Compute target zoom and pan to frame the entire node tree.
+) -> tuple[float, float, float, float] | None:
+    """Return the tree-space rect that frames the entire node tree.
 
-    Update ``minimap_state.view.tree_bounds`` immediately and return
-    ``(zoom, pan_x, pan_y)`` or ``None`` when data is unavailable.
+    Update ``minimap_state.view.tree_bounds`` immediately and return the rect,
+    or ``None`` when data is unavailable. When ``use_follow_view`` is enabled
+    the editor viewport is included in the rect so that clamping cannot clip
+    nodes afterward.
     """
     minimap_state = _state(area_ptr)
     if space is None:
@@ -48,32 +51,18 @@ def _compute_frame_all_targets(
     bounds = _expand_bounds_margin(bounds, _get_ui_scale(), map_h, minimap_state.view.inner_padding)
     minimap_state.view.tree_bounds = bounds
 
-    follow = get_addon_preferences().settings.use_follow_view
-
-    if not follow:
-        return 1.0, 0.0, 0.0
+    if not _follow_view_enabled():
+        return bounds
 
     visible = _get_visible_rect(space, region)
-    if visible:
-        combined_min_x = min(bounds[0], visible[0])
-        combined_min_y = min(bounds[1], visible[1])
-        combined_max_x = max(bounds[2], visible[2])
-        combined_max_y = max(bounds[3], visible[3])
-    else:
-        combined_min_x, combined_min_y, combined_max_x, combined_max_y = bounds
-
-    _, _, inner_w, inner_h, _, _, base_scale, tree_center_x, tree_center_y = _compute_base_map_geom(minimap_state)
-
-    combined_w = max(combined_max_x - combined_min_x, 1.0)
-    combined_h = max(combined_max_y - combined_min_y, 1.0)
-    zoom = min(inner_w / (base_scale * combined_w), inner_h / (base_scale * combined_h), 1.0)
-
-    combined_cx = (combined_min_x + combined_max_x) / 2
-    combined_cy = (combined_min_y + combined_max_y) / 2
-
-    pan_x = -(combined_cx - tree_center_x) * base_scale * zoom
-    pan_y = -(combined_cy - tree_center_y) * base_scale * zoom
-    return zoom, pan_x, pan_y
+    if not visible:
+        return bounds
+    return (
+        min(bounds[0], visible[0]),
+        min(bounds[1], visible[1]),
+        max(bounds[2], visible[2]),
+        max(bounds[3], visible[3]),
+    )
 
 
 def frame_all(
@@ -81,52 +70,18 @@ def frame_all(
     region: bpy.types.Region | None = None,
     area_ptr: int | None = None,
 ) -> None:
-    """Adjust minimap zoom/pan to frame the entire node tree.
-
-    When ``use_follow_view`` is enabled the editor viewport is included in the
-    frame so that clamping cannot clip nodes afterward.
-    """
-    targets = _compute_frame_all_targets(space, region, area_ptr)
-    if targets is None:
+    """Adjust minimap zoom/pan to frame the entire node tree."""
+    target = _compute_frame_all_rect(space, region, area_ptr)
+    if target is None:
         return
     minimap_state = _state(area_ptr)
-    zoom, pan_x, pan_y = targets
-    minimap_state.view.anchor_zoom = zoom
-    minimap_state.view.user_zoom = zoom
-    minimap_state.view.pan = (pan_x, pan_y)
+    _set_framed_rect(minimap_state, target)
+    _mark_view_authored(minimap_state)
     # Force a batch rebuild on the next draw: the one-shot zoom/pan change must
     # re-bake nodes/text at the new scale immediately, not wait for a settle
     # window that may never flush (operators stop after a single redraw).
     minimap_state.cache._batches_dirty = True
     _redraw()
-
-
-def _compute_frame_to_bounds_targets(
-    target_bounds: tuple[float, float, float, float],
-    area_ptr: int | None = None,
-) -> tuple[float, float, float]:
-    """Compute target zoom and pan to frame the given bounds without applying them.
-
-    The bounds are zoomed to entirely fill the minimap. The zoom is clamped
-    to the node-anchored scale range so tiny marquees cannot magnify a node
-    past a fixed pixel size and huge ones cannot shrink the map below the
-    minimum resolution. Return ``(zoom, pan_x, pan_y)``.
-    """
-    minimap_state = _state(area_ptr)
-
-    _, _, inner_w, inner_h, _, _, base_scale, tree_center_x, tree_center_y = _compute_base_map_geom(minimap_state)
-
-    target_w = max(target_bounds[2] - target_bounds[0], 1.0)
-    target_h = max(target_bounds[3] - target_bounds[1], 1.0)
-    zoom = min(inner_w / (base_scale * target_w), inner_h / (base_scale * target_h))
-    zoom = _clamp_minimap_zoom(zoom, base_scale)
-
-    target_cx = (target_bounds[0] + target_bounds[2]) / 2
-    target_cy = (target_bounds[1] + target_bounds[3]) / 2
-
-    pan_x = -(target_cx - tree_center_x) * base_scale * zoom
-    pan_y = -(target_cy - tree_center_y) * base_scale * zoom
-    return zoom, pan_x, pan_y
 
 
 def _frame_to_bounds(
@@ -135,10 +90,8 @@ def _frame_to_bounds(
 ) -> None:
     """Adjust minimap zoom/pan to frame the given bounds in tree coordinates."""
     minimap_state = _state(area_ptr)
-    zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(target_bounds, area_ptr)
-    minimap_state.view.anchor_zoom = zoom
-    minimap_state.view.user_zoom = zoom
-    minimap_state.view.pan = (pan_x, pan_y)
+    _set_framed_rect(minimap_state, target_bounds)
+    _mark_view_authored(minimap_state)
     # Force a batch rebuild on the next draw (see frame_all).
     minimap_state.cache._batches_dirty = True
     _redraw()
@@ -173,11 +126,12 @@ def _compute_frame_selected_targets(
     space: bpy.types.SpaceNodeEditor | None = None,
     region: bpy.types.Region | None = None,
     area_ptr: int | None = None,
-) -> tuple[float | None, float, float] | None:
-    """Compute target zoom and pan for the selected nodes without applying them.
+) -> tuple[float, float, float, float] | None:
+    """Return the tree-space rect that frames the selected nodes.
 
-    Return ``(zoom, pan_x, pan_y)`` where *zoom* is ``None`` when the current
-    zoom should be kept. Return ``None`` when nothing is selected or data is
+    Fit multiple selections or a single frame node with a margin; a single
+    regular node yields the visible rect centered on it, which keeps the
+    current zoom. Return ``None`` when nothing is selected or data is
     unavailable.
     """
     minimap_state = _state(area_ptr)
@@ -215,13 +169,10 @@ def _compute_frame_selected_targets(
         bounds_h = max(max_y - min_y, 1.0)
         inner_h = max(rect[3] - 2 * minimap_state.view.inner_padding, 1.0)
         margin = margin_px * bounds_h / inner_h
-        zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(
-            (min_x - margin, min_y - margin, max_x + margin, max_y + margin), area_ptr
-        )
-        return zoom, pan_x, pan_y
+        return (min_x - margin, min_y - margin, max_x + margin, max_y + margin)
 
     pan_x, pan_y = _compute_center_pan((min_x + max_x) / 2, (min_y + max_y) / 2, area_ptr)
-    return None, pan_x, pan_y
+    return _minimap_world_rect(minimap_state, minimap_state.view.user_zoom, (pan_x, pan_y))
 
 
 def _compute_editor_frame_selected_targets(
@@ -290,12 +241,9 @@ def frame_selected(
     targets = _compute_frame_selected_targets(space, region, area_ptr)
     if targets is None:
         return
-    zoom, pan_x, pan_y = targets
     minimap_state = _state(area_ptr)
-    if zoom is not None:
-        minimap_state.view.anchor_zoom = zoom
-        minimap_state.view.user_zoom = zoom
-    minimap_state.view.pan = (pan_x, pan_y)
+    _set_framed_rect(minimap_state, targets)
+    _mark_view_authored(minimap_state)
     # Force a batch rebuild on the next draw (see frame_all).
     minimap_state.cache._batches_dirty = True
     _redraw()

@@ -47,12 +47,13 @@ from ..core.theme import (
     _get_wire_curvature,
 )
 from ..geo.transforms import (
+    _adopt_view_framing,
     _clamp_pan_to_viewport,
     _get_map_content_rect,
     _get_minimap_transform,
     _get_visible_rect,
     _map_duo_size,
-    _preserve_view_for_map_resize,
+    _refit_framed_view,
 )
 from . import content_draw
 from .batch_build import _ensure_minimap_batches
@@ -721,6 +722,19 @@ def draw_minimap() -> None:
     master_alpha = settings.opacity
     corner = settings.current_position
 
+    # An interaction that moved the view since the last frame becomes the new
+    # framing target, then the type-list extent advances so the panel size
+    # below keys off this frame's extent instead of lagging a frame behind.
+    _adopt_view_framing(state)
+    prev_rect = state.view.rect
+    if prev_rect[2] > 1 and prev_rect[3] > 1:
+        extent_w, extent_h = prev_rect[2], prev_rect[3]
+    else:
+        # First frame: clamp the extent against the with-list pair.
+        extent_w = settings.minimap_width_with_list * ui_scale
+        extent_h = settings.minimap_height_with_list * ui_scale
+    _step_list_width(state, settings, extent_w, extent_h, ui_scale)
+
     rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, state)
     if rect is None:
         return
@@ -745,27 +759,14 @@ def draw_minimap() -> None:
         bounds = _expand_bounds_margin(raw_bounds, ui_scale, map_h, padding)
         state.view.tree_bounds = bounds
 
-    # Cross-frame size deltas (the animated dual-size transition) keep the
-    # same world point centered so the panel growth does not refocus the view.
-    prev_rect = state.view.rect
-    _preserve_view_for_map_resize(state, prev_rect[2], prev_rect[3], map_w, map_h, ui_scale)
-
     state.view.rect = (map_x, map_y, map_w, map_h)
     state.view.outer_margin = y_margin
     state.view.inner_padding = padding
 
-    # Per-tree view persistence: reset pan/zoom when switching node trees,
-    # but restore the saved view when revisiting the same tree.
-    if tree_ptr is not None:
-        if state.last_tree_ptr is None:
-            saved = state.tree_views.get(tree_ptr)
-            if saved is not None:
-                sz, spx, spy = saved
-                state.view.user_zoom = sz
-                state.view.anchor_zoom = sz
-                state.view.pan = (spx, spy)
-            state.last_tree_ptr = tree_ptr
-        elif state.last_tree_ptr != tree_ptr:
+    # Per-tree view persistence: the framed world rect is saved per tree, so a
+    # revisit shows the same region whatever the panel and list sizes are.
+    if tree_ptr is not None and state.last_tree_ptr != tree_ptr:
+        if state.last_tree_ptr is not None:
             # Type-list expansion/search are not meaningful across trees: clear them
             # so a group expanded in the previous material cannot leak its guide line
             # into this tree.
@@ -777,38 +778,29 @@ def draw_minimap() -> None:
             # Drop the cached list layout so the new tree rebuilds it from its
             # own compiled data instead of reusing the previous tree's rows.
             state.cache.list_key = None
-            # Save view for tree being left.
-            state.tree_views[state.last_tree_ptr] = (
-                state.view.user_zoom,
-                state.view.pan[0],
-                state.view.pan[1],
-            )
-            saved = state.tree_views.get(tree_ptr)
-            if saved is not None:
-                sz, spx, spy = saved
-                state.view.user_zoom = sz
-                state.view.anchor_zoom = sz
-                state.view.pan = (spx, spy)
-            else:
-                # No saved view — reset to frame-all for the new tree.
-                from ..geo.framing import _compute_frame_all_targets
+            # Save the framed rect for the tree being left.
+            if state.view.framed_rect is not None:
+                state.tree_views[state.last_tree_ptr] = state.view.framed_rect
+        saved = state.tree_views.get(tree_ptr)
+        if saved is None:
+            # No saved framing — frame the whole tree for the new tree.
+            from ..geo.framing import _compute_frame_all_rect
 
-                area_ptr = None
-                try:
-                    area_ptr = bpy.context.area.as_pointer()
-                except (AttributeError, ReferenceError):
-                    pass
-                targets = _compute_frame_all_targets(space, region, area_ptr)
-                if targets is not None:
-                    sz, spx, spy = targets
-                    state.view.anchor_zoom = sz
-                    state.view.user_zoom = sz
-                    state.view.pan = (spx, spy)
-            state.last_tree_ptr = tree_ptr
+            area_ptr = None
+            try:
+                area_ptr = bpy.context.area.as_pointer()
+            except (AttributeError, ReferenceError):
+                pass
+            saved = _compute_frame_all_rect(space, region, area_ptr)
+        if saved is not None:
+            state.view.framed_rect = saved
+        state.view.framed_key = None
+        state.last_tree_ptr = tree_ptr
 
-    # Reserve the type-list zone before computing the map transform so
-    # node framing and panning never place tree content behind the list.
-    _step_list_width(state, settings, map_w, map_h, ui_scale)
+    # Re-fit the framed world rect when the content rect changed (type-list
+    # extent, panel size, or placement): both type-list modes then show the
+    # same area of the tree, scaled to fit the available space.
+    _refit_framed_view(state)
 
     _clamp_pan_to_viewport(space, region, state, visible)
 

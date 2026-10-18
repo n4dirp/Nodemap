@@ -42,9 +42,8 @@ from ..core.state import (
     _state,
 )
 from ..geo.framing import (
-    _compute_frame_all_targets,
+    _compute_frame_all_rect,
     _compute_frame_selected_targets,
-    _compute_frame_to_bounds_targets,
     _frame_to_bounds,
     frame_all,
     frame_selected,
@@ -1941,9 +1940,9 @@ class NODEMAP_OT_navigate(Operator):
         match button_id:
             case "ALL":
                 if smooth:
-                    targets = _compute_frame_all_targets(self._space, self._region, area_ptr)
-                    if targets:
-                        self._anim.start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                    rect = _compute_frame_all_rect(self._space, self._region, area_ptr)
+                    if rect is not None:
+                        self._anim.start_frame_animation(context, rect)
                 else:
                     frame_all(self._space, self._region, area_ptr)
             case "VIEW":
@@ -1959,17 +1958,15 @@ class NODEMAP_OT_navigate(Operator):
                                 map_h,
                                 state.view.inner_padding,
                             )
-                        targets = _compute_frame_to_bounds_targets(visible, area_ptr)
-                        self._anim.start_frame_animation(context, targets[0], [targets[1], targets[2]])
+                        self._anim.start_frame_animation(context, visible)
                 else:
                     frame_view(self._space, self._region, area_ptr)
             case "SELECTED":
                 if scope in ("BOTH", "MAP"):
                     if smooth:
-                        targets = _compute_frame_selected_targets(self._space, self._region, area_ptr)
-                        if targets:
-                            target_zoom = targets[0] if targets[0] is not None else state.view.user_zoom
-                            self._anim.start_frame_animation(context, target_zoom, [targets[1], targets[2]])
+                        rect = _compute_frame_selected_targets(self._space, self._region, area_ptr)
+                        if rect is not None:
+                            self._anim.start_frame_animation(context, rect)
                     else:
                         frame_selected(self._space, self._region, area_ptr)
                 if scope in ("BOTH", "LIST"):
@@ -2128,8 +2125,7 @@ class NODEMAP_OT_navigate(Operator):
             return False
         area_ptr = self._area.as_pointer() if self._area else 0
         if self._anim._animations_enabled(context):
-            zoom, pan_x, pan_y = _compute_frame_to_bounds_targets(bounds, area_ptr)
-            self._anim.start_frame_animation(context, zoom, [pan_x, pan_y])
+            self._anim.start_frame_animation(context, bounds)
         else:
             _frame_to_bounds(bounds, area_ptr)
         return True

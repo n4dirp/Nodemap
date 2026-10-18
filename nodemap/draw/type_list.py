@@ -27,8 +27,8 @@ from ..core.constants import (
 )
 from ..core.helpers import (
     _get_type_list_width,
+    _log_list_view_state,
     _schedule_list_anim_redraw,
-    _schedule_settle_redraw,
 )
 from ..core.list_filter import (
     _ROW_CHILD,
@@ -70,71 +70,32 @@ _CARET_WIDTH: float = 2.0
 # ---------------------------------------------------------------------------
 
 
-def _maybe_preserve_view_for_list_width(
-    state: MinimapState,
-    current_width: float,
-    new_width: float,
-    ui_scale: float,
-    min_delta: float = 0.5,
-) -> None:
-    """Preserve view alignment when the list width changes meaningfully."""
-    if abs(new_width - current_width) >= min_delta:
-        from ..geo.transforms import _preserve_view_for_list_width
-
-        _preserve_view_for_list_width(state, current_width, new_width, ui_scale, min_delta)
-
-
 def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, ui_scale: float) -> None:
     """Advance the animated type-list zone extent for this frame.
 
     Also refreshes the zone placement from the position preference and minimap
-    aspect; when the placement flips (e.g. Auto on a resize across the
-    threshold), the view is preserved so framed content does not jump.
+    aspect. The view framing follows the extent through ``_refit_framed_view``,
+    so growing the zone or flipping its placement keeps the same world rect
+    framed.
     """
     from ..geo.transforms import _list_placement
 
-    new_placement = _list_placement(map_w, map_h, str(getattr(settings, "type_list_position", "AUTO")))
-    if new_placement != state.list.list_placement and state.list.list_width > 0:
-        from ..geo.transforms import _preserve_view_for_list_width
-
-        _preserve_view_for_list_width(
-            state,
-            state.list.list_width,
-            state.list.list_width,
-            ui_scale,
-            min_delta=0.0,
-            old_placement=state.list.list_placement,
-            new_placement=new_placement,
-        )
-    state.list.list_placement = new_placement
+    state.list.list_placement = _list_placement(map_w, map_h, str(getattr(settings, "type_list_position", "AUTO")))
 
     list_font_size = settings.type_list_font_size
     target_width = _get_type_list_width(settings, state, map_w, ui_scale, list_font_size, map_h)
 
     # During an interactive width drag, the live pixel width wins.
     if state.list.dragging_width is not None:
-        _maybe_preserve_view_for_list_width(
-            state,
-            state.list.list_width,
-            state.list.dragging_width,
-            ui_scale,
-        )
         state.list.list_width = state.list.dragging_width
         return
 
     if not state.list.anim_active:
         if target_width != state.list.list_width:
-            _maybe_preserve_view_for_list_width(
-                state,
-                state.list.list_width,
-                target_width,
-                ui_scale,
+            _log_list_view_state(
+                state, "List toggle snap open" if target_width > state.list.list_width else "List toggle snap close"
             )
             state.list.list_width = target_width
-            # The settled extent just changed; the panel rect for this frame
-            # already keyed off the pre-toggle extent, so repaint once to
-            # land the panel on its final size.
-            _schedule_settle_redraw()
         return
 
     if state.list.anim_target < 0:
@@ -144,7 +105,6 @@ def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, 
         elif time.perf_counter() - state.list.anim_start > TYPE_LIST_ANIM_AWAIT_TIMEOUT:
             state.list.anim_active = False
             state.list.list_width = target_width
-            _schedule_settle_redraw()
             return
         else:
             state.list.list_width = state.list.anim_from
@@ -162,30 +122,14 @@ def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, 
     if progress >= 1.0:
         new_width = state.list.anim_target
 
-    # Apply every animation step exactly. Discarding the tiny eased deltas
-    # (default 0.5px tolerance) would break the round trip: the divider
-    # inset/wiggling at the sub-pixel end of the curve would never transfer
-    # to pan/zoom, so each expand/collapse cycle leaves a small residue that
-    # accumulates across toggles when the zoomed zone is off-center.
-    if new_width != state.list.list_width:
-        _maybe_preserve_view_for_list_width(
-            state,
-            state.list.list_width,
-            new_width,
-            ui_scale,
-            min_delta=0.0,
-        )
+    # Apply every animation step exactly: the panel size follows the extent,
+    # and the framed view is re-fitted from the eased geometry each frame, so
+    # the round trip is exact instead of accumulating a residue per toggle.
     state.list.list_width = new_width
 
     if progress >= 1.0:
         state.list.anim_active = False
-        # The type-list animation is over; drop the batch key so the next draw
-        # rebuilds at the final scale immediately instead of waiting the
-        # zoom settle window.
-        # state.cache.batch_key = None
-        # One repaint after completion so the panel size (computed earlier in
-        # the frame from the anim state) lands exactly on the final pair.
-        _schedule_settle_redraw()
+        _log_list_view_state(state, "List toggle settle")
     else:
         _schedule_list_anim_redraw(state)
 

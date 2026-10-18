@@ -15,11 +15,13 @@ from ..core.helpers import _reduce_motion_enabled, get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
 from ..geo.transforms import (
     _clamp_pan_to_viewport,
+    _framed_rect_from_view,
     _get_visible_rect,
     _interp_rect,
-    _minimap_view_from_world_rect,
-    _minimap_world_rect,
+    _mark_view_authored,
+    _set_framed_rect,
     _smooth_view_fac,
+    _view_for_world_rect,
 )
 
 if TYPE_CHECKING:
@@ -96,10 +98,8 @@ class AnimationController:
         "drag_active",
         "_last_drag_tick",
         "frame_anim_active",
-        "frame_anim_start_zoom",
-        "frame_anim_start_pan",
-        "frame_anim_target_zoom",
-        "frame_anim_target_pan",
+        "frame_anim_start_rect",
+        "frame_anim_target_rect",
         "frame_anim_progress",
         "frame_anim_total",
         "editor_anim_active",
@@ -125,10 +125,8 @@ class AnimationController:
         self.drag_active: bool = False
         self._last_drag_tick: float = 0.0
         self.frame_anim_active: bool = False
-        self.frame_anim_start_zoom: float = 1.0
-        self.frame_anim_start_pan: list[float] = [0.0, 0.0]
-        self.frame_anim_target_zoom: float = 1.0
-        self.frame_anim_target_pan: list[float] = [0.0, 0.0]
+        self.frame_anim_start_rect: tuple[float, float, float, float] | None = None
+        self.frame_anim_target_rect: tuple[float, float, float, float] | None = None
         self.frame_anim_progress: float = 0.0
         self.frame_anim_total: float = 1.0
         self.editor_anim_active: bool = False
@@ -153,10 +151,8 @@ class AnimationController:
         self.drag_active = False
         self._last_drag_tick = 0.0
         self.frame_anim_active = False
-        self.frame_anim_start_zoom = 1.0
-        self.frame_anim_start_pan = [0.0, 0.0]
-        self.frame_anim_target_zoom = 1.0
-        self.frame_anim_target_pan = [0.0, 0.0]
+        self.frame_anim_start_rect = None
+        self.frame_anim_target_rect = None
         self.frame_anim_progress = 0.0
         self.frame_anim_total = 1.0
         self.editor_anim_active = False
@@ -255,10 +251,11 @@ class AnimationController:
         """Snap the minimap view to the frame-animation target and stop."""
         op = self._op
         state: MinimapState | None = op._state
-        if state:
-            state.view.anchor_zoom = self.frame_anim_target_zoom
-            state.view.user_zoom = self.frame_anim_target_zoom
-            state.view.pan = (self.frame_anim_target_pan[0], self.frame_anim_target_pan[1])
+        if state and self.frame_anim_target_rect is not None:
+            # Fit the target rect: same rule as every animation step, so the
+            # landing frame does not jump.
+            _set_framed_rect(state, self.frame_anim_target_rect)
+            _mark_view_authored(state)
             _clamp_pan_to_viewport(op._space, op._region, state)
             # The final frame lands inside the zoom-settle window, which would
             # defer the batch rebuild; force it so the bake matches the target
@@ -393,23 +390,26 @@ class AnimationController:
             # view2d.pan tags the region redraw itself; no explicit call needed.
             self._pan_editor(context, dx, dy)
 
-    def start_frame_animation(self, context: Context, target_zoom: float, target_pan: list[float]) -> None:
-        """Begin a zoom+pan animation toward the given target."""
+    def start_frame_animation(self, context: Context, target_rect: tuple[float, float, float, float]) -> None:
+        """Begin a zoom+pan animation toward *target_rect* in tree coordinates."""
         op = self._op
         state: MinimapState | None = op._state
         if not state:
             return
         if self.frame_anim_active:
             self.frame_anim_active = False
+        start_rect = _framed_rect_from_view(state)
+        if start_rect is None:
+            return
         self.frame_anim_progress = 0.0
-        self.frame_anim_start_zoom = state.view.user_zoom
-        self.frame_anim_start_pan = [state.view.pan[0], state.view.pan[1]]
-        self.frame_anim_target_zoom = target_zoom
-        self.frame_anim_target_pan = [target_pan[0], target_pan[1]]
-        start_world = _minimap_world_rect(state, self.frame_anim_start_zoom, self.frame_anim_start_pan)
-        target_world = _minimap_world_rect(state, target_zoom, self.frame_anim_target_pan)
-        self.frame_anim_total = self._total_frames(context, _smooth_view_fac(start_world, target_world))
+        self.frame_anim_start_rect = start_rect
+        self.frame_anim_target_rect = target_rect
+        self.frame_anim_total = self._total_frames(context, _smooth_view_fac(start_rect, target_rect))
         self.frame_anim_active = True
+        # Remember the target as the framed rect right away: the content rect
+        # does not change mid-animation, so the key still matches and the view
+        # is only re-fitted when the animation lands.
+        state.view.framed_rect = target_rect
         self.create_timer(context)
 
     def apply_frame_animation(self, context: Context) -> None:
@@ -418,7 +418,7 @@ class AnimationController:
         if not self.frame_anim_active:
             return
         state: MinimapState | None = op._state
-        if not state:
+        if not state or self.frame_anim_start_rect is None or self.frame_anim_target_rect is None:
             self.frame_anim_active = False
             self.destroy_timer(context)
             return
@@ -429,12 +429,19 @@ class AnimationController:
             op._redraw_ui()
             return
         eased = self._ease_smooth(progress)
-        start_world = _minimap_world_rect(state, self.frame_anim_start_zoom, self.frame_anim_start_pan)
-        target_world = _minimap_world_rect(state, self.frame_anim_target_zoom, self.frame_anim_target_pan)
-        zoom, pan = _minimap_view_from_world_rect(state, _interp_rect(start_world, target_world, eased))
+        interp = _interp_rect(self.frame_anim_start_rect, self.frame_anim_target_rect, eased)
+        fitted = _view_for_world_rect(state, interp)
+        if fitted is None:
+            self._finish_frame_animation(context)
+            op._redraw_ui()
+            return
+        zoom, pan = fitted
         state.view.user_zoom = zoom
         state.view.anchor_zoom = zoom
         state.view.pan = pan
+        # Own the pair for this frame so the draw does not read the eased view
+        # as an interaction and adopt it as the framed rect.
+        _mark_view_authored(state)
         _clamp_pan_to_viewport(op._space, op._region, state)
         op._redraw_ui()
 
