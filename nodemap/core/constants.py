@@ -121,7 +121,7 @@ PAN_ANIM_FPS: float = 100.0
 PAN_ANIM_INTERVAL: float = 1.0 / PAN_ANIM_FPS
 
 # Fixed animation duration in frames for click-to-pan (fast snap).
-PAN_FRAMES: float = 20.0
+PAN_FRAMES: float = 10.0
 
 # Minimum animation duration in frames so close pans stay visible instead of
 # collapsing to a single tick.
@@ -158,7 +158,7 @@ TYPE_LIST_RESERVE_TOP: int = 2 * BUTTON_SIZE + 3 * CONTENT_PADDING - 1
 # Batch building
 # ---------------------------------------------------------------------------
 MIN_SOCKET_SCALE: float = 0.1
-SCALE_REBUILD_REL: float = 0.015
+SCALE_REBUILD_REL: float = 0.05
 BATCH_DRIFT_PX: float = 384.0
 CULL_MARGIN_PX: float = BATCH_DRIFT_PX + 32.0
 # While the user is actively zooming, defer scale-bucket rebuilds and keep
