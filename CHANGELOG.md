@@ -1,15 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [2.1.0] - 2026-10-19
 
 ### Added
 - Added support for draw Zone Fills (simulation, repeat, for-each, and closure)
-- Added a dedicated minimap size (Size X/Y with List) used while the type list is open; the panel grows and shrinks together with the list as it toggles
-- Added an Auto Hide option that hides the minimap buttons when the pointer moves away
+- Added a dedicated minimap size used while the type list is open
+- Added an Auto-Hide option that hides the minimap buttons when the pointer moves away
 
 ### Changed
-- Updated button icons
-- Require Blender 4.4 or newer
+- Improved button icons
+- Expanded Blender version compatibility to 4.4+
 
 
 ## [2.0.0] - 2026-09-15
