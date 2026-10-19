@@ -697,6 +697,12 @@ def _ensure_minimap_batches(
     )
     bake_scale = minimap_state.cache.batch_scale
     anchor_x, anchor_y = minimap_state.cache.batch_anchor
+    # The cull window and the baked typography assume the panel rect the bake
+    # was culled against. A different rect (type-list toggle, panel or list
+    # resize) is therefore a rebuild reason in its own right, not just an
+    # indirect scale/anchor change — and it never counts as a zoom defer.
+    rect = (map_x, map_y, map_w, map_h)
+    rect_changed = rect != minimap_state.cache.batch_rect
     # A settle bump changes only tree_data_version, so wire/marker freshness
     # must gate the early return too — otherwise wires stay frozen at their
     # pre-drag positions until an unrelated rebuild trigger fires.
@@ -710,7 +716,8 @@ def _ensure_minimap_batches(
         query,
     )
     wires_fresh = wire_key == minimap_state.cache.wire_key and minimap_state.cache.wire_scale == bake_scale
-    now = time.monotonic()
+    # Milliseconds, so the settle window below lines up with ZOOM_SETTLE_MS.
+    now = time.monotonic() * 1000.0
     # Track active zoom so scale-bucket rebuilds can be deferred until the
     # zoom gesture settles (see the defer branch below).
     if abs(scale - minimap_state.cache.last_seen_scale) > 1e-4 * max(abs(scale), 1e-6):
@@ -719,6 +726,7 @@ def _ensure_minimap_batches(
     if (
         key == minimap_state.cache.batch_key
         and wires_fresh
+        and not rect_changed
         and bake_scale > 0.0
         and abs(scale - bake_scale) <= SCALE_REBUILD_REL * max(bake_scale, 1e-6)
         and abs(map_anchor_x - anchor_x) <= BATCH_DRIFT_PX
@@ -727,10 +735,13 @@ def _ensure_minimap_batches(
         return
     # While the scale is still changing, keep the current bake and let the
     # content matrix scale it exactly. Rebuild once the zoom settles or the
-    # drift escapes the ratio window (culling/typography would go stale).
+    # drift escapes the ratio window (culling/typography would go stale). A
+    # panel resize is never deferred: its larger bake would keep stale culling
+    # and label sizes, and the ratio window only ever matches reductions.
     if (
         key == minimap_state.cache.batch_key
         and wires_fresh
+        and not rect_changed
         and bake_scale > 0.0
         and abs(map_anchor_x - anchor_x) <= BATCH_DRIFT_PX
         and abs(map_anchor_y - anchor_y) <= BATCH_DRIFT_PX
@@ -745,6 +756,8 @@ def _ensure_minimap_batches(
         reasons.append("batch_key mismatch")
     if not wires_fresh:
         reasons.append("wires stale")
+    if rect_changed:
+        reasons.append("panel rect changed")
     if bake_scale <= 0.0 or abs(scale - bake_scale) > SCALE_REBUILD_REL * max(bake_scale, 1e-6):
         reasons.append(f"scale {bake_scale:.4f} -> {scale:.4f}")
     if abs(map_anchor_x - anchor_x) > BATCH_DRIFT_PX or abs(map_anchor_y - anchor_y) > BATCH_DRIFT_PX:
@@ -957,6 +970,7 @@ def _ensure_minimap_batches(
     minimap_state.cache.batch_key = key
     minimap_state.cache.batch_scale = bake_scale
     minimap_state.cache.batch_anchor = (map_anchor_x, map_anchor_y)
+    minimap_state.cache.batch_rect = rect
 
 
 def _convert_wire_endpoints(

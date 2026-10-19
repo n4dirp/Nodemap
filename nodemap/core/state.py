@@ -214,9 +214,14 @@ class RenderCache:
     batch_key: Any = None
     batch_scale: float = 1.0
     batch_anchor: Vec2 = (0.0, 0.0)
+    # Panel rect (map_x, map_y, map_w, map_h) the current bake was culled
+    # against. The baked vertices assume it is unchanged; a different rect
+    # (type-list toggle, panel resize) invalidates them like a key change.
+    batch_rect: Rect = (0.0, 0.0, 0.0, 0.0)
     wire_key: Any = None
     wire_scale: float = 1.0
     last_seen_scale: float = 0.0
+    # Monotonic timestamp in milliseconds of the last scale change.
     scale_last_change_ts: float = 0.0
     _batches_dirty: bool = False
 
@@ -236,6 +241,7 @@ class RenderCache:
         "socket_shadow",
         "reroute_batch",
         "batch_key",
+        "batch_rect",
         "wire_key",
         "list_key",
         "list_entries",

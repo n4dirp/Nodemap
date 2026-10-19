@@ -91,7 +91,12 @@ def _step_list_width(state: MinimapState, settings, panel_w: float, panel_h: flo
         return
 
     if not state.list.anim_active:
-        state.list.list_width = target_width
+        if target_width != state.list.list_width:
+            # The panel size and content rect follow the zone extent, so a
+            # snapped toggle (Reduce Motion, or animations off) still needs a
+            # re-bake for the new geometry.
+            state.list.list_width = target_width
+            state.cache._batches_dirty = True
         return
 
     if state.list.anim_target < 0:
@@ -101,6 +106,7 @@ def _step_list_width(state: MinimapState, settings, panel_w: float, panel_h: flo
         elif time.perf_counter() - state.list.anim_start > TYPE_LIST_ANIM_AWAIT_TIMEOUT:
             state.list.anim_active = False
             state.list.list_width = target_width
+            state.cache._batches_dirty = True
             return
         else:
             state.list.list_width = state.list.anim_from
@@ -124,6 +130,10 @@ def _step_list_width(state: MinimapState, settings, panel_w: float, panel_h: flo
     state.list.list_width = new_width
 
     if progress >= 1.0:
+        # Settle on the final geometry: flag one re-bake so the batches are
+        # culled against the settled panel rect even when the last eased step
+        # already matched it (the draw consumes the flag this same frame).
+        state.cache._batches_dirty = True
         state.list.anim_active = False
     else:
         _schedule_list_anim_redraw(state)
