@@ -66,19 +66,22 @@ class NODEMAP_PT_popup(Panel):
         if root_body:
             flow = root_body.grid_flow(row_major=True, columns=2, align=True)
             flow.prop(settings, "show_frames", text="Frames")
-            flow.prop(settings, "show_frame_labels", text="Frame Labels")
 
             flow.prop(settings, "show_node_colors", text="Node Colors")
-            flow.prop(settings, "show_node_labels", text="Node Labels")
             flow.prop(settings, "show_node_outline", text="Node Outline")
+            flow.prop(settings, "show_socket_indicators", text="Node Sockets")
 
-            sub = flow.row(align=True)
-            sub.active = settings.show_node_labels
-            sub.prop(settings, "compact_node_labels", text="Compact Labels")
+            flow.prop(settings, "show_node_count", text="Total Count")
+            flow.prop(settings, "show_reroutes", text="Wire Reroutes")
 
-            # flow.prop(settings, "show_reroutes", text="Reroutes")
-            # flow.prop(settings, "show_socket_indicators", text="Sockets")
-            flow.prop(settings, "show_node_count", text="Node Count")
+            header, body = layout.panel("NODEMAP_PT_labels", default_closed=True)
+            header.label(text="Labels")
+            if body:
+                flow = body.grid_flow(row_major=True, columns=2, align=True)
+                flow.prop(settings, "show_node_labels", text="Node Labels")
+
+                flow.prop(settings, "compact_node_labels", text="Name Initials")
+                flow.prop(settings, "show_frame_labels", text="Frame Labels")
 
             if settings.use_interactive:
                 header, body = layout.panel("NODEMAP_PT_buttons", default_closed=True)
@@ -104,13 +107,15 @@ class NODEMAP_PT_popup(Panel):
                     flow = body.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
                     flow.prop(settings, "show_search_bar", text="Search Bar")
                     flow.prop(settings, "use_follow_active", text="Follow Active")
+                    flow.prop(settings, "use_group_by_type")
+
                     sub = flow.row(align=True)
                     sub.active = settings.show_node_colors
                     sub.prop(settings, "show_type_colors", text="Type Colors")
 
                     col = body.column()
-                    col.label(text="Position")
-                    col.row().prop(settings, "type_list_position", text="Position", expand=True)
+                    col.label(text="List Position")
+                    col.row().prop(settings, "type_list_position", expand=True)
 
             header, body = layout.panel("NODEMAP_PT_wires", default_closed=True)
             header.prop(settings, "show_wires", text="Wires")

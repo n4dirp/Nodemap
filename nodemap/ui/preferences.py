@@ -598,7 +598,7 @@ class NODEMAP_PG_settings(PropertyGroup):
         description="How entries are ordered in the node-type list",
         items=[
             ("NAME", "Alphabetical", "Order alphabetically by type name"),
-            ("COUNT", "Count", "Order by node count, highest first"),
+            ("COUNT", "Group Count", "Order by node count, highest first"),
         ],
         default="NAME",
     )
@@ -835,7 +835,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "minimap_height", text="Y")
         if settings.show_type_list:
             col = group.column(align=True)
-            col.prop(settings, "minimap_width_with_list", text="Size X with List")
+            col.prop(settings, "minimap_width_with_list", text="Size X (with List)")
             col.prop(settings, "minimap_height_with_list", text="Y")
         group.separator()
         col = group.column(align=True)
@@ -868,8 +868,9 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         layout.separator()
         col = layout.column(heading="Labels")
         col.prop(settings, "show_node_labels", text="Node Labels")
-        if settings.show_node_labels:
-            col.prop(settings, "compact_node_labels", text="Compact Node Labels")
+        sub = col.row()
+        sub.active = settings.show_node_labels
+        sub.prop(settings, "compact_node_labels", text="Name Initials")
         if settings.show_frames:
             col.prop(settings, "show_frame_labels", text="Frame Labels")
 
@@ -881,7 +882,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         layout.separator()
         col = layout.column(heading="UI")
-        col.prop(settings, "show_node_count", text="Total Node Count")
+        col.prop(settings, "show_node_count", text="Total Count")
 
     def _draw_buttons_column(self, row):
         """Draw the Buttons column for the minimap action buttons."""
@@ -917,12 +918,13 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.active = settings.show_type_list
         col.row().prop(settings, "type_list_position", text="Position", expand=True)
         col.prop(settings, "type_list_font_size", text="Font Size")
-        row = col.row()
-        row.prop(settings, "show_search_bar", text="Search Bar")
-        sub = row.row()
+        col.prop(settings, "show_search_bar", text="Search Bar")
+        sub = col.row()
         sub.active = settings.show_node_colors
         sub.prop(settings, "show_type_colors", text="Type Colors")
-        row.prop(settings, "use_follow_active")
+        col.prop(settings, "use_follow_active")
+
+        col.separator()
         col.prop(settings, "use_group_by_type")
         if settings.use_group_by_type:
             col.row().prop(settings, "type_list_sort", text="Sort", expand=True)
@@ -936,11 +938,10 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         group.separator()
         col = group.column()
         col.active = settings.show_wires
-        row = col.row(align=True)
-        row.prop(settings, "show_wire_color", text="Wire Colors")
-        row.prop(settings, "show_dashed_wires", text="Dashed Fields")
-        row.prop(settings, "show_wires_selected", text="Selected Wires")
-        sub = col.column(heading="Noodle Curving")
+        col.prop(settings, "show_wire_color", text="Wire Colors")
+        col.prop(settings, "show_dashed_wires", text="Dashed Fields")
+        col.prop(settings, "show_wires_selected", text="Highlight Selections")
+        sub = col.column(heading="Custom Curving")
         row = sub.row(align=True, heading="")
         row.prop(settings, "use_custom_noodle_curving", text="")
         sub = row.row(align=True)
@@ -992,18 +993,19 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             return
         settings = self.settings
         group = layout.column()
-        split = group.split(factor=0.4)
-        split.label(text="")
-        row = split.row()
-        row.use_property_split = False
-        col = row.column()
+
+        col = group.column()
+        col.prop(settings, "use_auto_zoom", text="Auto Zoom")
+        col.prop(settings, "use_follow_view", text="Follow View")
+        col.separator()
+
+        col = group.column()
         col.prop(settings, "use_interactive", text="Interactive Map")
+
         sub = col.column()
         sub.active = settings.use_interactive and not _reduce_motion_enabled()
-        sub.prop(settings, "use_animations", text="Animations")
-        col = row.column()
-        col.prop(settings, "use_follow_view", text="Follow View")
-        col.prop(settings, "use_auto_zoom", text="Auto Zoom")
+        sub.prop(settings, "use_animations", text="Animation Effects")
+
         group.separator()
         interaction_column = group.column()
         interaction_column.active = settings.use_interactive
@@ -1026,12 +1028,23 @@ class NODEMAP_AddonPreferences(AddonPreferences):
 
         row = split.row(align=True)
         row.alignment = "RIGHT"
-        box = split.box().column(align=True)
+
+        box = split.box().column()
         box.active = False
-        box.label(text="Ctrl Drag: Pan View")
-        box.label(text="Shift Drag: Frame Region (Minimap)")
-        box.label(text="Alt Drag: Frame Region (Editor)")
-        box.label(text="Alt Scroll: Toggle Zoom")
+        box.label(text="Key Modifiers", icon="INFO")
+        box.separator(type="LINE")
+
+        shortcuts = [
+            ("Ctrl Drag", "Pan View"),
+            ("Shift Drag", "Frame Region (Minimap)"),
+            ("Alt Drag", "Frame Region (Editor)"),
+            ("Alt Scroll", "Toggle Zoom"),
+        ]
+
+        for shortcut, action in shortcuts:
+            split = box.split(factor=0.2, align=True)
+            split.label(text=shortcut)
+            split.label(text=action)
 
     def _draw_shortcuts(self, layout, context):
         """Draw the Shortcuts section reflecting the user keymap."""
