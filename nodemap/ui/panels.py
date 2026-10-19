@@ -95,6 +95,7 @@ class NODEMAP_PT_popup(Panel):
                     col = row.column()
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")
                     col.prop(settings, "show_move_button", text="Move Handle")
+                    col.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
 
                 header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
                 header.prop(settings, "show_type_list", text="Type List")

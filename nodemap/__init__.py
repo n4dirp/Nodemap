@@ -16,7 +16,13 @@ import bpy
 from bpy.types import SpaceNodeEditor
 
 from .core.icons import _load_icons, _unload_icons
-from .core.state import _cleanup_shared_tree_caches, _ensure_area_states, _minimap_window_operators, _registration_state
+from .core.state import (
+    _cleanup_button_hide_timers,
+    _cleanup_shared_tree_caches,
+    _ensure_area_states,
+    _minimap_window_operators,
+    _registration_state,
+)
 from .core.theme import _srgb_to_linear
 from .draw.icon_textures import _clear_icon_textures
 from .draw.overlay import draw_minimap
@@ -119,6 +125,7 @@ def unregister():
 
     _minimap_window_operators.clear()
     _cleanup_shared_tree_caches()
+    _cleanup_button_hide_timers()
     _clear_icon_textures()
     _srgb_to_linear.cache_clear()
     _registration_state["done"] = False

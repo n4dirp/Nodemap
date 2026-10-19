@@ -35,8 +35,10 @@ from ..core.list_filter import filter_matching_nodes
 from ..core.state import (
     MinimapState,
     ResizeHandle,
+    _cancel_button_hide_timer,
     _minimap_window_operators,
     _registration_state,
+    _schedule_button_hide,
     _shared_tree_cache,
     _state,
     _unregister_pending_timer,
@@ -53,6 +55,7 @@ from ..geo.transforms import (
     _get_minimap_transform,
     _get_visible_rect,
     _map_duo_size,
+    _map_settled_size,
     _refit_framed_view,
 )
 from . import content_draw
@@ -652,6 +655,44 @@ def _draw_marquee(
     )
 
 
+def _minimap_has_focus(state: MinimapState) -> bool:
+    """Return True while the minimap owns the pointer or an active interaction.
+
+    The button chrome stays visible whenever the cursor is over the minimap
+    (including its type-list zone) or the user is dragging, resizing,
+    scrolling, or typing in the search box.
+    """
+    interaction = state.interaction
+    list_state = state.list
+    return (
+        interaction.hovered_minimap
+        or interaction.pressed
+        or interaction.marquee_active
+        or interaction.resize_active is not None
+        or state.view.moving
+        or list_state.search_focused
+        or list_state.dragging_width is not None
+        or list_state.scrollbar_dragging
+        or list_state.h_scrollbar_dragging
+    )
+
+
+def _sync_button_auto_hide(settings, state: MinimapState, area_ptr: int | None) -> None:
+    """Show buttons while focused, scheduling an auto-hide after focus is lost.
+
+    With the preference off this restores the buttons and drops any pending
+    hide so toggling the option never leaves them stuck hidden.
+    """
+    auto_hide = bool(getattr(settings, "use_auto_hide_buttons", False))
+    if not auto_hide or _minimap_has_focus(state):
+        if state.buttons.auto_hidden or state.buttons.hide_timer is not None:
+            _cancel_button_hide_timer(state)
+            state.buttons.auto_hidden = False
+        return
+    if not state.buttons.auto_hidden and state.buttons.hide_timer is None:
+        _schedule_button_hide(state, area_ptr, float(getattr(settings, "buttons_hide_delay", 0.4)))
+
+
 def draw_minimap() -> None:
     """Orchestrate minimap drawing in the Node Editor."""
     context = bpy.context
@@ -723,17 +764,12 @@ def draw_minimap() -> None:
     corner = settings.current_position
 
     # An interaction that moved the view since the last frame becomes the new
-    # framing target, then the type-list extent advances so the panel size
-    # below keys off this frame's extent instead of lagging a frame behind.
+    # framing target, then the type-list extent advances against the panel size
+    # the toggle is heading to, so the placement, the reserve, and the content
+    # rect are already right on this frame instead of one redraw later.
     _adopt_view_framing(state)
-    prev_rect = state.view.rect
-    if prev_rect[2] > 1 and prev_rect[3] > 1:
-        extent_w, extent_h = prev_rect[2], prev_rect[3]
-    else:
-        # First frame: clamp the extent against the with-list pair.
-        extent_w = settings.minimap_width_with_list * ui_scale
-        extent_h = settings.minimap_height_with_list * ui_scale
-    _step_list_width(state, settings, extent_w, extent_h, ui_scale)
+    panel_w, panel_h = _map_settled_size(state, settings, ui_scale)
+    _step_list_width(state, settings, panel_w, panel_h, ui_scale)
 
     rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, state)
     if rect is None:
@@ -987,7 +1023,13 @@ def draw_minimap() -> None:
             mvp=base_mvp,
         )
 
-    button_ids = _visible_button_ids(settings)
+    try:
+        area_ptr = context.area.as_pointer()
+    except (AttributeError, ReferenceError):
+        area_ptr = None
+    _sync_button_auto_hide(settings, state, area_ptr)
+
+    button_ids = [] if state.buttons.auto_hidden else _visible_button_ids(settings)
     button_layout = _layout_buttons(state, button_ids, map_x, map_y, map_w, map_h, padding, ui_scale, settings)
     state.buttons.rects.clear()
     state.buttons.rects.update(button_layout.rects)

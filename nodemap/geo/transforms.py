@@ -44,6 +44,37 @@ def _list_top_inset(list_width: float, ui_scale: float) -> float:
     return ELEMENT_GAP * ui_scale + list_width
 
 
+def _map_size_pair(settings, ui_scale: float) -> tuple[float, float, float, float]:
+    """Return ``(base_w, base_h, list_w, list_h)`` panel sizes in scaled pixels.
+
+    ``minimap_width``/``minimap_height`` apply while the type list is closed,
+    ``minimap_width_with_list``/``minimap_height_with_list`` while it is open.
+    """
+    return (
+        settings.minimap_width * ui_scale,
+        settings.minimap_height * ui_scale,
+        settings.minimap_width_with_list * ui_scale,
+        settings.minimap_height_with_list * ui_scale,
+    )
+
+
+def _map_settled_size(minimap_state: MinimapState, settings, ui_scale: float) -> tuple[float, float]:
+    """Return the panel size the type-list toggle is heading to.
+
+    The type-list placement and the zone extent resolve against this size
+    instead of the previous frame's panel rect, so the reserved content area
+    and the framed view are right on the frame the list toggles (and on the
+    final frame of its animation) rather than one redraw later.
+    """
+    base_w, base_h, list_w, list_h = _map_size_pair(settings, ui_scale)
+    list_state = minimap_state.list
+    if list_state.anim_active and list_state.anim_target >= 0:
+        # A resolved animation decides where the panel lands.
+        return (list_w, list_h) if list_state.anim_target > 0 else (base_w, base_h)
+    show_list = bool(getattr(settings, "show_type_list", False)) and bool(getattr(settings, "use_interactive", False))
+    return (list_w, list_h) if show_list else (base_w, base_h)
+
+
 def _map_duo_size(minimap_state: MinimapState, settings, ui_scale: float) -> tuple[float, float]:
     """Return the frame's minimap size in scaled pixels.
 
@@ -53,10 +84,7 @@ def _map_duo_size(minimap_state: MinimapState, settings, ui_scale: float) -> tup
     each other with the same progress that drives the list zone extent, so
     the panel grows together with the list instead of snapping.
     """
-    base_w = settings.minimap_width * ui_scale
-    base_h = settings.minimap_height * ui_scale
-    list_w = settings.minimap_width_with_list * ui_scale
-    list_h = settings.minimap_height_with_list * ui_scale
+    base_w, base_h, list_w, list_h = _map_size_pair(settings, ui_scale)
 
     list_state = minimap_state.list
     if list_state.anim_active and list_state.anim_target >= 0:

@@ -69,20 +69,21 @@ _CARET_WIDTH: float = 2.0
 # ---------------------------------------------------------------------------
 
 
-def _step_list_width(state: MinimapState, settings, map_w: float, map_h: float, ui_scale: float) -> None:
+def _step_list_width(state: MinimapState, settings, panel_w: float, panel_h: float, ui_scale: float) -> None:
     """Advance the animated type-list zone extent for this frame.
 
-    Also refreshes the zone placement from the position preference and minimap
-    aspect. The view framing follows the extent through ``_refit_framed_view``,
-    so growing the zone or flipping its placement keeps the same world rect
-    framed.
+    *panel_w*/*panel_h* is the panel size the toggle is heading to: the zone
+    placement and extent resolve against it, never against the previous
+    frame's rect, so both are final on the frame the list toggles. The view
+    framing follows the extent through ``_refit_framed_view``, so growing the
+    zone or flipping its placement keeps the same world rect framed.
     """
     from ..geo.transforms import _list_placement
 
-    state.list.list_placement = _list_placement(map_w, map_h, str(getattr(settings, "type_list_position", "AUTO")))
+    state.list.list_placement = _list_placement(panel_w, panel_h, str(getattr(settings, "type_list_position", "AUTO")))
 
     list_font_size = settings.type_list_font_size
-    target_width = _get_type_list_width(settings, state, map_w, ui_scale, list_font_size, map_h)
+    target_width = _get_type_list_width(settings, state, panel_w, ui_scale, list_font_size, panel_h)
 
     # During an interactive width drag, the live pixel width wins.
     if state.list.dragging_width is not None:

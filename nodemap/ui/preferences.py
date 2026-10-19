@@ -77,6 +77,20 @@ def _update_invalidate_all(self, context):
         pass
 
 
+def _update_redraw(self, context):
+    """Redraw the Node Editor for a display-only preference change.
+
+    Used when a setting changes live chrome (e.g. the minimap buttons) that is
+    drawn every frame rather than baked into a GPU batch.
+    """
+    try:
+        from ..core.helpers import redraw_ui
+
+        redraw_ui("NODE_EDITOR")
+    except ImportError:
+        pass
+
+
 def _update_invalidate_batches(self, context):
     """Invalidate GPU batches only for display preference changes.
 
@@ -349,7 +363,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     passepartout_alpha: FloatProperty(
         name="Passepartout Opacity",
         description="Opacity of the dimming applied around the active view",
-        default=0.3,
+        default=0.4,
         min=0.0,
         max=0.9,
         precision=3,
@@ -412,6 +426,24 @@ class NODEMAP_PG_settings(PropertyGroup):
         description="Show a button in the minimap to drag and reposition the minimap",
         default=True,
         update=_update_invalidate_batches,
+    )
+
+    use_auto_hide_buttons: BoolProperty(
+        name="Auto Hide",
+        description="Hide the minimap buttons when the pointer moves away from the minimap",
+        default=False,
+        update=_update_redraw,
+    )
+
+    buttons_hide_delay: FloatProperty(
+        name="Hide Delay",
+        description="Seconds before the minimap buttons hide once the pointer leaves",
+        default=1.0,
+        min=0.0,
+        max=2.0,
+        step=0.05,
+        unit="TIME_ABSOLUTE",
+        update=_update_redraw,
     )
 
     show_node_labels: BoolProperty(
@@ -805,6 +837,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             col = group.column(align=True)
             col.prop(settings, "minimap_width_with_list", text="Size X with List")
             col.prop(settings, "minimap_height_with_list", text="Y")
+        group.separator()
         col = group.column(align=True)
         col.prop(settings, "max_width_percent", text="Max Width")
         col.prop(settings, "max_height_percent", text="Max Height")
@@ -814,49 +847,48 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         self._section_header(layout, "show_objects", "Objects")
         if not self.show_objects:
             return
-        group = layout.column()
-        split = group.split(factor=0.4)
-        split.label(text="")
-        row = split.row()
-        row.use_property_split = False
-        self._draw_show_column(row)
-        self._draw_labels_column(row)
-        self._draw_buttons_column(row)
+        group = layout.column(align=True)
+        self._draw_show_column(group)
         group.separator()
-        self._draw_type_list(group)
+        self._draw_buttons_column(group.box())
         group.separator()
-        self._draw_wires(group)
+        self._draw_type_list(group.box())
+        group.separator()
+        self._draw_wires(group.box())
 
-    def _draw_show_column(self, row):
+    def _draw_show_column(self, layout):
         """Draw the Show column for node and wire visibility."""
         settings = self.settings
-        col = row.column(heading="Show")
-        col.prop(settings, "show_frames", text="Frames")
-        col.prop(settings, "show_zone_fills", text="Zone Fills")
+
+        col = layout.column(heading="Nodes")
         col.prop(settings, "show_node_colors", text="Node Colors")
         col.prop(settings, "show_node_outline", text="Node Outline")
         col.prop(settings, "show_socket_indicators", text="Node Sockets")
-        col.prop(settings, "show_reroutes", text="Reroutes")
-        col.prop(settings, "show_node_count", text="Total Count")
-        sub = col.row()
-        sub.active = settings.use_interactive
-        sub.prop(settings, "show_type_list", text="Type List")
-        col.prop(settings, "show_wires", text="Wires")
 
-    def _draw_labels_column(self, row):
-        """Draw the Labels column for node and frame labels."""
-        settings = self.settings
-        col = row.column(heading="Labels")
+        layout.separator()
+        col = layout.column(heading="Labels")
         col.prop(settings, "show_node_labels", text="Node Labels")
         if settings.show_node_labels:
-            col.prop(settings, "compact_node_labels", text="Compact Labels")
+            col.prop(settings, "compact_node_labels", text="Compact Node Labels")
         if settings.show_frames:
             col.prop(settings, "show_frame_labels", text="Frame Labels")
+
+        layout.separator()
+        col = layout.column(heading="Layout")
+        col.prop(settings, "show_frames", text="Frames")
+        col.prop(settings, "show_reroutes", text="Reroutes")
+        col.prop(settings, "show_zone_fills", text="Zone Fills")
+
+        layout.separator()
+        col = layout.column(heading="UI")
+        col.prop(settings, "show_node_count", text="Total Node Count")
 
     def _draw_buttons_column(self, row):
         """Draw the Buttons column for the minimap action buttons."""
         settings = self.settings
-        col = row.column(heading="Buttons")
+        group = row.column()
+        group.label(text="Buttons")
+        col = row.column()
         col.active = settings.use_interactive
         col.prop(settings, "show_frame_all_button", text="Frame All")
         col.prop(settings, "show_frame_view_button", text="Frame View")
@@ -864,12 +896,23 @@ class NODEMAP_AddonPreferences(AddonPreferences):
             col.prop(settings, "show_frame_selected_button", text="Frame Selected")
         col.prop(settings, "show_list_toggle_button", text="List Toggle")
         col.prop(settings, "show_move_button", text="Move Handle")
+        col.separator()
+        col.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
+        sub = col.row(align=True)
+        sub.active = settings.use_auto_hide_buttons
+        sub.prop(settings, "buttons_hide_delay", text="Delay")
 
     def _draw_type_list(self, group):
         """Draw the Type List subsection within the Objects group."""
         settings = self.settings
         group = group.column()
         group.label(text="Type List")
+
+        sub = group.row()
+        sub.active = settings.use_interactive
+        sub.prop(settings, "show_type_list", text="Show Type List")
+        group.separator()
+
         col = group.column()
         col.active = settings.show_type_list
         col.row().prop(settings, "type_list_position", text="Position", expand=True)
@@ -889,6 +932,8 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         settings = self.settings
         group = group.column()
         group.label(text="Wires")
+        group.prop(settings, "show_wires", text="Show Wires")
+        group.separator()
         col = group.column()
         col.active = settings.show_wires
         row = col.row(align=True)

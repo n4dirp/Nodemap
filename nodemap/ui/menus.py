@@ -91,6 +91,12 @@ class NODEMAP_MT_minimap_buttons(Menu):
                 else:
                     layout.prop(settings, button_def.pref_attr, text=button_def.label)
 
+        layout.separator()
+        layout.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
+        row = layout.row()
+        row.active = settings.use_auto_hide_buttons
+        row.prop(settings, "buttons_hide_delay", text="Hide Delay")
+
 
 def open_minimap_button_menu(context, button_id: str) -> None:
     """Open the toggle menu for the minimap button with *button_id*."""

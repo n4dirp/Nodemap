@@ -5,6 +5,7 @@
 ### Added
 - Added support for draw Zone Fills (simulation, repeat, for-each, and closure)
 - Added a dedicated minimap size (Size X/Y with List) used while the type list is open; the panel grows and shrinks together with the list as it toggles
+- Added an Auto Hide option that hides the minimap buttons when the pointer moves away
 
 ### Changed
 - Updated button icons

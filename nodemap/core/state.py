@@ -12,7 +12,7 @@ import bpy
 
 from .. import __package__ as base_package
 from .constants import CONTENT_PADDING
-from .helpers import get_addon_preferences
+from .helpers import get_addon_preferences, redraw_ui
 
 logger = logging.getLogger(base_package)
 
@@ -88,6 +88,11 @@ class ButtonState:
     rects: dict[str, Rect] = field(default_factory=dict)
     hovered_button_id: str | None = None
     pressed_button_id: str | None = None
+    # Auto-hide: True while the button chrome is hidden because the minimap
+    # lost focus (pointer away and no interaction); hide_timer holds the
+    # pending one-shot delay timer that flips this on.
+    auto_hidden: bool = False
+    hide_timer: Any = None
 
 
 @dataclass
@@ -319,6 +324,47 @@ def _cleanup_shared_tree_caches() -> None:
     _shared_tree_caches.clear()
 
 
+def _cancel_button_hide_timer(state: MinimapState) -> None:
+    """Unregister the pending button auto-hide timer for *state*, if any."""
+    timer = state.buttons.hide_timer
+    if timer is None:
+        return
+    try:
+        bpy.app.timers.unregister(timer)
+    except (ValueError, RuntimeError):
+        pass
+    state.buttons.hide_timer = None
+
+
+def _schedule_button_hide(state: MinimapState, area_ptr: int | None, delay: float) -> None:
+    """Register a one-shot timer that auto-hides the minimap buttons after *delay*.
+
+    The delay keeps the chrome from flickering away the moment the pointer
+    leaves the minimap; a re-entry cancels the timer through
+    :func:`_cancel_button_hide_timer`.
+    """
+    if state.buttons.hide_timer is not None:
+        return
+
+    def _fire() -> None:
+        state.buttons.hide_timer = None
+        if not state.buttons.auto_hidden:
+            state.buttons.auto_hidden = True
+            redraw_ui("NODE_EDITOR", area_ptr)
+
+    try:
+        bpy.app.timers.register(_fire, first_interval=max(delay, 0.0))
+        state.buttons.hide_timer = _fire
+    except (RuntimeError, ValueError):
+        state.buttons.hide_timer = None
+
+
+def _cleanup_button_hide_timers() -> None:
+    """Unregister every pending button auto-hide timer (called on unload)."""
+    for state in _minimap_state.values():
+        _cancel_button_hide_timer(state)
+
+
 def _state(area_ptr: int | None = None) -> MinimapState:
     """Return the minimap state for the given area, initializing defaults if needed."""
     if area_ptr is None:
@@ -361,6 +407,7 @@ def _cleanup_area_states() -> None:
                     pass
     stale_pointers = [area_ptr for area_ptr in _minimap_state if area_ptr not in active_area_pointers]
     for area_ptr in stale_pointers:
+        _cancel_button_hide_timer(_minimap_state[area_ptr])
         del _minimap_state[area_ptr]
     if stale_pointers:
         logger.debug("_cleanup_area_states: removed %d stale entries", len(stale_pointers))

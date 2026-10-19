@@ -55,6 +55,8 @@ class NODEMAP_OT_preset(AddPresetBase, Operator):
         "settings.show_frame_selected_button",
         "settings.show_list_toggle_button",
         "settings.show_move_button",
+        "settings.use_auto_hide_buttons",
+        "settings.buttons_hide_delay",
         "settings.show_node_labels",
         "settings.compact_node_labels",
         "settings.show_frame_labels",

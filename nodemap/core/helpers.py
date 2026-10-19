@@ -298,20 +298,22 @@ def _type_list_size(settings, placement: str) -> int:
 def _get_type_list_width(
     settings,
     minimap_state,
-    map_w: float,
+    panel_w: float,
     ui_scale: float,
     font_size: int = TYPE_LIST_FONT_SIZE,
-    map_h: float = 0.0,
+    panel_h: float = 0.0,
 ) -> float:
     """Return the type-list zone extent in pixels (0 when disabled).
 
     The extent is driven by ``type_list_width`` (``type_list_height`` in top
-    placement) in pixels, clamped to ``TYPE_LIST_MIN_WIDTH`` and the map's
+    placement) in pixels, clamped to ``TYPE_LIST_MIN_WIDTH`` and the panel's
     reference axis minus the placement reserve (width minus
     ``TYPE_LIST_RESERVE_LEFT`` in left placement, height minus
     ``TYPE_LIST_RESERVE_TOP`` in top placement), and does not depend on
-    content measurement; content clips or shows extra padding instead. Called
-    before the map transform so node framing can reserve the zone.
+    content measurement; content clips or shows extra padding instead.
+    *panel_w*/*panel_h* is the panel size the list mode is heading to, so the
+    reserve matches the panel that will be drawn. Called before the map
+    transform so node framing can reserve the zone.
     """
     if not settings or not settings.show_type_list or not settings.use_interactive:
         return 0.0
@@ -320,9 +322,9 @@ def _get_type_list_width(
     if not type_stats:
         return 0.0
 
-    is_top = minimap_state.list.list_placement == "TOP" and map_h > 0
+    is_top = minimap_state.list.list_placement == "TOP" and panel_h > 0
     raw_width = _type_list_size(settings, "TOP" if is_top else "LEFT") * ui_scale
-    reference_w = map_h if is_top else map_w
+    reference_w = panel_h if is_top else panel_w
     reserve = TYPE_LIST_RESERVE_TOP if is_top else TYPE_LIST_RESERVE_LEFT
     max_w = max(0.0, reference_w - reserve * ui_scale)
     return min(max(raw_width, TYPE_LIST_MIN_WIDTH * ui_scale), max_w)
