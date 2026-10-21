@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Added a Follow View button 
+
 ## [2.1.0] - 2026-10-19
 
 ### Added

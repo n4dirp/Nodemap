@@ -33,6 +33,7 @@ settings.show_frame_all_button = True
 settings.show_frame_view_button = True
 settings.show_frame_selected_button = True
 settings.show_list_toggle_button = True
+settings.show_follow_view_button = True
 settings.show_move_button = True
 settings.use_auto_hide_buttons = False
 settings.buttons_hide_delay = 1.0

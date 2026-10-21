@@ -32,6 +32,7 @@ class ButtonDef:
     press_style: PressStyle
     pref_attr: str
     icon: str
+    icon_off: str | None = None
     action: str | None = None
     toggle_attr: str | None = None
     menu_group: str = "frame"
@@ -90,6 +91,17 @@ BUTTONS: dict[str, ButtonDef] = {
         menu_group="list",
         list_animation=True,
     ),
+    "FOLLOW": ButtonDef(
+        id="FOLLOW",
+        label="Follow View",
+        kind=ButtonKind.REGULAR,
+        group="left",
+        press_style=PressStyle.CLICK,
+        pref_attr="show_follow_view_button",
+        icon="PINNED",
+        icon_off="UNPINNED",
+        toggle_attr="use_follow_view",
+    ),
     "DRAG": ButtonDef(
         id="DRAG",
         label="Move Handle",
@@ -104,13 +116,13 @@ BUTTONS: dict[str, ButtonDef] = {
 
 # Order defines the top-edge draw row (left to right), the cull priority when
 # space is tight, and the deterministic paint order.
-BUTTON_ORDER: tuple[str, ...] = ("SELECTED", "VIEW", "ALL", "LIST", "DRAG")
+BUTTON_ORDER: tuple[str, ...] = ("SELECTED", "VIEW", "ALL", "LIST", "FOLLOW", "DRAG")
 
 # Display order for the Buttons visibility submenu (frame entries
 # most-used-first, unlike the draw row order above).
-MENU_ORDER: tuple[str, ...] = ("LIST", "ALL", "VIEW", "SELECTED", "DRAG")
+MENU_ORDER: tuple[str, ...] = ("LIST", "FOLLOW", "ALL", "VIEW", "SELECTED", "DRAG")
 
-# Placement-zone order for grouped menus: list toggle, frame row, move handle.
+# Placement-zone order for grouped menus: left chrome, frame row, move handle.
 GROUPS: tuple[str, ...] = ("left", "frame", "right")
 
 

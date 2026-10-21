@@ -421,6 +421,13 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
+    show_follow_view_button: BoolProperty(
+        name="Follow View Button",
+        description="Show a button in the minimap to toggle Follow View",
+        default=True,
+        update=_update_invalidate_batches,
+    )
+
     show_move_button: BoolProperty(
         name="Show Move Handle",
         description="Show a button in the minimap to drag and reposition the minimap",
@@ -888,7 +895,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         """Draw the Buttons column for the minimap action buttons."""
         settings = self.settings
         group = row.column()
-        group.label(text="Buttons")
+        group.label(text="Operators")
         col = row.column()
         col.active = settings.use_interactive
         col.prop(settings, "show_frame_all_button", text="Frame All")
@@ -896,6 +903,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         if not settings.use_follow_view:
             col.prop(settings, "show_frame_selected_button", text="Frame Selected")
         col.prop(settings, "show_list_toggle_button", text="List Toggle")
+        col.prop(settings, "show_follow_view_button", text="Follow View")
         col.prop(settings, "show_move_button", text="Move Handle")
         col.separator()
         col.prop(settings, "use_auto_hide_buttons", text="Auto Hide")

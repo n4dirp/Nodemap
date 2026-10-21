@@ -6,6 +6,7 @@ from typing import Any
 from ..core.buttons import (
     BUTTON_ORDER,
     BUTTONS,
+    ButtonDef,
     ButtonKind,
     _cull_frame_ids,
     _row_hover_geometry,
@@ -61,11 +62,22 @@ class ButtonTheme:
     regular_text_selected: tuple
 
 
+def _button_icon_key(button_def: ButtonDef, settings) -> str:
+    """Return the icon key for a button, using its off-state icon when toggled off."""
+    if (
+        button_def.icon_off is not None
+        and button_def.toggle_attr is not None
+        and not getattr(settings, button_def.toggle_attr, False)
+    ):
+        return button_def.icon_off
+    return button_def.icon
+
+
 def _paint_button_icon(
-    button_id: str, x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None
+    button_id: str, x: float, y: float, size: float, color, settings, ui_scale: float, mvp: Any = None
 ) -> None:
     """Paint the tinted PNG glyph for a button id, centered in its rect."""
-    texture = _get_button_texture(BUTTONS[button_id].icon)
+    texture = _get_button_texture(_button_icon_key(BUTTONS[button_id], settings))
     if texture is None:
         return
     draw_size = BUTTON_ICON_SIZE * ui_scale
@@ -117,13 +129,14 @@ def _layout_buttons(
 ) -> ButtonLayout:
     """Return culled 4-tuple hit rects for every visible button.
 
-    The row hosts the whole chrome: the list toggle at the left and the
-    frame buttons (ALL/VIEW/SELECTED) leading into the move-grip drag handle
-    at the right. When the move button is disabled the frame row extends to
-    the right padding edge instead. Frame buttons are culled progressively
-    when the row would spill past the left padding or collide with the list
-    toggle. The drag handle is only laid out while interactive mode is on,
-    which is the mode that enables repositioning the map.
+    The row hosts the whole chrome: the left group (list toggle and follow
+    view) at the left, the frame buttons (ALL/VIEW/SELECTED) leading into the
+    move-grip drag handle at the right. When the move button is disabled the
+    frame row extends to the right padding edge instead. Frame buttons are
+    culled progressively when the row would spill past the left padding or
+    collide with the left chrome. The drag handle is only laid out while
+    interactive mode is on, which is the mode that enables repositioning the
+    map.
     """
     top_y, size, drag_x = _row_geometry(
         map_x, map_y, map_w, map_h, padding, ui_scale, state.list.list_placement, state.list.list_width
@@ -138,12 +151,23 @@ def _layout_buttons(
     ]
     row_right_x = round(drag_x - gap - size) if show_move else drag_x
 
-    # List toggle at the top-left, sliding right of an open type-list zone.
-    list_x: float | None = None
-    if "LIST" in visible_ids:
-        list_x = round(map_x + padding)
+    # Match the exact integer separation used between the frame row and the
+    # move handle so both groups read with the same spacing.
+    left_gap = drag_x - (row_right_x + size) if show_move else round(gap)
+
+    # Left chrome (list toggle, follow view) at the top-left, sliding right
+    # of an open type-list zone. Standalone boxes keep the move-handle gap
+    # between them so they never read as a combined row.
+    left_ids = [
+        button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "left" and button_id in visible_ids
+    ]
+    left_x: int | None = None
+    left_right: int | None = None
+    if left_ids:
+        left_x = round(map_x + padding)
         if state.list.list_width > 0:
-            list_x = max(list_x, round(_get_map_content_rect(state)[0]))
+            left_x = max(left_x, round(_get_map_content_rect(state)[0]))
+        left_right = left_x + len(left_ids) * size + (len(left_ids) - 1) * left_gap
 
     priority = tuple(button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "frame")
     kept = _cull_frame_ids(
@@ -151,7 +175,7 @@ def _layout_buttons(
         row_right_x,
         size,
         map_x + padding,
-        list_x + size if list_x is not None else None,
+        left_right,
         gap,
         priority,
     )
@@ -162,8 +186,9 @@ def _layout_buttons(
     for button_index, button_id in enumerate(kept):
         rects[button_id] = (row_origins[button_index], top_y, size, size)
 
-    if list_x is not None:
-        rects["LIST"] = (list_x, top_y, size, size)
+    if left_x is not None:
+        for left_index, button_id in enumerate(left_ids):
+            rects[button_id] = (left_x + left_index * (size + left_gap), top_y, size, size)
 
     if show_move:
         rects["DRAG"] = (drag_x, top_y, size, size)
@@ -318,4 +343,4 @@ def _paint_buttons(
                     fill_color,
                     mvp=mvp,
                 )
-        _paint_button_icon(button_id, button_x, button_y, button_w, icon_color, ui_scale, mvp=mvp)
+        _paint_button_icon(button_id, button_x, button_y, button_w, icon_color, settings, ui_scale, mvp=mvp)
