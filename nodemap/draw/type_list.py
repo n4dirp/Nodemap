@@ -1538,10 +1538,15 @@ def _draw_list_text(
 
         search_text = search_query if search_query else "Search"
 
+        # The search pill has a solid fill behind its text, so skip the shadow.
+        if with_shadow:
+            blf.disable(font_id, blf.SHADOW)
         blf.clipping(font_id, int(base_text_start_x), clip_top, int(search_text_right), clip_bottom)
         blf.position(font_id, search_text_start_x, search_text_y, 0)
         blf.color(font_id, *search_text_color)
         blf.draw(font_id, search_text)
+        if with_shadow:
+            blf.enable(font_id, blf.SHADOW)
 
         if clear_rect:
             _draw_search_clear_button(

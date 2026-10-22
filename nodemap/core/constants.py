@@ -85,6 +85,19 @@ WHEEL_ZOOM_OUT: float = 0.85
 LABEL_MARGIN_PX: float = 12.0
 
 # ---------------------------------------------------------------------------
+# Text outline
+# ---------------------------------------------------------------------------
+# blf.shadow level 6 is FontShadowType::Outline, a 1px dilation of the glyph alpha.
+BLF_SHADOW_OUTLINE: int = 6
+TEXT_OUTLINE_ALPHA: float = 0.8
+TEXT_OUTLINE_LUMINANCE_THRESHOLD: float = 0.4
+
+# Rec. 709 luminance weights used to pick a contrasting outline color.
+TEXT_LUMINANCE_R: float = 0.2126
+TEXT_LUMINANCE_G: float = 0.7152
+TEXT_LUMINANCE_B: float = 0.0722
+
+# ---------------------------------------------------------------------------
 # Type-list zone
 # ---------------------------------------------------------------------------
 TYPE_LIST_FONT_ID: int = 0

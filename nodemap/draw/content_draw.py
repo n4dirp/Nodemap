@@ -11,7 +11,7 @@ from mathutils import Matrix
 from ..core.theme import _srgb_to_linear
 from .content_layers import CONTENT_LAYERS
 from .gpu_draw import (
-    _draw_text_with_shadow,
+    _draw_text_with_outline,
     _get_batch_noodle_shader,
     _get_batch_pill_shader,
     _get_batch_poly_shader,
@@ -217,7 +217,7 @@ def _draw_layer_labels(state: MinimapState, settings: NODEMAP_PG_settings, mvp: 
     offset_x = params["map_anchor_x"] - params["content_scale_factor"] * params["pivot_x"]
     offset_y = params["map_anchor_y"] - params["content_scale_factor"] * params["pivot_y"]
     for font_id, text, label_x, label_y, text_color, font_size in label_entries:
-        _draw_text_with_shadow(
+        _draw_text_with_outline(
             font_id,
             text,
             round(params["content_scale_factor"] * label_x + offset_x),

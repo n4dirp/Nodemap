@@ -5,7 +5,14 @@ from typing import Any
 
 import bpy
 
-from .constants import ZONE_THEME_DEFAULTS
+from .constants import (
+    TEXT_LUMINANCE_B,
+    TEXT_LUMINANCE_G,
+    TEXT_LUMINANCE_R,
+    TEXT_OUTLINE_ALPHA,
+    TEXT_OUTLINE_LUMINANCE_THRESHOLD,
+    ZONE_THEME_DEFAULTS,
+)
 from .helpers import get_addon_preferences
 
 _COLOR_TAG_TO_THEME_ATTR: dict[str, str] = {
@@ -52,6 +59,19 @@ def _alpha_mul(color: tuple[float, ...], alpha: float) -> tuple[float, float, fl
 def _color_contrast(color: tuple[float, ...], factor: float = 0.85) -> tuple[float, float, float, float]:
     """Darken a color by the given factor to produce a contrast variant."""
     return (float(color[0] * factor), float(color[1] * factor), float(color[2] * factor), 1.0)
+
+
+def _compute_outline_color(color: tuple[float, ...]) -> tuple[float, float, float, float]:
+    """Return a contrasting black or white outline color for text.
+
+    The outline alpha follows the text alpha so outlined text fades together
+    with the minimap instead of leaving a visible glyph halo behind.
+    """
+    luminance = color[0] * TEXT_LUMINANCE_R + color[1] * TEXT_LUMINANCE_G + color[2] * TEXT_LUMINANCE_B
+    alpha = TEXT_OUTLINE_ALPHA * (float(color[3]) if len(color) > 3 else 1.0)
+    if luminance > TEXT_OUTLINE_LUMINANCE_THRESHOLD:
+        return (0.0, 0.0, 0.0, alpha)
+    return (1.0, 1.0, 1.0, alpha)
 
 
 def _theme(path: str, default: tuple[float, ...]) -> tuple[float, ...]:

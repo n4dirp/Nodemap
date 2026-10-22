@@ -69,7 +69,7 @@ from .gpu_draw import (
     _draw_filled_rounded_rect_with_hole,
     _draw_pill,
     _draw_rounded_rect_border,
-    _draw_text_with_shadow,
+    _draw_text_with_outline,
 )
 from .minimap_buttons import (
     _layout_buttons,
@@ -601,7 +601,7 @@ def _draw_node_count(
 
     text_color = _alpha_mul(colors["node_text"], master_alpha)
 
-    _draw_text_with_shadow(font_id, info_text, text_x, text_y, text_color, font_size, settings.show_text_shadow)
+    _draw_text_with_outline(font_id, info_text, text_x, text_y, text_color, font_size, settings.show_text_shadow)
 
 
 def _draw_marquee(

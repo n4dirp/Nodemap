@@ -5,6 +5,9 @@
 ### Added
 - Added a Follow View button 
 
+### Changed
+- Node and frame names on the minimap now use outlined text
+
 ## [2.1.0] - 2026-10-19
 
 ### Added

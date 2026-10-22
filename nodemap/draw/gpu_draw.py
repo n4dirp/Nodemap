@@ -8,7 +8,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
-from ..core.theme import _srgb_to_linear
+from ..core.constants import BLF_SHADOW_OUTLINE
+from ..core.theme import _compute_outline_color, _srgb_to_linear
 
 GPUStageInterfaceInfo = gpu.types.GPUStageInterfaceInfo
 GPUShaderCreateInfo = gpu.types.GPUShaderCreateInfo
@@ -1092,20 +1093,21 @@ def _translated_mvp(tx: float, ty: float, mvp: Any = None) -> Any:
     return base @ Matrix.Translation((tx, ty, 0.0))
 
 
-def _draw_text_with_shadow(
-    font_id: int, text: str, x: float, y: float, color: tuple[float, ...], size: int, with_shadow: bool = True
+def _draw_text_with_outline(
+    font_id: int, text: str, x: float, y: float, color: tuple[float, ...], size: int, with_outline: bool = True
 ):
+    """Draw text with the 1px outline Blender uses for viewport overlay text."""
     if len(color) == 3:
         color = color + (1.0,)
     blf.size(font_id, size)
-    if with_shadow:
+    if with_outline:
         blf.enable(font_id, blf.SHADOW)
-        blf.shadow(font_id, 3, 0, 0, 0, 255)
-        blf.shadow_offset(font_id, 0, -1)
+        blf.shadow(font_id, BLF_SHADOW_OUTLINE, *_compute_outline_color(color))
+        blf.shadow_offset(font_id, 0, 0)
     blf.position(font_id, x, y, 0)
     blf.color(font_id, *color)
     blf.draw(font_id, text)
-    if with_shadow:
+    if with_outline:
         blf.disable(font_id, blf.SHADOW)
 
 

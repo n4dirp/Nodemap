@@ -347,8 +347,8 @@ class NODEMAP_PG_settings(PropertyGroup):
     )
 
     show_text_shadow: BoolProperty(
-        name="Text Shadows",
-        description="Draw a shadow behind minimap and type-list text",
+        name="Text Outline",
+        description="Draw an outline behind minimap text and a shadow behind type-list text",
         default=True,
         update=_update_invalidate_batches,
     )
@@ -992,7 +992,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         sub.active = settings.use_custom_viewport_fill
         sub.prop(settings, "viewport_fill_color", text="")
 
-        group.prop(settings, "show_text_shadow", text="Text Shadows")
+        group.prop(settings, "show_text_shadow", text="Text Outline")
 
     def _draw_navigation(self, layout, context):
         """Draw the Navigation section for interaction and input mapping."""
