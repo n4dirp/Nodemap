@@ -27,6 +27,7 @@ BUTTON_FILES: dict[str, str] = {
 }
 
 SEARCH_FILE = "blender_icon_viewzoom.png"
+CLEAR_FILE = "blender_icon_x.png"
 
 EXPAND_FILE = "blender_icon_rightarrow.png"
 COLLAPSE_FILE = "blender_icon_downarrow_hlt.png"
@@ -89,6 +90,11 @@ def _get_button_texture(icon: str):
 def _get_search_texture():
     """Return the cached GPU texture for the search icon, or None."""
     return _texture_for(SEARCH_FILE)
+
+
+def _get_clear_texture():
+    """Return the cached GPU texture for the search clear icon, or None."""
+    return _texture_for(CLEAR_FILE)
 
 
 def _get_chevron_texture(expanded: bool):

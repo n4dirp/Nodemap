@@ -49,13 +49,12 @@ from ..core.theme import (
 from .batch_build import _create_quad_indices
 from .gpu_draw import (
     _draw_filled_rounded_rect,
-    _draw_icon_batch,
     _draw_rounded_rect_border,
     _draw_tinted_image,
     _get_batch_rect_border_shader,
     _get_batch_rect_shader,
 )
-from .icon_textures import _get_chevron_texture, _get_search_texture
+from .icon_textures import _get_chevron_texture, _get_clear_texture, _get_search_texture
 from .scrollbar import _draw_list_scrollbar_core, _scrollbar_thickness
 
 _DEFAULT_ENTRY = ("", 0.0, 1)
@@ -783,48 +782,24 @@ def _draw_search_clear_button(
     hovered: bool,
     colors: dict,
     master_alpha: float,
-    ui_scale: float,
 ) -> None:
-    """Draw the clear-query (X) button inside the search pill."""
+    """Draw the clear-query (X) icon inside the search pill."""
     clear_x, clear_y, clear_size, _ = rect
+
+    texture = _get_clear_texture()
+    if texture is None:
+        return
 
     icon_color = _alpha_mul(
         colors["search_text"] if not hovered else colors["search_text_selected"],
         master_alpha,
     )
 
-    cx = clear_size / 2
-    cy = clear_size / 2
-    stroke = max(1.0, 0.8 * ui_scale)
-    length = clear_size
+    # blf restores GPU blending to NONE after drawing text, and this icon is
+    # painted after the search text, so re-enable it for the masked texture.
+    gpu.state.blend_set("ALPHA")
 
-    hw = length / 2
-    hh = stroke / 2
-    pos: list = []
-    uv: list = []
-    half_sizes: list = []
-    radii: list = []
-
-    for angle_deg in (45.0, -45.0):
-        angle = math.radians(angle_deg)
-        cos_a = math.cos(angle)
-        sin_a = math.sin(angle)
-        for lx, ly in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)):
-            pos.append((cos_a * lx - sin_a * ly + cx, sin_a * lx + cos_a * ly + cy, 0.0))
-        uv.extend([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
-        half_sizes.extend([(hw, hh)] * 4)
-        radii.extend([0.0] * 4)
-
-    _draw_icon_batch(
-        ("CLEAR", clear_size, ui_scale),
-        tuple(pos),
-        tuple(uv),
-        tuple(half_sizes),
-        tuple(radii),
-        clear_x,
-        clear_y,
-        icon_color,
-    )
+    _draw_tinted_image(clear_x, clear_y, clear_size, texture, icon_color)
 
 
 def _draw_search_icon(
@@ -1047,7 +1022,7 @@ def _compute_zone_geometry(
     text_y_off = round((row_h - line_h) / 2)
 
     text_color = _alpha_mul(colors["outliner_text"], master_alpha)
-    count_color = _alpha_mul(colors["outliner_text"], 0.3 * master_alpha)
+    count_color = _alpha_mul(colors["outliner_text"], 0.4 * master_alpha)
     selection_color = _alpha_mul(colors["outliner_selected_object"], master_alpha)
     active_color = _alpha_mul(colors["outliner_active_object"], master_alpha)
     match_color = _alpha_mul(colors["outliner_match"], master_alpha)
@@ -1080,9 +1055,12 @@ def _compute_zone_geometry(
     search_text_x = zone_x + pad_x
 
     if settings.show_search_bar and state.list.search_query:
-        clear_size = max(int(12 * ui_scale), int(search_h * 0.6))
-        clear_x = search_x + search_w - clear_size - 4 * ui_scale
-        clear_y = round(search_bottom - 0.5 + (search_h - clear_size) / 2)
+        # The clear glyph uses the shared icon size and its own hit rect, so
+        # centering it in the pill once keeps it aligned at any interface scale
+        # (centering it on a smaller slot and rounding twice drifted it).
+        clear_size = round(BUTTON_ICON_SIZE * ui_scale)
+        clear_x = round(search_x + search_w - clear_size - 4 * ui_scale)
+        clear_y = round(search_bottom + (search_h - clear_size) / 2)
         state.list.search_clear_rect = (clear_x, clear_y, clear_size, clear_size)
     else:
         state.list.search_clear_rect = None
@@ -1494,9 +1472,11 @@ def _draw_list_text(
 
         gpu.state.scissor_set(*zone_scissor)
 
+        # Only the empty placeholder is dimmed: a typed query keeps the normal
+        # text color after the field loses focus, so it does not read as disabled.
         search_text_color = (
             _alpha_mul(colors["search_text_selected"], master_alpha)
-            if state.list.search_focused and search_query
+            if search_query
             else _alpha_mul(colors["search_text"], 0.1 * master_alpha)
         )
         icon_color = _alpha_mul(colors["search_text"], master_alpha)
@@ -1554,7 +1534,6 @@ def _draw_list_text(
                 state.list.search_clear_hovered,
                 colors,
                 master_alpha,
-                ui_scale,
             )
 
         gpu.state.scissor_set(*view_scissor)
