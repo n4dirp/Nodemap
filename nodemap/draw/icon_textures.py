@@ -21,8 +21,8 @@ BUTTON_FILES: dict[str, str] = {
     "VIEW": "nodemap_frame_view.png",
     "SELECTED": "nodemap_frame_sel.png",
     "LIST": "nodemap_type_list.png",
-    "PINNED": "blender_icon_pinned.png",
-    "UNPINNED": "blender_icon_unpinned.png",
+    "FOLLOW_VIEW": "blender_icon_view_locked.png",
+    "FOLLOW_VIEW_OFF": "blender_icon_view_unlocked.png",
     "DRAG": "blender_icon_grip.png",
 }
 

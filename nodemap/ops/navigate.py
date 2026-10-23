@@ -64,58 +64,8 @@ from .animations import AnimationController
 
 logger = logging.getLogger(base_package)
 
-# Printable characters accepted while typing a type-list search query.
-# Key names match Blender's event enum (see rna_wm.cc): SEMI_COLON,
-# ACCENT_GRAVE, LEFT_BRACKET, RIGHT_BRACKET, EQUAL.
-_SEARCH_SPECIAL_KEYS: dict[str, str] = {
-    "SPACE": " ",
-    "PERIOD": ".",
-    "COMMA": ",",
-    "SLASH": "/",
-    "SEMI_COLON": ";",
-    "QUOTE": "'",
-    "UNDERSCORE": "_",
-    "MINUS": "-",
-    "COLON": ":",
-    "BACKSLASH": "\\",
-    "LEFT_BRACKET": "[",
-    "RIGHT_BRACKET": "]",
-    "EQUAL": "=",
-    "ACCENT_GRAVE": "`",
-}
-
-_SEARCH_DIGIT_KEYS: dict[str, str] = {
-    "ZERO": "0",
-    "ONE": "1",
-    "TWO": "2",
-    "THREE": "3",
-    "FOUR": "4",
-    "FIVE": "5",
-    "SIX": "6",
-    "SEVEN": "7",
-    "EIGHT": "8",
-    "NINE": "9",
-}
-
-_SEARCH_NUMPAD_KEYS: dict[str, str] = {
-    "NUMPAD_0": "0",
-    "NUMPAD_1": "1",
-    "NUMPAD_2": "2",
-    "NUMPAD_3": "3",
-    "NUMPAD_4": "4",
-    "NUMPAD_5": "5",
-    "NUMPAD_6": "6",
-    "NUMPAD_7": "7",
-    "NUMPAD_8": "8",
-    "NUMPAD_9": "9",
-    "NUMPAD_PERIOD": ".",
-    "NUMPAD_SLASH": "/",
-    "NUMPAD_ASTERIX": "*",
-    "NUMPAD_MINUS": "-",
-    "NUMPAD_PLUS": "+",
-}
-
-_SEARCH_ACCEPTED: set[str] = set(" .,_;/:'-[]=`\\*+")
+# Longest type-list search query, in characters.
+_SEARCH_MAX_LENGTH: int = 64
 
 
 def _search_caret_at_x(query: str, click_x: int, text_start_x: float, font_size: int) -> int:
@@ -135,24 +85,17 @@ def _search_caret_at_x(query: str, click_x: int, text_start_x: float, font_size:
 
 
 def _event_char(event: Event) -> str | None:
-    """Return the printable character for *event*, or None when not one.
+    """Return the character *event* produces, or None when it produces none.
 
-    Blender reports character keys through ``event.type``: a single
-    uppercase letter, a named digit (``ZERO``...``NINE``), a numpad key
-    (``NUMPAD_0``...``NUMPAD_9``, ``NUMPAD_SLASH``, ...), or a named
-    symbol key (``SPACE``, ``PERIOD``, ...). There is no ``event.char``
-    attribute in Blender 5.2.
+    ``event.unicode`` carries the text the operating system resolved from the
+    pressed key: the same UTF-8 buffer Blender's own text fields insert. The
+    physical key name in ``event.type`` is layout independent and must never
+    be used to guess text (``Ç`` has no letter enum on an ABNT2 keyboard, and
+    an AZERTY keyboard types ``é`` on the ``2`` key). Blender strips control
+    characters before the event reaches Python, so any returned text is
+    printable.
     """
-    key_type = event.type
-    if key_type in _SEARCH_NUMPAD_KEYS:
-        return _SEARCH_NUMPAD_KEYS[key_type]
-    if key_type in _SEARCH_DIGIT_KEYS:
-        return _SEARCH_DIGIT_KEYS[key_type]
-    if key_type in _SEARCH_SPECIAL_KEYS:
-        return _SEARCH_SPECIAL_KEYS[key_type]
-    if len(key_type) == 1 and key_type.isalpha():
-        return key_type.lower()
-    return None
+    return event.unicode or None
 
 
 # Mouse and frame-callback events that never get captured by the search box.
@@ -986,8 +929,8 @@ class NODEMAP_OT_navigate(Operator):
     def _handle_list_search(self, context: Context, event: Event) -> set[str]:
         """Handle key input while the type-list search box is focused.
 
-        Typed characters (letters, digits, and a few common separators) are
-        inserted at the caret; Left/Right/Home/End move the caret, Backspace
+        Typed characters are inserted at the caret exactly as the keyboard
+        layout produces them; Left/Right/Home/End move the caret, Backspace
         deletes before it and Delete after it. Enter blurs (keeping the
         search); the first Esc blurs (keeping the search) and arms clearing,
         so a second Esc over the minimap clears the query. Every other event
@@ -1044,9 +987,10 @@ class NODEMAP_OT_navigate(Operator):
             return {"RUNNING_MODAL"}
 
         char = _event_char(event)
-        if char is not None and (char.isalnum() or char in _SEARCH_ACCEPTED):
-            state.list.search_query = (query[:cursor] + char + query[cursor:])[:64]
-            state.list.search_cursor = min(cursor + 1, 64)
+        if char is not None:
+            text = query[:cursor] + char + query[cursor:]
+            state.list.search_query = text[:_SEARCH_MAX_LENGTH]
+            state.list.search_cursor = min(len(state.list.search_query), cursor + 1)
             self._redraw_ui()
         return {"RUNNING_MODAL"}
 

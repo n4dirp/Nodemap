@@ -11,6 +11,7 @@
 
 ### Fixed
 - Frame All and Frame View now work while Follow View is enabled
+- The type list search bar follows the system keyboard layout, so accented and other non-US characters can be typed
 
 ## [2.1.0] - 2026-10-19
 

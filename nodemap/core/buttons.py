@@ -88,8 +88,8 @@ BUTTONS: dict[str, ButtonDef] = {
         group="left",
         press_style=PressStyle.CLICK,
         pref_attr="show_follow_view_button",
-        icon="PINNED",
-        icon_off="UNPINNED",
+        icon="FOLLOW_VIEW",
+        icon_off="FOLLOW_VIEW_OFF",
         toggle_attr="use_follow_view",
     ),
     "DRAG": ButtonDef(
