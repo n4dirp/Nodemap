@@ -47,8 +47,7 @@ class NODEMAP_PT_popup(Panel):
             row = body.row(align=True)
             row.operator("nodemap.frame_all", text="All")
             row.operator("nodemap.frame_view", text="View")
-            if not settings.use_follow_view:
-                row.operator("nodemap.frame_selected", text="Selected")
+            row.operator("nodemap.frame_selected", text="Selected")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=False)
         header.label(text="Options")
@@ -92,8 +91,7 @@ class NODEMAP_PT_popup(Panel):
                     col = row.column(align=True)
                     col.prop(settings, "show_frame_all_button", text="Frame All")
                     col.prop(settings, "show_frame_view_button", text="Frame View")
-                    if not settings.use_follow_view:
-                        col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+                    col.prop(settings, "show_frame_selected_button", text="Frame Selected")
 
                     col = row.column()
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")

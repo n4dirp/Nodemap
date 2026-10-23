@@ -6,7 +6,11 @@
 - Added a Follow View button 
 
 ### Changed
+- Frame Selected stays available with Follow View and frames the selected nodes in the editor
 - Node and frame names on the minimap now use outlined text
+
+### Fixed
+- Frame All and Frame View now work while Follow View is enabled
 
 ## [2.1.0] - 2026-10-19
 

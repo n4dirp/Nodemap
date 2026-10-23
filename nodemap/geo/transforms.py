@@ -242,14 +242,14 @@ def _set_framed_rect(minimap_state: MinimapState, rect: tuple[float, float, floa
     """Remember *rect* as the framed world rect and fit it to the content rect.
 
     Framing actions call this so the same world rect is re-fitted when the type
-    list or the panel changes the content rect. Return True when fitted; follow
-    view recomputes zoom and pan every draw and is left alone.
+    list or the panel changes the content rect. The fit runs in follow view too:
+    an explicit frame must move the view, while the automatic re-fits keep
+    leaving follow view to its per-draw zoom and pan dynamics. Return True when
+    fitted.
     """
     view = minimap_state.view
     view.framed_rect = (float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
     view.framed_key = None
-    if _follow_view_enabled():
-        return False
     return _fit_framed_view(minimap_state)
 
 

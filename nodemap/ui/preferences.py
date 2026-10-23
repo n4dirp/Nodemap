@@ -900,8 +900,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.active = settings.use_interactive
         col.prop(settings, "show_frame_all_button", text="Frame All")
         col.prop(settings, "show_frame_view_button", text="Frame View")
-        if not settings.use_follow_view:
-            col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+        col.prop(settings, "show_frame_selected_button", text="Frame Selected")
         col.prop(settings, "show_list_toggle_button", text="List Toggle")
         col.prop(settings, "show_follow_view_button", text="Follow View")
         col.prop(settings, "show_move_button", text="Move Handle")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable
 
 
 class ButtonKind(StrEnum):
@@ -37,13 +36,6 @@ class ButtonDef:
     toggle_attr: str | None = None
     menu_group: str = "frame"
     list_animation: bool = False
-    disable_when_follow_view: bool = False
-    visible_when: Callable[[Any], bool] = lambda settings: True
-
-
-def _not_follow_view(settings) -> bool:
-    """Return True unless Follow View drives framing (hides Frame Selected)."""
-    return not bool(getattr(settings, "use_follow_view", False))
 
 
 BUTTONS: dict[str, ButtonDef] = {
@@ -56,8 +48,6 @@ BUTTONS: dict[str, ButtonDef] = {
         pref_attr="show_frame_selected_button",
         icon="SELECTED",
         action="SELECTED",
-        disable_when_follow_view=True,
-        visible_when=_not_follow_view,
     ),
     "VIEW": ButtonDef(
         id="VIEW",
@@ -133,11 +123,7 @@ def _visible_button_ids(settings) -> list[str]:
     """
     if not bool(getattr(settings, "use_interactive", False)):
         return []
-    return [
-        button_id
-        for button_id in BUTTON_ORDER
-        if getattr(settings, BUTTONS[button_id].pref_attr, True) and BUTTONS[button_id].visible_when(settings)
-    ]
+    return [button_id for button_id in BUTTON_ORDER if getattr(settings, BUTTONS[button_id].pref_attr, True)]
 
 
 def _row_xs(row_right_x: float, count: int, size: int) -> list[int]:

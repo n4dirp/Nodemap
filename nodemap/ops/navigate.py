@@ -53,6 +53,7 @@ from ..geo.transforms import (
     _clamp_minimap_zoom,
     _clamp_pan_to_viewport,
     _compute_map_transform,
+    _follow_view_enabled,
     _get_minimap_transform,
     _get_visible_rect,
     _map_duo_size,
@@ -446,6 +447,37 @@ def _try_animated_frame(context: Context, button_id: str) -> bool:
     return True
 
 
+def _run_editor_view_selected(
+    context: Context,
+    area: Area | None = None,
+    region: Region | None = None,
+    space: SpaceNodeEditor | None = None,
+) -> bool:
+    """Frame the selected nodes in the editor viewport. Return True when run.
+
+    Follow View keeps the editor viewport on the minimap, so selecting Frame
+    Selected there frames the nodes in the editor instead of the minimap.
+    ``node.view_selected`` polls for a WINDOW region, so the region is resolved
+    explicitly when the operator runs from a header popover.
+    """
+    area = area or context.area
+    if context.window is None or area is None or area.type != "NODE_EDITOR":
+        return False
+    space = space or area.spaces.active
+    if space is None or getattr(space, "type", None) != "NODE_EDITOR":
+        return False
+    if region is None or getattr(region, "type", None) != "WINDOW" or not hasattr(region, "view2d"):
+        region = next((candidate for candidate in area.regions if candidate.type == "WINDOW"), None)
+    if region is None:
+        return False
+    try:
+        with context.temp_override(area=area, region=region, space_data=space):
+            bpy.ops.node.view_selected()
+    except RuntimeError:
+        return False
+    return True
+
+
 class NODEMAP_OT_frame_all(Operator):
     """Reset the minimap view to show all nodes."""
 
@@ -470,6 +502,9 @@ class NODEMAP_OT_frame_selected(Operator):
     bl_options = {"INTERNAL"}
 
     def execute(self, context: Context) -> set[str]:
+        if _follow_view_enabled():
+            _run_editor_view_selected(context)
+            return {"FINISHED"}
         if _try_animated_frame(context, "SELECTED"):
             return {"FINISHED"}
         frame_selected()
@@ -1930,7 +1965,9 @@ class NODEMAP_OT_navigate(Operator):
         The SELECTED action touches two spaces: the minimap view and the type
         list. *scope* selects which one runs: "MAP" frames only the nodes in
         the minimap, "LIST" focuses only the list on the active node, and
-        "BOTH" keeps the combined behaviour for buttons and operators.
+        "BOTH" keeps the combined behaviour for buttons and operators. With
+        follow view on, the map part frames the selection in the editor instead,
+        since the map already tracks the editor viewport.
         """
         state = self._state
         if not state:
@@ -1963,7 +2000,11 @@ class NODEMAP_OT_navigate(Operator):
                     frame_view(self._space, self._region, area_ptr)
             case "SELECTED":
                 if scope in ("BOTH", "MAP"):
-                    if smooth:
+                    if _follow_view_enabled():
+                        # Follow View keeps the viewport on the map: frame the
+                        # selection in the editor and let the map follow it.
+                        _run_editor_view_selected(context, self._area, self._region, self._space)
+                    elif smooth:
                         rect = _compute_frame_selected_targets(self._space, self._region, area_ptr)
                         if rect is not None:
                             self._anim.start_frame_animation(context, rect)

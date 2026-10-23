@@ -84,12 +84,7 @@ class NODEMAP_MT_minimap_buttons(Menu):
                 button_def = BUTTONS[button_id]
                 if button_def.group != group:
                     continue
-                if button_def.disable_when_follow_view:
-                    row = layout.row()
-                    row.active = not settings.use_follow_view
-                    row.prop(settings, button_def.pref_attr, text=button_def.label)
-                else:
-                    layout.prop(settings, button_def.pref_attr, text=button_def.label)
+                layout.prop(settings, button_def.pref_attr, text=button_def.label)
 
         layout.separator()
         layout.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
