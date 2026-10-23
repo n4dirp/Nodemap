@@ -6,7 +6,6 @@ from typing import Any
 from ..core.buttons import (
     BUTTON_ORDER,
     BUTTONS,
-    ButtonDef,
     ButtonKind,
     _cull_frame_ids,
     _row_hover_geometry,
@@ -62,22 +61,11 @@ class ButtonTheme:
     regular_text_selected: tuple
 
 
-def _button_icon_key(button_def: ButtonDef, settings) -> str:
-    """Return the icon key for a button, using its off-state icon when toggled off."""
-    if (
-        button_def.icon_off is not None
-        and button_def.toggle_attr is not None
-        and not getattr(settings, button_def.toggle_attr, False)
-    ):
-        return button_def.icon_off
-    return button_def.icon
-
-
 def _paint_button_icon(
-    button_id: str, x: float, y: float, size: float, color, settings, ui_scale: float, mvp: Any = None
+    button_id: str, x: float, y: float, size: float, color, ui_scale: float, mvp: Any = None
 ) -> None:
     """Paint the tinted PNG glyph for a button id, centered in its rect."""
-    texture = _get_button_texture(_button_icon_key(BUTTONS[button_id], settings))
+    texture = _get_button_texture(BUTTONS[button_id].icon)
     if texture is None:
         return
     draw_size = BUTTON_ICON_SIZE * ui_scale
@@ -343,4 +331,4 @@ def _paint_buttons(
                     fill_color,
                     mvp=mvp,
                 )
-        _paint_button_icon(button_id, button_x, button_y, button_w, icon_color, settings, ui_scale, mvp=mvp)
+        _paint_button_icon(button_id, button_x, button_y, button_w, icon_color, ui_scale, mvp=mvp)

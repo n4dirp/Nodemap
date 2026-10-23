@@ -895,7 +895,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         """Draw the Buttons column for the minimap action buttons."""
         settings = self.settings
         group = row.column()
-        group.label(text="Operators")
+        group.label(text="Buttons")
         col = row.column()
         col.active = settings.use_interactive
         col.prop(settings, "show_frame_all_button", text="Frame All")

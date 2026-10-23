@@ -84,7 +84,7 @@ class NODEMAP_PT_popup(Panel):
 
             if settings.use_interactive:
                 header, body = layout.panel("NODEMAP_PT_buttons", default_closed=True)
-                header.label(text="Operators")
+                header.label(text="Buttons")
                 if body:
                     col = body.column()
                     row = col.row()
@@ -97,7 +97,8 @@ class NODEMAP_PT_popup(Panel):
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")
                     col.prop(settings, "show_follow_view_button", text="Follow View")
                     col.prop(settings, "show_move_button", text="Move Handle")
-                    col.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
+
+                    body.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
 
                 header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
                 header.prop(settings, "show_type_list", text="Type List")

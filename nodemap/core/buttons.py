@@ -31,7 +31,6 @@ class ButtonDef:
     press_style: PressStyle
     pref_attr: str
     icon: str
-    icon_off: str | None = None
     action: str | None = None
     toggle_attr: str | None = None
     menu_group: str = "frame"
@@ -89,7 +88,6 @@ BUTTONS: dict[str, ButtonDef] = {
         press_style=PressStyle.CLICK,
         pref_attr="show_follow_view_button",
         icon="FOLLOW_VIEW",
-        icon_off="FOLLOW_VIEW_OFF",
         toggle_attr="use_follow_view",
     ),
     "DRAG": ButtonDef(
