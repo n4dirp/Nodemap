@@ -7,7 +7,8 @@ from ..core.buttons import (
     BUTTON_ORDER,
     BUTTONS,
     ButtonKind,
-    _cull_frame_ids,
+    _cull_row_ids,
+    _group_button_ids,
     _row_hover_geometry,
     _row_radii,
     _row_xs,
@@ -34,12 +35,12 @@ from .icon_textures import _get_button_texture
 
 @dataclass
 class ButtonLayout:
-    """Store culled button hit rects and frame-row order for one frame."""
+    """Store culled button hit rects and combined-row membership for one frame."""
 
     rects: dict[str, Rect]
-    frame_order: list[str]
+    rows: list[list[str]]
     size: float
-    combined: bool
+    slots: dict[str, tuple[int, int]]
 
 
 @dataclass(frozen=True)
@@ -117,14 +118,14 @@ def _layout_buttons(
 ) -> ButtonLayout:
     """Return culled 4-tuple hit rects for every visible button.
 
-    The row hosts the whole chrome: the left group (list toggle and follow
-    view) at the left, the frame buttons (ALL/VIEW/SELECTED) leading into the
-    move-grip drag handle at the right. When the move button is disabled the
-    frame row extends to the right padding edge instead. Frame buttons are
-    culled progressively when the row would spill past the left padding or
-    collide with the left chrome. The drag handle is only laid out while
-    interactive mode is on, which is the mode that enables repositioning the
-    map.
+    The row hosts the whole chrome: the list toggle at the left; on the right
+    the follow-view toggle, the frame row, the zoom pair, and the move-grip
+    drag handle, each group separated by the same padding gap. Buttons within
+    the frame row and the zoom pair share edges, so only their external
+    corners round. Rows are culled progressively when they would spill past
+    the left padding or collide with the list toggle. The drag handle is only
+    laid out while interactive mode is on, which is the mode that enables
+    repositioning the map.
     """
     top_y, size, drag_x = _row_geometry(
         map_x, map_y, map_w, map_h, padding, ui_scale, state.list.list_placement, state.list.list_width
@@ -132,57 +133,62 @@ def _layout_buttons(
     gap = padding
     show_move = "DRAG" in visible_ids
 
-    # Frame buttons sit left of the drag handle, or flush to the right
-    # padding edge when the move button is hidden.
-    frame_ids = [
-        button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "frame" and button_id in visible_ids
-    ]
-    row_right_x = round(drag_x - gap - size) if show_move else drag_x
-
-    # Match the exact integer separation used between the frame row and the
-    # move handle so both groups read with the same spacing.
-    left_gap = drag_x - (row_right_x + size) if show_move else round(gap)
-
-    # Left chrome (list toggle, follow view) at the top-left, sliding right
-    # of an open type-list zone. Standalone boxes keep the move-handle gap
-    # between them so they never read as a combined row.
-    left_ids = [
-        button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "left" and button_id in visible_ids
-    ]
+    # Left chrome: the list toggle, sliding right of an open type-list zone.
+    left_ids = _group_button_ids(visible_ids, "left")
     left_x: int | None = None
-    left_right: int | None = None
+    left_limit = round(map_x + padding)
     if left_ids:
-        left_x = round(map_x + padding)
+        left_x = left_limit
         if state.list.list_width > 0:
             left_x = max(left_x, round(_get_map_content_rect(state)[0]))
-        left_right = left_x + len(left_ids) * size + (len(left_ids) - 1) * left_gap
+        left_right = left_x + len(left_ids) * size + (len(left_ids) - 1) * gap
+        left_limit = round(left_right + gap)
 
-    priority = tuple(button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "frame")
-    kept = _cull_frame_ids(
-        frame_ids,
-        row_right_x,
-        size,
-        map_x + padding,
-        left_right,
-        gap,
-        priority,
-    )
+    follow_ids = _group_button_ids(visible_ids, "view")
+    frame_ids = _group_button_ids(visible_ids, "frame")
+    zoom_ids = _group_button_ids(visible_ids, "zoom")
+
+    # The right side fills leftwards from the drag handle, or from the right
+    # padding edge when the move button is hidden.
+    cursor = round(drag_x - gap - size) if show_move else drag_x
+
+    # Zoom pair, then the frame row, then the follow toggle.
+    zoom_kept = _cull_row_ids(zoom_ids, cursor, size, left_limit, tuple(zoom_ids))
+    zoom_origins = _row_xs(cursor, len(zoom_kept), size)
+    if zoom_kept:
+        cursor = zoom_origins[0] - gap - size
+
+    # Reserve room for the follow toggle left of the frame row so frame
+    # culling never pushes it past the left chrome.
+    follow_reserve = size + gap if follow_ids else 0.0
+    frame_priority = tuple(button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == "frame")
+    frame_kept = _cull_row_ids(frame_ids, cursor, size, left_limit + follow_reserve, frame_priority)
+    frame_origins = _row_xs(cursor, len(frame_kept), size)
+    if frame_kept:
+        cursor = frame_origins[0] - gap - size
+
+    follow_id = follow_ids[0] if follow_ids and cursor >= left_limit else None
 
     rects: dict[str, Rect] = {}
-    count = len(kept)
-    row_origins = _row_xs(row_right_x, count, size)
-    for button_index, button_id in enumerate(kept):
-        rects[button_id] = (row_origins[button_index], top_y, size, size)
+    for button_index, button_id in enumerate(frame_kept):
+        rects[button_id] = (frame_origins[button_index], top_y, size, size)
+    for button_index, button_id in enumerate(zoom_kept):
+        rects[button_id] = (zoom_origins[button_index], top_y, size, size)
+    if follow_id is not None:
+        rects[follow_id] = (round(cursor), top_y, size, size)
 
     if left_x is not None:
         for left_index, button_id in enumerate(left_ids):
-            rects[button_id] = (left_x + left_index * (size + left_gap), top_y, size, size)
+            rects[button_id] = (round(left_x + left_index * (size + gap)), top_y, size, size)
 
     if show_move:
         rects["DRAG"] = (drag_x, top_y, size, size)
 
-    frame_order = sorted(kept, key=lambda button_id: rects[button_id][0])
-    return ButtonLayout(rects=rects, frame_order=frame_order, size=size, combined=len(frame_order) >= 2)
+    rows = [row_ids for row_ids in (frame_kept, zoom_kept) if len(row_ids) >= 2]
+    slots = {
+        button_id: (button_index, len(row_ids)) for row_ids in rows for button_index, button_id in enumerate(row_ids)
+    }
+    return ButtonLayout(rects=rects, rows=rows, size=size, slots=slots)
 
 
 def _resolve_button_theme(colors: dict, master_alpha: float, ui_scale: float) -> ButtonTheme:
@@ -217,10 +223,11 @@ def _paint_buttons(
 ) -> None:
     """Paint buttons from a layout without touching hit rects.
 
-    Frame buttons draw as a horizontal row when two or more are shown, each
-    as its own box sharing square inner corners; the list toggle and the
-    move-grip handle stay standalone. Pass *only_id* to repaint a single
-    standalone button (the pressed move grip above the moving overlay).
+    Each combined row (the frame row and the zoom pair) draws as one box: only
+    the row's external corners round, inner corners meet square, and a shared
+    seam is stroked once. Every other button stays standalone. Pass *only_id*
+    to repaint a single standalone button (the pressed move grip above the
+    moving overlay).
     """
     rects = layout.rects
     if only_id is not None:
@@ -231,68 +238,66 @@ def _paint_buttons(
         targets = [button_id for button_id in BUTTON_ORDER if button_id in rects]
 
     shadow_color = (0, 0, 0, 0.15 * master_alpha)
-    if only_id is None and layout.combined:
-        row_x = rects[layout.frame_order[0]][0]
-        row_y = rects[layout.frame_order[0]][1]
-        row_w = len(layout.frame_order) * layout.size
-        _draw_filled_rounded_rect(
-            row_x + theme.radius,
-            row_y - 1,
-            row_w - 2 * theme.radius,
-            1,
-            0,
-            shadow_color,
-            mvp=mvp,
-        )
-        # Draw each frame button as its own box, edge-to-edge with no gap.
-        # Only the external corners round, inner corners meet square; each
-        # button's border is drawn on its own rect, so neighboring borders
-        # coincide at the seam and every interior is equally inset.
-        # Fills use the wider radius to keep anti-aliased edges smooth while
-        # borders keep the base radius. Buttons that have a left neighbor
-        # skip their left border stroke: two coincident strokes would stack
-        # into a heavy 2px seam, so the seam line is emitted once by the
-        # neighbor's right border only.
-        for button_index, button_id in enumerate(layout.frame_order):
-            button_x, button_y, button_w, button_h = rects[button_id]
-            fill_radii = _row_radii(button_index, len(layout.frame_order), theme.fill_radius)
-            border_radii = _row_radii(button_index, len(layout.frame_order), theme.radius)
-            _draw_filled_rounded_rect_varying(
-                button_x, button_y, button_w, button_h, fill_radii, theme.tool_bg, mvp=mvp
-            )
-            _draw_rounded_rect_border_varying_sides(
-                button_x,
-                button_y,
-                button_w,
-                button_h,
-                border_radii,
-                theme.tool_border,
-                theme.border_width,
-                skip_left=button_index > 0,
-                mvp=mvp,
-            )
-
-    order_index = {button_id: index for index, button_id in enumerate(layout.frame_order)}
-    for button_id in targets:
-        button_def = BUTTONS.get(button_id)
-        standalone = (button_def.group != "frame" if button_def else True) or not layout.combined
-        if standalone:
-            button_x, button_y, button_w = rects[button_id][:3]
+    if only_id is None:
+        for row_ids in layout.rows:
+            row_x, row_y = rects[row_ids[0]][0], rects[row_ids[0]][1]
+            row_w = len(row_ids) * layout.size
             _draw_filled_rounded_rect(
-                button_x + theme.radius,
-                button_y - 1,
-                button_w - 2 * theme.radius,
+                row_x + theme.radius,
+                row_y - 1,
+                row_w - 2 * theme.radius,
                 1,
                 0,
                 shadow_color,
                 mvp=mvp,
             )
+            # Draw each button as its own box, edge-to-edge with no gap.
+            # Only the external corners round, inner corners meet square; each
+            # button's border is drawn on its own rect, so neighboring borders
+            # coincide at the seam and every interior is equally inset.
+            # Fills use the wider radius to keep anti-aliased edges smooth while
+            # borders keep the base radius. Buttons that have a left neighbor
+            # skip their left border stroke: two coincident strokes would stack
+            # into a heavy 2px seam, so the seam line is emitted once by the
+            # neighbor's right border only.
+            for button_index, button_id in enumerate(row_ids):
+                button_x, button_y, button_w, button_h = rects[button_id]
+                fill_radii = _row_radii(button_index, len(row_ids), theme.fill_radius)
+                border_radii = _row_radii(button_index, len(row_ids), theme.radius)
+                _draw_filled_rounded_rect_varying(
+                    button_x, button_y, button_w, button_h, fill_radii, theme.tool_bg, mvp=mvp
+                )
+                _draw_rounded_rect_border_varying_sides(
+                    button_x,
+                    button_y,
+                    button_w,
+                    button_h,
+                    border_radii,
+                    theme.tool_border,
+                    theme.border_width,
+                    skip_left=button_index > 0,
+                    mvp=mvp,
+                )
+
+    for button_id in targets:
+        if button_id in layout.slots:
+            continue
+        button_x, button_y, button_w = rects[button_id][:3]
+        _draw_filled_rounded_rect(
+            button_x + theme.radius,
+            button_y - 1,
+            button_w - 2 * theme.radius,
+            1,
+            0,
+            shadow_color,
+            mvp=mvp,
+        )
     for button_id in targets:
         button_def = BUTTONS.get(button_id)
         button_x, button_y, button_w, button_h = rects[button_id]
         is_pressed = state.buttons.pressed_button_id == button_id
         is_hovered = (not is_pressed) and state.buttons.hovered_button_id == button_id
-        standalone = (button_def.group != "frame" if button_def else True) or not layout.combined
+        standalone = button_id not in layout.slots
         if button_def is not None and button_def.kind == ButtonKind.REGULAR:
             toggled = bool(button_def.toggle_attr and getattr(settings, button_def.toggle_attr, False))
             box_fill = theme.regular_selected if toggled else theme.regular_bg
@@ -314,9 +319,9 @@ def _paint_buttons(
             if not standalone:
                 # Only the row's external corners round, inner corners stay square.
                 hover_radius = max(2.0, theme.fill_radius - 1)
-                button_index = order_index.get(button_id, -1)
+                button_index, row_count = layout.slots[button_id]
                 hover_x, hover_width, hover_radii = _row_hover_geometry(
-                    button_x, button_w, button_index, len(layout.frame_order), hover_radius
+                    button_x, button_w, button_index, row_count, hover_radius
                 )
                 _draw_filled_rounded_rect_varying(
                     hover_x, button_y + 1, hover_width, button_h - 2, hover_radii, fill_color, mvp=mvp

@@ -79,6 +79,11 @@ MIN_MAP_SCALE: float = 0.02
 WHEEL_ZOOM_IN: float = 1.15
 WHEEL_ZOOM_OUT: float = 0.85
 
+# Zoom buttons take a larger step than the wheel: one click doubles the zoom,
+# the other halves it, so a pair of clicks returns to the starting zoom.
+BUTTON_ZOOM_IN: float = 2.0
+BUTTON_ZOOM_OUT: float = 0.5
+
 # ---------------------------------------------------------------------------
 # Node labels
 # ---------------------------------------------------------------------------

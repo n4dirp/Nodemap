@@ -23,6 +23,7 @@ from ..core.constants import (
     MIN_MAP_WIDTH,
 )
 from ..core.helpers import (
+    _button_row_inset,
     _expand_bounds_margin,
     _get_minimap_margins,
     _get_safe_bounds,
@@ -798,6 +799,7 @@ def draw_minimap() -> None:
     state.view.rect = (map_x, map_y, map_w, map_h)
     state.view.outer_margin = y_margin
     state.view.inner_padding = padding
+    state.view.button_inset = _button_row_inset(settings, ui_scale)
 
     # Per-tree view persistence: the framed world rect is saved per tree, so a
     # revisit shows the same region whatever the panel and list sizes are.

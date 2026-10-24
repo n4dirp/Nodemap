@@ -68,6 +68,26 @@ BUTTONS: dict[str, ButtonDef] = {
         icon="ALL",
         action="ALL",
     ),
+    "ZOOM_OUT": ButtonDef(
+        id="ZOOM_OUT",
+        label="Zoom Out",
+        kind=ButtonKind.TOOL,
+        group="zoom",
+        press_style=PressStyle.CLICK,
+        pref_attr="show_zoom_out_button",
+        icon="ZOOM_OUT",
+        action="ZOOM_OUT",
+    ),
+    "ZOOM_IN": ButtonDef(
+        id="ZOOM_IN",
+        label="Zoom In",
+        kind=ButtonKind.TOOL,
+        group="zoom",
+        press_style=PressStyle.CLICK,
+        pref_attr="show_zoom_in_button",
+        icon="ZOOM_IN",
+        action="ZOOM_IN",
+    ),
     "LIST": ButtonDef(
         id="LIST",
         label="List Toggle",
@@ -84,7 +104,7 @@ BUTTONS: dict[str, ButtonDef] = {
         id="FOLLOW",
         label="Follow View",
         kind=ButtonKind.REGULAR,
-        group="left",
+        group="view",
         press_style=PressStyle.CLICK,
         pref_attr="show_follow_view_button",
         icon="FOLLOW_VIEW",
@@ -94,7 +114,7 @@ BUTTONS: dict[str, ButtonDef] = {
         id="DRAG",
         label="Move Handle",
         kind=ButtonKind.REGULAR,
-        group="right",
+        group="move",
         press_style=PressStyle.DRAG,
         pref_attr="show_move_button",
         icon="DRAG",
@@ -102,16 +122,25 @@ BUTTONS: dict[str, ButtonDef] = {
     ),
 }
 
-# Order defines the top-edge draw row (left to right), the cull priority when
-# space is tight, and the deterministic paint order.
-BUTTON_ORDER: tuple[str, ...] = ("SELECTED", "VIEW", "ALL", "LIST", "FOLLOW", "DRAG")
+# Order defines the paint order, the left-to-right order within the frame and
+# zoom rows, and the cull priority of those rows when space is tight.
+BUTTON_ORDER: tuple[str, ...] = ("SELECTED", "VIEW", "ALL", "ZOOM_OUT", "ZOOM_IN", "LIST", "FOLLOW", "DRAG")
 
 # Display order for the Buttons visibility submenu (frame entries
 # most-used-first, unlike the draw row order above).
-MENU_ORDER: tuple[str, ...] = ("LIST", "FOLLOW", "ALL", "VIEW", "SELECTED", "DRAG")
+MENU_ORDER: tuple[str, ...] = ("LIST", "FOLLOW", "ALL", "VIEW", "SELECTED", "ZOOM_IN", "ZOOM_OUT", "DRAG")
 
-# Placement-zone order for grouped menus: left chrome, frame row, move handle.
-GROUPS: tuple[str, ...] = ("left", "frame", "right")
+# Placement-zone order for grouped menus: left chrome, follow toggle, frame
+# row, zoom pair, move handle.
+GROUPS: tuple[str, ...] = ("left", "view", "frame", "zoom", "move")
+
+
+def _group_button_ids(visible_ids: list[str], group: str) -> list[str]:
+    """Return the visible ids of *group* in draw order.
+
+    Pure helper with no Blender dependency.
+    """
+    return [button_id for button_id in BUTTON_ORDER if BUTTONS[button_id].group == group and button_id in visible_ids]
 
 
 def _visible_button_ids(settings) -> list[str]:
@@ -167,30 +196,26 @@ def _row_radii(index: int, count: int, radius: float) -> tuple[float, float, flo
     return (0.0, 0.0, 0.0, 0.0)
 
 
-def _cull_frame_ids(
-    frame_ids: list[str],
+def _cull_row_ids(
+    row_ids: list[str],
     row_right_x: float,
     button_size: float,
-    map_left_limit: float,
-    list_right: float | None,
-    gap: float,
+    left_limit: float,
     priority: tuple[str, ...],
 ) -> list[str]:
-    """Return the frame ids that fit without overflowing or overlapping.
+    """Return the ids of a right-anchored combined row that fit in the space.
 
-    When space is tight, hide buttons progressively in *priority* order.
-    Pure helper with no Blender dependency.
+    *left_limit* is the smallest x the row's leftmost button may use; anything
+    smaller overflows the left padding or collides with the chrome there. When
+    space is tight, hide buttons progressively in *priority* order. Pure helper
+    with no Blender dependency.
     """
     # Work on a copy so culling never affects the caller's order.
-    kept = list(frame_ids)
+    kept = list(row_ids)
     while kept:
         count = len(kept)
         row_left_x = row_right_x - (count - 1) * button_size if count else row_right_x
-        # 1) row would overflow left padding
-        row_overflows_left = row_left_x < map_left_limit
-        # 2) row would overlap the list toggle (with clearance)
-        row_overlaps_left_chrome = list_right is not None and row_left_x < list_right + gap
-        if not row_overflows_left and not row_overlaps_left_chrome:
+        if row_left_x >= left_limit:
             break
         # Hide next priority button that is still visible.
         to_hide: str | None = None

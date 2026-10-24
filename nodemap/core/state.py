@@ -60,6 +60,9 @@ class ViewState:
     snapshot_selected_bounds: Rect | None = None
     outer_margin: float = 10.0
     inner_padding: float = CONTENT_PADDING
+    # Height reserved above the content for the button row; keeps framed
+    # content clear of the buttons without clipping what is drawn there.
+    button_inset: float = 0.0
     map_scale: float = 1.0
     user_zoom: float = 1.0
     anchor_zoom: float = 1.0

@@ -9,9 +9,12 @@ import blf
 import bpy
 
 from .. import __package__ as base_package
+from .buttons import _visible_button_ids
 from .constants import (
     ASSET_SHELF_HEIGHT,
+    BUTTON_SIZE,
     CONTEXT_PATH_HEIGHT,
+    ELEMENT_GAP,
     EMPTY_FINGERPRINT,
     LABEL_MARGIN_PX,
     MINIMAP_MARGIN,
@@ -67,6 +70,19 @@ def _get_ui_scale() -> float:
     window to supply a real scale.
     """
     return float(bpy.context.preferences.system.ui_scale) or 1.0
+
+
+def _button_row_inset(settings, ui_scale: float) -> float:
+    """Return the top content inset reserved for the minimap button row.
+
+    Zero when the reserve option is off or no button is visible; otherwise the
+    row height plus the gap that keeps framed content clear of the row.
+    """
+    if settings is None or not getattr(settings, "reserve_button_space", True):
+        return 0.0
+    if not _visible_button_ids(settings):
+        return 0.0
+    return round(BUTTON_SIZE * ui_scale) + ELEMENT_GAP * ui_scale
 
 
 def _reduce_motion_enabled() -> bool:

@@ -14,11 +14,13 @@ from ..core.constants import INERTIA_PAN_DECAY, PAN_ANIM_INTERVAL, PAN_FRAMES, P
 from ..core.helpers import _reduce_motion_enabled, get_addon_preferences
 from ..geo.framing import _compute_editor_frame_selected_targets
 from ..geo.transforms import (
+    _adopt_view_framing,
     _clamp_pan_to_viewport,
     _framed_rect_from_view,
     _get_visible_rect,
     _interp_rect,
     _mark_view_authored,
+    _minimap_world_rect,
     _set_framed_rect,
     _smooth_view_fac,
     _view_for_world_rect,
@@ -102,6 +104,13 @@ class AnimationController:
         "frame_anim_target_rect",
         "frame_anim_progress",
         "frame_anim_total",
+        "zoom_anim_active",
+        "zoom_anim_start_zoom",
+        "zoom_anim_target_zoom",
+        "zoom_anim_start_pan",
+        "zoom_anim_target_pan",
+        "zoom_anim_progress",
+        "zoom_anim_total",
         "editor_anim_active",
         "editor_anim_progress",
         "editor_anim_start_rect",
@@ -129,6 +138,13 @@ class AnimationController:
         self.frame_anim_target_rect: tuple[float, float, float, float] | None = None
         self.frame_anim_progress: float = 0.0
         self.frame_anim_total: float = 1.0
+        self.zoom_anim_active: bool = False
+        self.zoom_anim_start_zoom: float = 1.0
+        self.zoom_anim_target_zoom: float = 1.0
+        self.zoom_anim_start_pan: tuple[float, float] = (0.0, 0.0)
+        self.zoom_anim_target_pan: tuple[float, float] = (0.0, 0.0)
+        self.zoom_anim_progress: float = 0.0
+        self.zoom_anim_total: float = 1.0
         self.editor_anim_active: bool = False
         self.editor_anim_progress: float = 0.0
         self.editor_anim_start_rect: list[float] = [0.0, 0.0, 0.0, 0.0]
@@ -155,6 +171,13 @@ class AnimationController:
         self.frame_anim_target_rect = None
         self.frame_anim_progress = 0.0
         self.frame_anim_total = 1.0
+        self.zoom_anim_active = False
+        self.zoom_anim_start_zoom = 1.0
+        self.zoom_anim_target_zoom = 1.0
+        self.zoom_anim_start_pan = (0.0, 0.0)
+        self.zoom_anim_target_pan = (0.0, 0.0)
+        self.zoom_anim_progress = 0.0
+        self.zoom_anim_total = 1.0
         self.editor_anim_active = False
         self.editor_anim_progress = 0.0
         self.editor_anim_start_rect = [0.0, 0.0, 0.0, 0.0]
@@ -168,6 +191,7 @@ class AnimationController:
             or self.inertia_active
             or self.drag_active
             or self.frame_anim_active
+            or self.zoom_anim_active
             or self.editor_anim_active
         )
 
@@ -276,6 +300,8 @@ class AnimationController:
             self._finish_center_animation(context)
         if self.frame_anim_active:
             self._finish_frame_animation(context)
+        if self.zoom_anim_active:
+            self._finish_zoom_animation(context)
         if self.editor_anim_active:
             self._cancel_editor_animation(context)
 
@@ -444,6 +470,85 @@ class AnimationController:
         _mark_view_authored(state)
         _clamp_pan_to_viewport(op._space, op._region, state)
         op._redraw_ui()
+
+    def start_zoom_animation(self, context: Context, target_zoom: float, target_pan: tuple[float, float]) -> None:
+        """Begin an eased zoom toward *target_zoom* and *target_pan*.
+
+        The target pair comes from the anchored zoom step, so easing zoom and
+        pan by the same fraction follows the same path the instant step takes
+        and the tree point under the anchor stays fixed.
+        """
+        op = self._op
+        state: MinimapState | None = op._state
+        if not state:
+            return
+        view = state.view
+        start_zoom = view.user_zoom
+        start_pan = view.pan
+        if abs(target_zoom - start_zoom) <= 1e-6 and target_pan == start_pan:
+            return
+        start_rect = _minimap_world_rect(state, start_zoom, start_pan)
+        target_rect = _minimap_world_rect(state, target_zoom, target_pan)
+        self.zoom_anim_start_zoom = start_zoom
+        self.zoom_anim_target_zoom = target_zoom
+        self.zoom_anim_start_pan = (start_pan[0], start_pan[1])
+        self.zoom_anim_target_pan = (target_pan[0], target_pan[1])
+        self.zoom_anim_progress = 0.0
+        self.zoom_anim_total = self._total_frames(context, _smooth_view_fac(start_rect, target_rect))
+        self.zoom_anim_active = True
+        # Hold the starting pair as authored so the draw does not adopt the
+        # intermediate views as the framing target while the zoom eases.
+        _mark_view_authored(state)
+        self.create_timer(context)
+
+    def apply_zoom_animation(self, context: Context) -> None:
+        """Step the eased zoom forward one frame."""
+        op = self._op
+        if not self.zoom_anim_active:
+            return
+        state: MinimapState | None = op._state
+        if not state:
+            self.zoom_anim_active = False
+            self.destroy_timer(context)
+            return
+        self.zoom_anim_progress += 1 / self.zoom_anim_total
+        if self.zoom_anim_progress >= 1.0:
+            self._finish_zoom_animation(context)
+            op._redraw_ui()
+            return
+        eased = self._ease_smooth(self.zoom_anim_progress)
+        zoom = self.zoom_anim_start_zoom + (self.zoom_anim_target_zoom - self.zoom_anim_start_zoom) * eased
+        pan = (
+            self.zoom_anim_start_pan[0] + (self.zoom_anim_target_pan[0] - self.zoom_anim_start_pan[0]) * eased,
+            self.zoom_anim_start_pan[1] + (self.zoom_anim_target_pan[1] - self.zoom_anim_start_pan[1]) * eased,
+        )
+        state.view.user_zoom = zoom
+        state.view.anchor_zoom = zoom
+        state.view.pan = pan
+        _mark_view_authored(state)
+        _clamp_pan_to_viewport(op._space, op._region, state)
+        op._redraw_ui()
+
+    def _finish_zoom_animation(self, context: Context) -> None:
+        """Snap the minimap zoom to its target and adopt it as the framing."""
+        op = self._op
+        state: MinimapState | None = op._state
+        if state:
+            state.view.user_zoom = self.zoom_anim_target_zoom
+            state.view.anchor_zoom = self.zoom_anim_target_zoom
+            state.view.pan = self.zoom_anim_target_pan
+            _clamp_pan_to_viewport(op._space, op._region, state)
+            # Each tick owned the eased pair as authored; the landed pair is a
+            # new one, so the adopt call below records it as the framing target
+            # exactly like an instant zoom step does.
+            _adopt_view_framing(state)
+            # The final frame lands inside the zoom-settle window, which would
+            # defer the batch rebuild; force it so the bake matches the landed
+            # scale even if no later redraw follows.
+            state.cache._batches_dirty = True
+        self.zoom_anim_active = False
+        self.zoom_anim_progress = 0.0
+        self.destroy_timer(context)
 
     def view_selected_animated(self, context: Context) -> bool:
         """Ease the editor viewport onto the selected nodes; True when started."""

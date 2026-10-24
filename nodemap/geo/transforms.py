@@ -109,29 +109,42 @@ def _get_map_content_rect_for_width(
     list_width: float,
     ui_scale: float | None = None,
 ) -> tuple[float, float, float, float]:
-    """Return the content rect for an explicit list width without mutating state."""
+    """Return the content rect for an explicit list width without mutating state.
+
+    The rect is the area node framing fits into: the type-list zone is
+    subtracted, and the button row reserves a strip along the top so framed
+    content starts below it. Drawing is not clipped to this rect, so content
+    can still extend under the buttons when the view is panned or zoomed.
+    """
     map_x, map_y, map_w, map_h = minimap_state.view.rect
     padding = minimap_state.view.inner_padding
+    button_inset = minimap_state.view.button_inset
     if ui_scale is None:
         ui_scale = _get_ui_scale()
     placement = minimap_state.list.list_placement
     if list_width > 0 and placement == "TOP":
-        # Only the top strip is reserved; the button row beneath it overlaps
-        # the content, like the left placement. The left/right span the full
+        # Only the top strip is reserved; the button row beneath it is
+        # excluded from the content as well. The left/right span the full
         # inner width.
-        top_inset = padding + _list_top_inset(list_width, ui_scale)
+        top_inset = padding + _list_top_inset(list_width, ui_scale) + button_inset
         return map_x + padding, map_y + padding, max(map_w - 2 * padding, 1.0), max(map_h - padding - top_inset, 1.0)
     left_inset = padding + list_width
     if list_width > 0:
         left_inset += 4.0 * ui_scale
-    return map_x + left_inset, map_y + padding, max(map_w - padding - left_inset, 1.0), max(map_h - 2 * padding, 1.0)
+    return (
+        map_x + left_inset,
+        map_y + padding,
+        max(map_w - padding - left_inset, 1.0),
+        max(map_h - 2 * padding - button_inset, 1.0),
+    )
 
 
 def _get_map_content_rect(minimap_state: MinimapState) -> tuple[float, float, float, float]:
     """Return ``(left, bottom, width, height)`` of the map content area.
 
-    Subtract the type-list zone plus a margin from the left edge so node
-    framing and panning never place tree content behind the list.
+    Subtract the type-list zone plus a margin from the left edge and the
+    button row reserve from the top edge, so node framing never places tree
+    content behind the list or under the buttons.
     """
     return _get_map_content_rect_for_width(minimap_state, minimap_state.list.list_width)
 

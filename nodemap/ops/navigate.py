@@ -10,6 +10,8 @@ from bpy.types import Area, Context, Event, Operator, Region, SpaceNodeEditor
 from .. import __package__ as base_package
 from ..core.buttons import BUTTONS, PressStyle
 from ..core.constants import (
+    BUTTON_ZOOM_IN,
+    BUTTON_ZOOM_OUT,
     CONTENT_PADDING,
     DOCK_DWELL_MS,
     INERTIA_MIN_SPEED,
@@ -66,6 +68,9 @@ logger = logging.getLogger(base_package)
 
 # Longest type-list search query, in characters.
 _SEARCH_MAX_LENGTH: int = 64
+
+# Actions that zoom the minimap by one button step, mapped to their zoom factor.
+_ZOOM_ACTIONS: dict[str, float] = {"ZOOM_IN": BUTTON_ZOOM_IN, "ZOOM_OUT": BUTTON_ZOOM_OUT}
 
 
 def _search_caret_at_x(query: str, click_x: int, text_start_x: float, font_size: int) -> int:
@@ -159,6 +164,56 @@ def _view_zoom_factors(space, region, visible: tuple[float, float, float, float]
     visible_w = max(visible[2] - visible[0], 1e-6)
     visible_h = max(visible[3] - visible[1], 1e-6)
     return region.width / visible_w, region.height / visible_h
+
+
+def _zoom_minimap_target(
+    state: MinimapState, zoom_delta: float, anchor_x: float, anchor_y: float
+) -> tuple[float, tuple[float, float]] | None:
+    """Return ``(zoom, pan)`` for a zoom step around a region-space anchor.
+
+    Shared by the wheel, the zoom buttons, and the zoom animation: the tree
+    point under the anchor stays in place while the pan compensates. The zoom
+    is clamped to the absolute map scale range like every other minimap zoom.
+    Return None when the map transform is unavailable.
+    """
+    effective_zoom = state.view.user_zoom
+    transform = _get_minimap_transform(state)
+    tree_coord = _tree_from_region(anchor_x, anchor_y, transform)
+    if transform[2] <= 0 or tree_coord is None:
+        return None
+    _, _, scale, tree_center_x, tree_center_y = transform
+    base_scale = scale / max(state.view.user_zoom, 1e-6)
+    new_zoom = _clamp_minimap_zoom(effective_zoom * zoom_delta, base_scale)
+    hit_tx, hit_ty = tree_coord
+    previous_zoom = state.view.user_zoom
+    pan_x, pan_y = state.view.pan
+    return new_zoom, (
+        pan_x - (hit_tx - tree_center_x) * base_scale * (new_zoom - previous_zoom),
+        pan_y - (hit_ty - tree_center_y) * base_scale * (new_zoom - previous_zoom),
+    )
+
+
+def _zoom_minimap_by(
+    state: MinimapState,
+    zoom_delta: float,
+    anchor_x: float,
+    anchor_y: float,
+    space=None,
+    region=None,
+) -> None:
+    """Scale the minimap zoom by *zoom_delta* around a region-space anchor.
+
+    Shared by the mouse wheel and the instant zoom button path: the tree point
+    under the anchor stays in place while the view pans to compensate.
+    """
+    target = _zoom_minimap_target(state, zoom_delta, anchor_x, anchor_y)
+    if target is None:
+        return
+    new_zoom, new_pan = target
+    state.view.anchor_zoom = new_zoom
+    state.view.user_zoom = new_zoom
+    state.view.pan = new_pan
+    _clamp_pan_to_viewport(space, region, state)
 
 
 def _frame_button_at(mouse_x: int, mouse_y: int, state: MinimapState) -> str | None:
@@ -601,6 +656,7 @@ class NODEMAP_OT_navigate(Operator):
             or self._anim.inertia_active
             or self._anim.drag_active
             or self._anim.frame_anim_active
+            or self._anim.zoom_anim_active
             or self._anim.editor_anim_active
         )
 
@@ -849,6 +905,9 @@ class NODEMAP_OT_navigate(Operator):
                     return {"RUNNING_MODAL"}
                 if self._anim.frame_anim_active:
                     self._anim.apply_frame_animation(context)
+                    return {"RUNNING_MODAL"}
+                if self._anim.zoom_anim_active:
+                    self._anim.apply_zoom_animation(context)
                     return {"RUNNING_MODAL"}
                 if self._anim.editor_anim_active:
                     self._anim.apply_editor_animation(context)
@@ -1771,7 +1830,10 @@ class NODEMAP_OT_navigate(Operator):
             dy = self._mouse_y - self._drag_start[1]
             if abs(dx) > 2 or abs(dy) > 2 or self._dragging:
                 if not self._dragging and (
-                    self._anim.anim_active or self._anim.frame_anim_active or self._anim.editor_anim_active
+                    self._anim.anim_active
+                    or self._anim.frame_anim_active
+                    or self._anim.zoom_anim_active
+                    or self._anim.editor_anim_active
                 ):
                     self._anim.cancel_smooth(context)
                 self._dragging = True
@@ -1837,23 +1899,7 @@ class NODEMAP_OT_navigate(Operator):
                     except RuntimeError:
                         pass
                 else:
-                    transform = _get_minimap_transform(state)
-                    tree_coord = _tree_from_region(self._mouse_x, self._mouse_y, transform)
-
-                    if transform[2] > 0 and tree_coord is not None:
-                        _, _, scale, tree_center_x, tree_center_y = transform
-                        base_scale = scale / max(state.view.user_zoom, 1e-6)
-                        new_zoom = _clamp_minimap_zoom(effective_zoom * zoom_delta, base_scale)
-                        hit_tx, hit_ty = tree_coord
-                        pan_x, pan_y = state.view.pan
-
-                        pan_x_new = pan_x - (hit_tx - tree_center_x) * base_scale * (new_zoom - state.view.user_zoom)
-                        pan_y_new = pan_y - (hit_ty - tree_center_y) * base_scale * (new_zoom - state.view.user_zoom)
-
-                        state.view.anchor_zoom = new_zoom
-                        state.view.user_zoom = new_zoom
-                        state.view.pan = (pan_x_new, pan_y_new)
-                        _clamp_pan_to_viewport(self._space, self._region, state)
+                    _zoom_minimap_by(state, zoom_delta, self._mouse_x, self._mouse_y, self._space, self._region)
 
             self._redraw_ui()
             return {"RUNNING_MODAL"}
@@ -1899,8 +1945,29 @@ class NODEMAP_OT_navigate(Operator):
         if button_def.toggle_attr is not None:
             self._toggle_regular_button(settings, state, button_id)
             return
+        zoom_delta = _ZOOM_ACTIONS.get(button_def.action) if button_def.action else None
+        if zoom_delta is not None:
+            self._zoom_minimap_step(context, state, zoom_delta)
+            return
         if button_def.action is not None:
             self._dispatch_frame_action(context, settings, button_def.action)
+
+    def _zoom_minimap_step(self, context: Context, state: MinimapState, zoom_delta: float) -> None:
+        """Zoom the minimap one button step around the centre of its map rect.
+
+        The step eases toward the same target the instant path applies, so the
+        anchor stays fixed for the whole animation.
+        """
+        map_x, map_y, map_w, map_h = state.view.rect
+        anchor_x = map_x + map_w / 2.0
+        anchor_y = map_y + map_h / 2.0
+        if self._anim._animations_enabled(context):
+            target = _zoom_minimap_target(state, zoom_delta, anchor_x, anchor_y)
+            if target is not None:
+                self._anim.start_zoom_animation(context, *target)
+                return
+        _zoom_minimap_by(state, zoom_delta, anchor_x, anchor_y, self._space, self._region)
+        self._redraw_ui()
 
     def _dispatch_frame_action(self, context: Context, settings, button_id: str, scope: str = "BOTH") -> None:
         """Run a frame action directly, or eased via animation when smooth pan applies.

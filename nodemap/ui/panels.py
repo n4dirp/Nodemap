@@ -92,12 +92,15 @@ class NODEMAP_PT_popup(Panel):
                     col.prop(settings, "show_frame_all_button", text="Frame All")
                     col.prop(settings, "show_frame_view_button", text="Frame View")
                     col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+                    col.prop(settings, "show_zoom_out_button", text="Zoom Out")
+                    col.prop(settings, "show_zoom_in_button", text="Zoom In")
 
                     col = row.column()
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")
                     col.prop(settings, "show_follow_view_button", text="Follow View")
                     col.prop(settings, "show_move_button", text="Move Handle")
 
+                    body.prop(settings, "reserve_button_space", text="Reserve Button Space")
                     body.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
 
                 header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)

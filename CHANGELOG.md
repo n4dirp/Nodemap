@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Added Zoom In and Zoom Out buttons to the minimap button bar
+- Added a Reserve Button Space option that keeps the framed minimap view clear of the buttons
+
 ## [2.2.0] - 2026-10-23
 
 ### Added
