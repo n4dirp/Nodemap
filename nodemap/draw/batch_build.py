@@ -392,19 +392,9 @@ def _emit_node(ctx: "_BakeContext", info: dict) -> None:
 def _emit_frame_labels(ctx: "_BakeContext") -> None:
     """Resolve frame-label collisions and emit their backdrops plus text."""
     for entry in _resolve_frame_label_layout(ctx.frame_label_entries, ctx.ui_scale):
-        rect_x, rect_y, label_w, label_h = entry["rect"]
+        rect_x, rect_y, _, _ = entry["rect"]
         label_pad = entry["pad"]
-        _emit_quad(
-            ctx.frame_fill_attr,
-            rect_x,
-            rect_y,
-            rect_x + label_w,
-            rect_y + label_h,
-            label_w / 2,
-            label_h / 2,
-            entry["node_r"],
-            entry["bg_label_color"],
-        )
+
         ctx.node_labels.append(
             (
                 ctx.font_id,
