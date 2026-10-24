@@ -1,17 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [2.2.0] - 2026-10-23
 
 ### Added
-- Added a Follow View button 
+- Added a Follow View toggle button 
 
 ### Changed
 - Frame Selected stays available with Follow View and frames the selected nodes in the editor
 - Node and frame names on the minimap now use outlined text
+- Dragging the minimap now tracks the cursor more tightly
 
 ### Fixed
 - Frame All and Frame View now work while Follow View is enabled
-- The type list search bar follows the system keyboard layout, so accented and other non-US characters can be typed
+- The type list search bar follows the system keyboard layout
 
 ## [2.1.0] - 2026-10-19
 
