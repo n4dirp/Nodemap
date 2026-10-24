@@ -622,7 +622,7 @@ class NODEMAP_PG_settings(PropertyGroup):
     type_list_width: IntProperty(
         name="Type List Width",
         description="Width of the node-type list in pixels (left placement)",
-        default=160,
+        default=256,
         min=int(TYPE_LIST_MIN_WIDTH),
         max=10000,
         subtype="PIXEL",
