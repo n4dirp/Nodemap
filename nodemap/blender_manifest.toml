@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "nodemap"
-version = "2.1.0"
+version = "2.2.0"
 name = "Nodemap"
 tagline = "A minimap and node list for the Node Editor"
 maintainer = "Nadir Perazzo"
