@@ -87,21 +87,31 @@ class NODEMAP_PT_popup(Panel):
                 header.label(text="Buttons")
                 if body:
                     col = body.column()
+
                     row = col.row()
-                    col = row.column(align=True)
-                    col.prop(settings, "show_frame_all_button", text="Frame All")
-                    col.prop(settings, "show_frame_view_button", text="Frame View")
-                    col.prop(settings, "show_frame_selected_button", text="Frame Selected")
-                    col.prop(settings, "show_zoom_out_button", text="Zoom Out")
-                    col.prop(settings, "show_zoom_in_button", text="Zoom In")
 
                     col = row.column()
                     col.prop(settings, "show_list_toggle_button", text="List Toggle")
+                    col.separator()
                     col.prop(settings, "show_follow_view_button", text="Follow View")
+                    col = col.column(align=True)
+                    col.prop(settings, "show_frame_all_button", text="Frame All")
+                    col.prop(settings, "show_frame_view_button", text="Frame View")
+                    col.prop(settings, "show_frame_selected_button", text="Frame Selected")
+
+                    col = row.column()
+                    sub = col.column(align=True)
+                    sub.prop(settings, "show_zoom_out_button", text="Zoom Out")
+                    sub.prop(settings, "show_zoom_in_button", text="Zoom In")
+
+                    col.separator()
                     col.prop(settings, "show_move_button", text="Move Handle")
 
-                    body.prop(settings, "reserve_button_space", text="Reserve Button Space")
-                    body.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
+                    col = body.column()
+                    col.label(text="Options")
+                    row = col.row()
+                    row.prop(settings, "reserve_button_space", text="Reserve Space")
+                    row.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
 
                 header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
                 header.prop(settings, "show_type_list", text="Type List")

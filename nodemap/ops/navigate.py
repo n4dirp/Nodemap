@@ -56,6 +56,7 @@ from ..geo.transforms import (
     _clamp_pan_to_viewport,
     _compute_map_transform,
     _follow_view_enabled,
+    _get_map_content_rect,
     _get_minimap_transform,
     _get_visible_rect,
     _map_duo_size,
@@ -1953,14 +1954,16 @@ class NODEMAP_OT_navigate(Operator):
             self._dispatch_frame_action(context, settings, button_def.action)
 
     def _zoom_minimap_step(self, context: Context, state: MinimapState, zoom_delta: float) -> None:
-        """Zoom the minimap one button step around the centre of its map rect.
+        """Zoom the minimap one button step around the center of its content rect.
 
-        The step eases toward the same target the instant path applies, so the
-        anchor stays fixed for the whole animation.
+        The anchor is the node area (panel minus the type-list zone and the
+        button row) rather than the whole panel, so the framed content stays
+        centered through the step. The step eases toward the same target the
+        instant path applies, so the anchor stays fixed for the whole animation.
         """
-        map_x, map_y, map_w, map_h = state.view.rect
-        anchor_x = map_x + map_w / 2.0
-        anchor_y = map_y + map_h / 2.0
+        left, bottom, width, height = _get_map_content_rect(state)
+        anchor_x = left + width / 2.0
+        anchor_y = bottom + height / 2.0
         if self._anim._animations_enabled(context):
             target = _zoom_minimap_target(state, zoom_delta, anchor_x, anchor_y)
             if target is not None:
