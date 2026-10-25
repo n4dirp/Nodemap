@@ -123,9 +123,9 @@ def _layout_buttons(
     drag handle, each group separated by the same padding gap. Buttons within
     the frame row and the zoom pair share edges, so only their external
     corners round. Rows are culled progressively when they would spill past
-    the left padding or collide with the list toggle. The drag handle is only
-    laid out while interactive mode is on, which is the mode that enables
-    repositioning the map.
+    the left padding, the open type-list zone, or the list toggle. The drag
+    handle is only laid out while interactive mode is on, which is the mode
+    that enables repositioning the map.
     """
     top_y, size, drag_x = _row_geometry(
         map_x, map_y, map_w, map_h, padding, ui_scale, state.list.list_placement, state.list.list_width
@@ -134,13 +134,14 @@ def _layout_buttons(
     show_move = "DRAG" in visible_ids
 
     # Left chrome: the list toggle, sliding right of an open type-list zone.
+    # The open zone itself always holds the right-side rows back (through the
+    # content rect's left edge), so culling still applies when the list toggle
+    # is hidden.
     left_ids = _group_button_ids(visible_ids, "left")
     left_x: int | None = None
-    left_limit = round(map_x + padding)
+    left_limit = round(_get_map_content_rect(state)[0])
     if left_ids:
         left_x = left_limit
-        if state.list.list_width > 0:
-            left_x = max(left_x, round(_get_map_content_rect(state)[0]))
         left_right = left_x + len(left_ids) * size + (len(left_ids) - 1) * gap
         left_limit = round(left_right + gap)
 
