@@ -327,9 +327,10 @@ def _get_type_list_width(
     ``TYPE_LIST_RESERVE_LEFT`` in left placement, height minus
     ``TYPE_LIST_RESERVE_TOP`` in top placement), and does not depend on
     content measurement; content clips or shows extra padding instead.
-    *panel_w*/*panel_h* is the panel size the list mode is heading to, so the
-    reserve matches the panel that will be drawn. Called before the map
-    transform so node framing can reserve the zone.
+    *panel_w*/*panel_h* is the panel size the list mode is heading to, already
+    clamped to the editor area, so the reserve matches the panel that will be
+    drawn. Called before the map transform so node framing can reserve the
+    zone.
     """
     if not settings or not settings.show_type_list or not settings.use_interactive:
         return 0.0

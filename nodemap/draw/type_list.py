@@ -71,11 +71,12 @@ _CARET_WIDTH: float = 2.0
 def _step_list_width(state: MinimapState, settings, panel_w: float, panel_h: float, ui_scale: float) -> None:
     """Advance the animated type-list zone extent for this frame.
 
-    *panel_w*/*panel_h* is the panel size the toggle is heading to: the zone
-    placement and extent resolve against it, never against the previous
-    frame's rect, so both are final on the frame the list toggles. The view
-    framing follows the extent through ``_refit_framed_view``, so growing the
-    zone or flipping its placement keeps the same world rect framed.
+    *panel_w*/*panel_h* is the panel size the toggle is heading to, already
+    clamped to the editor area: the zone placement and extent resolve against
+    it, never against the previous frame's rect, so both are final on the
+    frame the list toggles. The view framing follows the extent through
+    ``_refit_framed_view``, so growing the zone or flipping its placement
+    keeps the same world rect framed.
     """
     from ..geo.transforms import _list_placement
 

@@ -133,9 +133,21 @@ def _dock_to_border(
 
 
 def _compute_minimap_rect(
-    settings, ui_scale, space, region, corner, state: MinimapState
+    settings,
+    ui_scale,
+    space,
+    region,
+    corner,
+    state: MinimapState,
+    panel_size: tuple[float, float] | None = None,
 ) -> tuple[float, float, float, float, float, float] | None:
-    """Compute the minimap rectangle position and dimensions."""
+    """Compute the minimap rectangle position and dimensions.
+
+    *panel_size* overrides the frame's size pair. The draw pass uses it to
+    clamp a settled (not yet drawn) panel size against the editor area, so
+    the type list can reserve space against the panel that will actually be
+    drawn instead of the configured pair.
+    """
     safe_x_min, safe_y_min, safe_x_max, safe_y_max = _get_safe_bounds(bpy.context.area, region)
     safe_width = safe_x_max - safe_x_min
     safe_height = safe_y_max - safe_y_min
@@ -145,7 +157,7 @@ def _compute_minimap_rect(
     # Dual size pairs: the with-list pair grows the panel while the type
     # list is open, easing with the list open/close animation. Still capped
     # to % of safe region (accounting for margins).
-    map_w, map_h = _map_duo_size(state, settings, ui_scale)
+    map_w, map_h = panel_size if panel_size is not None else _map_duo_size(state, settings, ui_scale)
     max_width_pct = settings.max_width_percent / 100.0
     max_height_pct = settings.max_height_percent / 100.0
     map_w = min(map_w, (safe_width - x_margin) * max_width_pct)
@@ -770,6 +782,17 @@ def draw_minimap() -> None:
     # rect are already right on this frame instead of one redraw later.
     _adopt_view_framing(state)
     panel_w, panel_h = _map_settled_size(state, settings, ui_scale)
+    # The settled pair is the configured size; the editor area may be smaller
+    # than that (window split, area resize). Clamp it to the drawable bounds
+    # first so the list reserves against the panel that will actually be drawn
+    # and can never cover the node area. Shrinking the area is a transient
+    # layout clamp: the preference keeps the configured size, so growing the
+    # area back restores it.
+    settled_rect = _compute_minimap_rect(
+        settings, ui_scale, space, region, corner, state, panel_size=(panel_w, panel_h)
+    )
+    if settled_rect is not None:
+        panel_w, panel_h = settled_rect[2], settled_rect[3]
     _step_list_width(state, settings, panel_w, panel_h, ui_scale)
 
     rect = _compute_minimap_rect(settings, ui_scale, space, region, corner, state)
