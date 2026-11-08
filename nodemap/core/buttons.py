@@ -34,6 +34,7 @@ class ButtonDef:
     action: str | None = None
     toggle_attr: str | None = None
     menu_group: str = "frame"
+    menu_label: str | None = None
     list_animation: bool = False
 
 
@@ -74,9 +75,10 @@ BUTTONS: dict[str, ButtonDef] = {
         kind=ButtonKind.TOOL,
         group="zoom",
         press_style=PressStyle.CLICK,
-        pref_attr="show_zoom_out_button",
+        pref_attr="show_zoom_buttons",
         icon="ZOOM_OUT",
         action="ZOOM_OUT",
+        menu_label="Zoom Buttons",
     ),
     "ZOOM_IN": ButtonDef(
         id="ZOOM_IN",
@@ -84,9 +86,10 @@ BUTTONS: dict[str, ButtonDef] = {
         kind=ButtonKind.TOOL,
         group="zoom",
         press_style=PressStyle.CLICK,
-        pref_attr="show_zoom_in_button",
+        pref_attr="show_zoom_buttons",
         icon="ZOOM_IN",
         action="ZOOM_IN",
+        menu_label="Zoom Buttons",
     ),
     "LIST": ButtonDef(
         id="LIST",
@@ -124,7 +127,7 @@ BUTTONS: dict[str, ButtonDef] = {
 
 # Order defines the paint order, the left-to-right order within the frame and
 # zoom rows, and the cull priority of those rows when space is tight.
-BUTTON_ORDER: tuple[str, ...] = ("SELECTED", "VIEW", "ALL", "ZOOM_OUT", "ZOOM_IN", "LIST", "FOLLOW", "DRAG")
+BUTTON_ORDER: tuple[str, ...] = ("SELECTED", "VIEW", "ALL", "ZOOM_IN", "ZOOM_OUT", "LIST", "FOLLOW", "DRAG")
 
 # Display order for the Buttons visibility submenu (frame entries
 # most-used-first, unlike the draw row order above).

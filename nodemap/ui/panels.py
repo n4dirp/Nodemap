@@ -86,26 +86,14 @@ class NODEMAP_PT_popup(Panel):
                 header, body = layout.panel("NODEMAP_PT_buttons", default_closed=True)
                 header.label(text="Buttons")
                 if body:
-                    col = body.column()
-
-                    row = col.row()
-
-                    col = row.column()
-                    col.prop(settings, "show_list_toggle_button", text="List Toggle")
-                    col.separator()
-                    col.prop(settings, "show_follow_view_button", text="Follow View")
-                    col = col.column(align=True)
-                    col.prop(settings, "show_frame_all_button", text="Frame All")
-                    col.prop(settings, "show_frame_view_button", text="Frame View")
-                    col.prop(settings, "show_frame_selected_button", text="Frame Selected")
-
-                    col = row.column()
-                    sub = col.column(align=True)
-                    sub.prop(settings, "show_zoom_out_button", text="Zoom Out")
-                    sub.prop(settings, "show_zoom_in_button", text="Zoom In")
-
-                    col.separator()
-                    col.prop(settings, "show_move_button", text="Move Handle")
+                    flow = body.grid_flow(row_major=True, columns=2, align=True)
+                    flow.prop(settings, "show_list_toggle_button", text="List Toggle")
+                    flow.prop(settings, "show_follow_view_button", text="Follow View")
+                    flow.prop(settings, "show_frame_all_button", text="Frame All")
+                    flow.prop(settings, "show_frame_view_button", text="Frame View")
+                    flow.prop(settings, "show_frame_selected_button", text="Frame Selected")
+                    flow.prop(settings, "show_zoom_buttons", text="Zoom Buttons")
+                    flow.prop(settings, "show_move_button", text="Move Handle")
 
                     col = body.column()
                     col.label(text="Options")

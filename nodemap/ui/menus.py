@@ -77,6 +77,7 @@ class NODEMAP_MT_minimap_buttons(Menu):
             return
         settings = prefs.settings
         layout = self.layout
+        seen_attrs: set[str] = set()
         for group_index, group in enumerate(GROUPS):
             if group_index:
                 layout.separator()
@@ -84,7 +85,10 @@ class NODEMAP_MT_minimap_buttons(Menu):
                 button_def = BUTTONS[button_id]
                 if button_def.group != group:
                     continue
-                layout.prop(settings, button_def.pref_attr, text=button_def.label)
+                if button_def.pref_attr in seen_attrs:
+                    continue
+                seen_attrs.add(button_def.pref_attr)
+                layout.prop(settings, button_def.pref_attr, text=button_def.menu_label or button_def.label)
 
         layout.separator()
         layout.prop(settings, "use_auto_hide_buttons", text="Auto Hide")

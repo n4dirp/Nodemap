@@ -1556,7 +1556,7 @@ def _draw_list_text(
 
             blf.position(font_id, base_text_start_x, no_match_y, 0)
             blf.color(font_id, *count_color)
-            blf.draw(font_id, "No matches")
+            blf.draw(font_id, "No results found")
 
     for (
         kind,

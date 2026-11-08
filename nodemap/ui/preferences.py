@@ -414,16 +414,9 @@ class NODEMAP_PG_settings(PropertyGroup):
         update=_update_invalidate_batches,
     )
 
-    show_zoom_out_button: BoolProperty(
-        name="Zoom Out Button",
-        description="Show a Zoom-out button inside the minimap",
-        default=True,
-        update=_update_invalidate_batches,
-    )
-
-    show_zoom_in_button: BoolProperty(
-        name="Zoom In Button",
-        description="Show a Zoom-in button inside the minimap",
+    show_zoom_buttons: BoolProperty(
+        name="Zoom Buttons",
+        description="Show Zoom-in and Zoom-out buttons inside the minimap",
         default=True,
         update=_update_invalidate_batches,
     )
@@ -922,8 +915,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "show_frame_all_button", text="Frame All")
         col.prop(settings, "show_frame_view_button", text="Frame View")
         col.prop(settings, "show_frame_selected_button", text="Frame Selected")
-        col.prop(settings, "show_zoom_out_button", text="Zoom Out")
-        col.prop(settings, "show_zoom_in_button", text="Zoom In")
+        col.prop(settings, "show_zoom_buttons", text="Zoom Buttons")
         col.prop(settings, "show_list_toggle_button", text="List Toggle")
         col.prop(settings, "show_follow_view_button", text="Follow View")
         col.prop(settings, "show_move_button", text="Move Handle")
