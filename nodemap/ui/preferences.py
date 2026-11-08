@@ -444,7 +444,7 @@ class NODEMAP_PG_settings(PropertyGroup):
 
     reserve_button_space: BoolProperty(
         name="Reserve Button Space",
-        description="Keep the framed minimap view clear of the buttons",
+        description="Keep the framed minimap view clear of the buttons, collapsing the space when hidden",
         default=True,
         update=_update_redraw,
     )

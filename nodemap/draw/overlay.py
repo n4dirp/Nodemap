@@ -819,10 +819,19 @@ def draw_minimap() -> None:
         bounds = _expand_bounds_margin(raw_bounds, ui_scale, map_h, padding)
         state.view.tree_bounds = bounds
 
+    # Resolve button auto-hide before the content rect so the reserve and the
+    # painted chrome agree on the same frame: hiding the buttons collapses the
+    # reserved strip, and restoring them brings it back.
+    try:
+        area_ptr = context.area.as_pointer()
+    except (AttributeError, ReferenceError):
+        area_ptr = None
+    _sync_button_auto_hide(settings, state, area_ptr)
+
     state.view.rect = (map_x, map_y, map_w, map_h)
     state.view.outer_margin = y_margin
     state.view.inner_padding = padding
-    state.view.button_inset = _button_row_inset(settings, ui_scale)
+    state.view.button_inset = _button_row_inset(settings, ui_scale, state.buttons.auto_hidden)
 
     # Per-tree view persistence: the framed world rect is saved per tree, so a
     # revisit shows the same region whatever the panel and list sizes are.
@@ -1047,12 +1056,6 @@ def draw_minimap() -> None:
             content_rect=_get_map_content_rect(state),
             mvp=base_mvp,
         )
-
-    try:
-        area_ptr = context.area.as_pointer()
-    except (AttributeError, ReferenceError):
-        area_ptr = None
-    _sync_button_auto_hide(settings, state, area_ptr)
 
     button_ids = [] if state.buttons.auto_hidden else _visible_button_ids(settings)
     button_layout = _layout_buttons(state, button_ids, map_x, map_y, map_w, map_h, padding, ui_scale, settings)
