@@ -1,14 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [2.3.0] - 2026-11-09
 
 ### Added
-- Added Zoom In and Zoom Out buttons to the minimap button bar
-- Added a Reserve Button Space option that keeps the framed minimap view clear of the buttons
+- Added Zoom control overlays to the minimap
+- Added a Reserve Space option that keeps the framed minimap view clear of the overlays
 
 ### Fixed
 - Minimap buttons no longer overlap the type list when the List Toggle button is hidden
 - The type list now shrinks with the Node Editor so it always leaves room for the nodes in the minimap
+
+### Changed
+- Updated icons, panel layout and option texts.
 
 ## [2.2.0] - 2026-10-23
 
