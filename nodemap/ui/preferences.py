@@ -891,7 +891,7 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "show_node_labels", text="Node Labels")
         sub = col.row()
         sub.active = settings.show_node_labels
-        sub.prop(settings, "compact_node_labels", text="Name Initials")
+        sub.prop(settings, "compact_node_labels", text="Node Name Initials")
         if settings.show_frames:
             col.prop(settings, "show_frame_labels", text="Frame Labels")
 
@@ -901,26 +901,24 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         col.prop(settings, "show_reroutes", text="Reroutes")
         col.prop(settings, "show_zone_fills", text="Zone Fills")
 
-        layout.separator()
-        col = layout.column(heading="UI")
-        col.prop(settings, "show_node_count", text="Total Count")
-
     def _draw_buttons_column(self, row):
         """Draw the Buttons column for the minimap action buttons."""
         settings = self.settings
         group = row.column()
-        group.label(text="Buttons")
+        group.label(text="Overlays")
         col = row.column()
         col.active = settings.use_interactive
+        col.prop(settings, "show_list_toggle_button", text="List Toggle")
+        col.prop(settings, "show_follow_view_button", text="Follow View")
         col.prop(settings, "show_frame_all_button", text="Frame All")
         col.prop(settings, "show_frame_view_button", text="Frame View")
         col.prop(settings, "show_frame_selected_button", text="Frame Selected")
         col.prop(settings, "show_zoom_buttons", text="Zoom Buttons")
-        col.prop(settings, "show_list_toggle_button", text="List Toggle")
-        col.prop(settings, "show_follow_view_button", text="Follow View")
         col.prop(settings, "show_move_button", text="Move Handle")
-        col.prop(settings, "reserve_button_space", text="Reserve Button Space")
-        col.separator()
+        col.prop(settings, "show_node_count", text="Total Count")
+
+        col = row.column()
+        col.prop(settings, "reserve_button_space", text="Reserve Space")
         col.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
         sub = col.row(align=True)
         sub.active = settings.use_auto_hide_buttons
@@ -930,11 +928,11 @@ class NODEMAP_AddonPreferences(AddonPreferences):
         """Draw the Type List subsection within the Objects group."""
         settings = self.settings
         group = group.column()
-        group.label(text="Type List")
+        group.label(text="Node List")
 
         sub = group.row()
         sub.active = settings.use_interactive
-        sub.prop(settings, "show_type_list", text="Show Type List")
+        sub.prop(settings, "show_type_list", text="Show Node List")
         group.separator()
 
         col = group.column()

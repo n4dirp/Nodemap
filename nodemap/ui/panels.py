@@ -37,7 +37,7 @@ class NODEMAP_PT_popup(Panel):
         layout.active = minimap_state.enabled
 
         row = layout.row()
-        row.label(text="Nodemap")
+        row.label(text="Nodemap Options")
         NODEMAP_PT_presets.draw_panel_header(row)
         row.operator("nodemap.open_preferences", text="", icon="PREFERENCES", emboss=False)
 
@@ -45,12 +45,12 @@ class NODEMAP_PT_popup(Panel):
         header.label(text="Frame")
         if body:
             row = body.row(align=True)
-            row.operator("nodemap.frame_all", text="All")
-            row.operator("nodemap.frame_view", text="View")
             row.operator("nodemap.frame_selected", text="Selected")
+            row.operator("nodemap.frame_view", text="View")
+            row.operator("nodemap.frame_all", text="All Nodes")
 
         header, body = layout.panel("NODEMAP_PT_options", default_closed=False)
-        header.label(text="Options")
+        header.label(text="Navigation")
         if body:
             flow = body.grid_flow(row_major=False, columns=2, even_columns=True, even_rows=True, align=True)
             flow.prop(settings, "use_interactive", text="Interactive Map")
@@ -61,19 +61,17 @@ class NODEMAP_PT_popup(Panel):
             flow.prop(settings, "use_auto_zoom", text="Auto Zoom")
 
         header, root_body = layout.panel("NODEMAP_PT_objects", default_closed=False)
-        header.label(text="Objects")
+        header.label(text="Map Objects")
         if root_body:
             flow = root_body.grid_flow(row_major=True, columns=2, align=True)
             flow.prop(settings, "show_frames", text="Frames")
-
             flow.prop(settings, "show_node_colors", text="Node Colors")
             flow.prop(settings, "show_node_outline", text="Node Outline")
             flow.prop(settings, "show_socket_indicators", text="Node Sockets")
-
-            flow.prop(settings, "show_node_count", text="Total Count")
             flow.prop(settings, "show_reroutes", text="Wire Reroutes")
+            flow.prop(settings, "show_zone_fills", text="Zone Fills")
 
-            header, body = layout.panel("NODEMAP_PT_labels", default_closed=True)
+            header, body = root_body.panel("NODEMAP_PT_labels", default_closed=True)
             header.label(text="Labels")
             if body:
                 flow = body.grid_flow(row_major=True, columns=2, align=True)
@@ -82,43 +80,7 @@ class NODEMAP_PT_popup(Panel):
                 flow.prop(settings, "compact_node_labels", text="Name Initials")
                 flow.prop(settings, "show_frame_labels", text="Frame Labels")
 
-            if settings.use_interactive:
-                header, body = layout.panel("NODEMAP_PT_buttons", default_closed=True)
-                header.label(text="Buttons")
-                if body:
-                    flow = body.grid_flow(row_major=True, columns=2, align=True)
-                    flow.prop(settings, "show_list_toggle_button", text="List Toggle")
-                    flow.prop(settings, "show_follow_view_button", text="Follow View")
-                    flow.prop(settings, "show_frame_all_button", text="Frame All")
-                    flow.prop(settings, "show_frame_view_button", text="Frame View")
-                    flow.prop(settings, "show_frame_selected_button", text="Frame Selected")
-                    flow.prop(settings, "show_zoom_buttons", text="Zoom Buttons")
-                    flow.prop(settings, "show_move_button", text="Move Handle")
-
-                    col = body.column()
-                    col.label(text="Options")
-                    row = col.row()
-                    row.prop(settings, "reserve_button_space", text="Reserve Space")
-                    row.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
-
-                header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
-                header.prop(settings, "show_type_list", text="Type List")
-                if body:
-                    body.active = settings.show_type_list
-                    flow = body.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
-                    flow.prop(settings, "show_search_bar", text="Search Bar")
-                    flow.prop(settings, "use_follow_active", text="Follow Active")
-                    flow.prop(settings, "use_group_by_type")
-
-                    sub = flow.row(align=True)
-                    sub.active = settings.show_node_colors
-                    sub.prop(settings, "show_type_colors", text="Type Colors")
-
-                    col = body.column()
-                    col.label(text="List Position")
-                    col.row().prop(settings, "type_list_position", expand=True)
-
-            header, body = layout.panel("NODEMAP_PT_wires", default_closed=True)
+            header, body = root_body.panel("NODEMAP_PT_wires", default_closed=True)
             header.prop(settings, "show_wires", text="Wires")
             if body:
                 body.active = settings.show_wires
@@ -134,6 +96,43 @@ class NODEMAP_PT_popup(Panel):
                 sub.active = settings.use_custom_noodle_curving
                 sub.prop(settings, "noodle_curving", text="Curving", slider=True)
                 flow.prop(settings, "wire_thickness", text="Thickness", slider=True)
+
+        if settings.use_interactive:
+            header, body = layout.panel("NODEMAP_PT_type_list", default_closed=True)
+            header.prop(settings, "show_type_list", text="Node List")
+            if body:
+                body.active = settings.show_type_list
+                flow = body.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+                flow.prop(settings, "show_search_bar", text="Search Bar")
+                flow.prop(settings, "use_follow_active", text="Follow Active")
+                flow.prop(settings, "use_group_by_type")
+
+                sub = flow.row(align=True)
+                sub.active = settings.show_node_colors
+                sub.prop(settings, "show_type_colors", text="Type Colors")
+
+                col = body.column()
+                col.label(text="Position")
+                col.row().prop(settings, "type_list_position", expand=True)
+
+            header, body = layout.panel("NODEMAP_PT_buttons", default_closed=True)
+            header.label(text="Panel Overlays")
+            if body:
+                flow = body.grid_flow(row_major=True, columns=2, align=True)
+                flow.prop(settings, "show_list_toggle_button", text="List Toggle")
+                flow.prop(settings, "show_follow_view_button", text="Follow View")
+                flow.prop(settings, "show_frame_selected_button", text="Frame Selected")
+                flow.prop(settings, "show_frame_view_button", text="Frame View")
+                flow.prop(settings, "show_frame_all_button", text="Frame All Nodes")
+                flow.prop(settings, "show_zoom_buttons", text="Zoom Control")
+                flow.prop(settings, "show_move_button", text="Move Handle")
+                flow.prop(settings, "show_node_count", text="Total Count")
+
+                col = body.column()
+                col.label(text="Options")
+                row = col.row()
+                row.prop(settings, "reserve_button_space", text="Reserve Space")
+                row.prop(settings, "use_auto_hide_buttons", text="Auto Hide")
 
         header, body = layout.panel("NODEMAP_PT_theme", default_closed=True)
         header.label(text="Theme")

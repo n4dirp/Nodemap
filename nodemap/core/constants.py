@@ -169,8 +169,8 @@ BUTTON_HOVER_ALPHA: float = 0.05
 
 # Minimap area kept free of the type list: left placement reserves horizontal
 # space, top placement reserves vertical space.
-TYPE_LIST_RESERVE_LEFT: int = 2 * BUTTON_SIZE + 4 * CONTENT_PADDING - 1
-TYPE_LIST_RESERVE_TOP: int = 2 * BUTTON_SIZE + 3 * CONTENT_PADDING - 1
+TYPE_LIST_RESERVE_LEFT: int = 4 * BUTTON_SIZE + 4 * CONTENT_PADDING - 1
+TYPE_LIST_RESERVE_TOP: int = 4 * BUTTON_SIZE + 3 * CONTENT_PADDING - 1
 
 # ---------------------------------------------------------------------------
 # Batch building
