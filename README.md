@@ -83,7 +83,7 @@ Drag the generated `nodemap-<version>.zip` into Blender.
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) or the [version history](https://extensions.blender.org/add-ons/nodemap/#versions) on Blender Extensions.
+See [CHANGELOG.md](CHANGELOG.md) or the [version history](https://extensions.blender.org/add-ons/nodemap/versions/) on Blender Extensions.
 
 ## Support & Contributing
 
